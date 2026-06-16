@@ -338,7 +338,15 @@ async def cb_admin_delete_sub(cb: CallbackQuery, state: FSMContext):
     await send_or_edit(cb, "⏳ Удаление подписки...")
 
     try:
-        result = await admin_delete_subscription(sub_id)
+        import asyncio
+        result = await asyncio.wait_for(admin_delete_subscription(sub_id), timeout=90)
+    except asyncio.TimeoutError:
+        await send_or_edit(
+            cb,
+            "❌ Таймаут удаления (90 с). Проверьте логи и панель.",
+            admin_back_kb(),
+        )
+        return
     except ValueError as e:
         await send_or_edit(cb, f"❌ {e}", admin_back_kb())
         return

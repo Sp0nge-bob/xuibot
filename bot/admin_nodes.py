@@ -23,10 +23,10 @@ def _health_icon(node: dict) -> str:
     return "🟢" if node.get("is_healthy") else "🔴"
 
 
-def _short_host(host: str) -> str:
+def _short_host(host: str, max_len: int = 36) -> str:
     h = normalize_xui_host(host or "")
-    if len(h) > 36:
-        return h[:33] + "..."
+    if len(h) > max_len:
+        return h[: max_len - 3] + "..."
     return h
 
 
@@ -46,22 +46,23 @@ async def nodes_list_text() -> str:
         "",
         f"Всего: <b>{summary['total']}</b> · healthy: <b>{summary['healthy']}</b>"
         f" / <b>{summary['enabled']}</b>",
+        f"Основная: <b>{summary.get('primary', 0)}</b> · вторичные: <b>{summary.get('secondary', 0)}</b>",
         "",
     ]
     if not nodes:
         lines.append("Нод не настроено. Добавьте основную и вторичные.")
     else:
-        for n in nodes:
-            primary = " ★ основная" if n.get("is_primary") else ""
+        lines.append("Краткий список (подробности — по кнопке ноды):")
+        for n in nodes[:30]:
+            primary = " ★" if n.get("is_primary") else ""
             uptime = await _uptime_str(n["id"])
-            latency = n.get("health_latency_ms")
-            lat = f"{latency} ms" if latency is not None else "—"
+            status = _health_icon(n)
             lines.append(
-                f"{_health_icon(n)} <b>{n['name']}</b>{primary}\n"
-                f"   host: <code>{_short_host(n['host'])}</code>\n"
-                f"   inbounds: <code>{n.get('inbound_ids') or '—'}</code> · "
-                f"uptime 24h: {uptime} · {lat}"
+                f"{status} <b>{n['name']}</b>{primary} · {uptime} · "
+                f"<code>{_short_host(n['host'], 28)}</code>"
             )
+        if len(nodes) > 30:
+            lines.append(f"… и ещё <b>{len(nodes) - 30}</b> (см. кнопки ниже)")
     return "\n".join(lines)
 
 
@@ -116,14 +117,14 @@ async def node_detail_text(node: dict) -> str:
         f"Роль: {'★ Основная' if node.get('is_primary') else 'Вторичная'}\n"
         f"Статус: {_health_icon(node)} "
         f"{'online' if node.get('is_healthy') else 'offline'}\n"
-        f"Host: <code>{node['host']}</code>\n"
+        f"Host: <code>{_short_host(node['host'], 64)}</code>\n"
         f"Inbounds: <code>{node.get('inbound_ids') or '—'}</code>\n"
         f"Enabled: {'да' if node.get('is_enabled') else 'нет'}\n\n"
         f"Uptime 24h: <b>{uptime}</b>\n"
         f"Latency: <b>{node.get('health_latency_ms') or '—'}</b> ms\n"
         f"Последняя проверка: {checked}\n"
         f"Последний синк: {synced}\n"
-        f"Ошибка: <code>{str(err)[:120]}</code>"
+        f"Ошибка: <code>{str(err)[:200]}</code>"
     )
 
 

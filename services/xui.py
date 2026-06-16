@@ -55,6 +55,23 @@ def normalize_xui_host(host: str) -> str:
     return host
 
 
+def _node_host_key(node: dict) -> str:
+    return normalize_xui_host(node.get("host") or "").lower()
+
+
+def _dedupe_nodes_by_host(nodes: list[dict]) -> list[dict]:
+    """Одна панель — один проход (дубликаты записей в xui_nodes игнорируются)."""
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for node in nodes:
+        key = _node_host_key(node)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(node)
+    return unique
+
+
 async def build_sub_link(sub_id: str) -> str:
     if settings.SUBSCRIPTION_BASE_URL:
         base = settings.SUBSCRIPTION_BASE_URL.rstrip("/")
@@ -734,7 +751,28 @@ async def extend_client(
     return new_expiry
 
 
+async def _remove_client_on_node(
+    api: AsyncApi,
+    email: str,
+    *,
+    inbound_ids: list[int] | None = None,
+) -> list[int]:
+    """Быстрое удаление на ноде: unified del + purge только нужных инбаундов."""
+    panel_cache.invalidate()
+    await _delete_client_by_email(api, email)
+    purged: list[int] = []
+    if inbound_ids:
+        for iid in inbound_ids:
+            if await _remove_email_from_inbound_settings(api, email, iid):
+                purged.append(iid)
+    else:
+        purged = await _purge_email_from_all_inbound_settings(api, email)
+    panel_cache.invalidate()
+    return sorted(set(purged))
+
+
 async def _remove_client_on_panel(api: AsyncApi, email: str) -> list[int]:
+    panel_cache.invalidate()
     located = await _locate_client_inbounds(api, email, force=False)
     if (
         not located
@@ -753,22 +791,41 @@ async def _remove_client_on_panel(api: AsyncApi, email: str) -> list[int]:
     return sorted(removed)
 
 
-async def remove_client_from_secondaries(email: str) -> list[int]:
-    """Удаление tg-клиента только на вторичных нодах."""
+async def remove_client_from_secondaries(
+    email: str,
+    *,
+    skip_hosts: set[str] | None = None,
+) -> list[int]:
+    """Удаление tg-клиента только на вторичных нодах (без дублей host)."""
+    from db.xui_nodes import get_secondary_nodes, parse_inbound_ids
+
     _assert_bot_client_email(email)
     try:
-        from db.xui_nodes import get_secondary_nodes
-        nodes = await get_secondary_nodes(healthy_only=False)
+        nodes = _dedupe_nodes_by_host(
+            await get_secondary_nodes(healthy_only=False),
+        )
     except Exception:
         nodes = []
+
+    skip = {h.lower() for h in (skip_hosts or set())}
     all_removed: list[int] = []
     for node in nodes:
         if not node.get("is_enabled", True):
             continue
+        host_key = _node_host_key(node)
+        if host_key in skip:
+            continue
         try:
             api = await get_api_for_node(node)
-            removed = await _remove_client_on_panel(api, email)
+            inbound_ids = parse_inbound_ids(node.get("inbound_ids") or "")
+            removed = await _remove_client_on_node(
+                api, email, inbound_ids=inbound_ids or None,
+            )
             all_removed.extend(removed)
+            logger.info(
+                "Removed {} from secondary {} ({}) inbounds {}",
+                email, node.get("name"), node.get("id"), removed,
+            )
         except Exception as e:
             logger.error(
                 "Remove {} on secondary node {} failed: {}",
@@ -779,17 +836,26 @@ async def remove_client_from_secondaries(email: str) -> list[int]:
 
 async def remove_client_everywhere(email: str) -> list[int]:
     """Удаление tg-клиента: сначала основная нода, затем вторичные."""
+    from db.xui_nodes import get_primary_node
+
     _assert_bot_client_email(email)
     all_removed: list[int] = []
+    processed_hosts: set[str] = set()
     try:
-        from db.xui_nodes import get_primary_node
         primary = await get_primary_node()
     except Exception:
         primary = None
+
     if primary and primary.get("host"):
+        host_key = _node_host_key(primary)
         try:
             api = await get_api_for_node(primary)
             all_removed.extend(await _remove_client_on_panel(api, email))
+            processed_hosts.add(host_key)
+            logger.info(
+                "Removed {} from primary {} ({})",
+                email, primary.get("name"), primary.get("id"),
+            )
         except Exception as e:
             logger.error(
                 "Remove {} on primary node {} failed: {}",
@@ -798,7 +864,11 @@ async def remove_client_everywhere(email: str) -> list[int]:
     else:
         api = await get_api()
         all_removed.extend(await _remove_client_on_panel(api, email))
-    all_removed.extend(await remove_client_from_secondaries(email))
+        processed_hosts.add(_node_host_key({"host": settings.XUI_HOST}))
+
+    all_removed.extend(
+        await remove_client_from_secondaries(email, skip_hosts=processed_hosts),
+    )
     return sorted(set(all_removed))
 
 
@@ -806,11 +876,11 @@ async def disable_client(email: str, inbound_id: Optional[int] = None):
     _assert_bot_client_email(email)
     try:
         from db.xui_nodes import list_nodes
-        nodes = await list_nodes(enabled_only=True)
+        nodes = _dedupe_nodes_by_host(await list_nodes(enabled_only=True))
     except Exception:
         nodes = []
     if not nodes:
-        nodes = [{"id": 0}]
+        nodes = [{"id": 0, "host": settings.XUI_HOST}]
     for node in nodes:
         try:
             api = await get_api_for_node(node) if node.get("host") else await get_api()

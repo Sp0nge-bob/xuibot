@@ -15,7 +15,12 @@ class PanelCache:
         self._inbounds: Optional[list[Inbound]] = None
         self._index: dict[str, dict[int, Client]] = {}
         self._ts: float = 0
+        self._host: str | None = None
         self._lock = asyncio.Lock()
+
+    @staticmethod
+    def _api_host(api: AsyncApi) -> str:
+        return (getattr(api.client, "host", None) or "").rstrip("/").lower()
 
     @staticmethod
     def build_index(inbounds: list[Inbound]) -> dict[str, dict[int, Client]]:
@@ -27,20 +32,29 @@ class PanelCache:
         return index
 
     async def refresh(self, api: AsyncApi, *, force: bool = False) -> list[Inbound]:
+        host = self._api_host(api)
         async with self._lock:
             now = time.monotonic()
-            if not force and self._inbounds is not None and (now - self._ts) < self.ttl:
+            host_changed = self._host and host and self._host != host
+            if (
+                not force
+                and not host_changed
+                and self._inbounds is not None
+                and (now - self._ts) < self.ttl
+            ):
                 return self._inbounds
             inbounds = await api.inbound.get_list()
             self._inbounds = inbounds
             self._index = self.build_index(inbounds)
             self._ts = now
+            self._host = host or self._host
             return inbounds
 
     def invalidate(self) -> None:
         self._inbounds = None
         self._index = {}
         self._ts = 0
+        self._host = None
 
     def locate(self, email: str) -> dict[int, Client]:
         return dict(self._index.get(email, {}))

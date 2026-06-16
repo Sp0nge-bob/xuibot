@@ -262,6 +262,11 @@ async def delete_node(node_id: int) -> tuple[bool, str]:
         await db.execute("DELETE FROM node_health_checks WHERE node_id = ?", (node_id,))
         await db.execute("DELETE FROM xui_nodes WHERE id = ?", (node_id,))
         await db.commit()
+    try:
+        from services.xui import invalidate_api_cache
+        invalidate_api_cache(node_id)
+    except Exception:
+        pass
     return True, ""
 
 
