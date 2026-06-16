@@ -37,10 +37,13 @@ async def start_bot():
     start_scheduler()
 
     try:
-        group = await ensure_bot_group()
+        import asyncio as _asyncio
+        group = await _asyncio.wait_for(ensure_bot_group(), timeout=20)
         if group:
             logger.info("Группа 3x-ui: {}", group)
-        await log_inbound_port_conflicts()
+        await _asyncio.wait_for(log_inbound_port_conflicts(), timeout=20)
+    except _asyncio.TimeoutError:
+        logger.warning("Таймаут инициализации 3x-ui — бот продолжит без проверки панели")
     except Exception as e:
         logger.warning("Не удалось инициализировать группу 3x-ui: {}", e)
 

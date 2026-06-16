@@ -10,6 +10,7 @@ from config.settings import settings
 from db.database import DB_PATH
 
 _INIT_DONE = False
+_INIT_IN_PROGRESS = False
 
 
 def parse_inbound_ids(raw: str) -> list[int]:
@@ -21,7 +22,20 @@ def format_inbound_ids(ids: list[int]) -> str:
 
 
 async def init_xui_nodes() -> None:
-    global _INIT_DONE
+    global _INIT_DONE, _INIT_IN_PROGRESS
+    if _INIT_DONE:
+        return
+    if _INIT_IN_PROGRESS:
+        return
+    _INIT_IN_PROGRESS = True
+    try:
+        await _init_xui_nodes_impl()
+        _INIT_DONE = True
+    finally:
+        _INIT_IN_PROGRESS = False
+
+
+async def _init_xui_nodes_impl() -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS xui_nodes (
@@ -64,7 +78,6 @@ async def init_xui_nodes() -> None:
     count = await _count_nodes()
     if count == 0:
         await _migrate_primary_from_env()
-    _INIT_DONE = True
 
 
 async def _ensure_init() -> None:
@@ -83,9 +96,9 @@ async def _count_nodes() -> int:
 
 
 async def _migrate_primary_from_env() -> None:
-    from db.bot_settings import get_subscription_inbound_ids
+    from db.bot_settings import get_subscription_inbound_ids_from_settings
 
-    inbound_ids = await get_subscription_inbound_ids()
+    inbound_ids = await get_subscription_inbound_ids_from_settings()
     await create_node(
         name="Primary",
         host=settings.XUI_HOST,

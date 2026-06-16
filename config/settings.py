@@ -1,7 +1,6 @@
 from pydantic_settings import BaseSettings
 from pydantic import field_validator
 from typing import List
-from loguru import logger
 
 class Settings(BaseSettings):
     # Telegram
@@ -61,6 +60,8 @@ class Settings(BaseSettings):
     PUBLIC_WEBHOOK_URL: str = ""
 
     LOG_LEVEL: str = "INFO"
+    LOG_DIR: str = "data/logs"
+    LOG_SESSION_RETAIN: int = 5
     USE_POLLING: bool = False
 
     # Защита от наложения нажатий (двойная оплата, параллельные callback)
@@ -106,10 +107,10 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-logger.remove()
-logger.add(
-    sink=lambda msg: print(msg, end=""),
+from config.logging_setup import setup_logging
+
+setup_logging(
     level=settings.LOG_LEVEL,
-    colorize=True,
-    format="<green>{time:HH:mm:ss}</green> | <level>{level:<7}</level> | <level>{message}</level>",
+    log_dir=settings.LOG_DIR,
+    session_retain=settings.LOG_SESSION_RETAIN,
 )

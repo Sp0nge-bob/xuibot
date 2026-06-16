@@ -45,6 +45,17 @@ def _parse_inbound_ids(raw: str) -> List[int]:
     return [int(x.strip()) for x in raw.split(",") if x.strip()]
 
 
+async def get_subscription_inbound_ids_from_settings() -> List[int]:
+    """Inbound IDs из bot_settings / .env — без обращения к xui_nodes."""
+    stored = await get_setting(SETTING_SUBSCRIPTION_INBOUNDS)
+    if stored and stored.strip():
+        return _parse_inbound_ids(stored)
+    env_raw = (settings.DEFAULT_SUBSCRIPTION_INBOUNDS or "").strip()
+    if env_raw:
+        return _parse_inbound_ids(env_raw)
+    return [settings.DEFAULT_INBOUND_ID]
+
+
 async def get_subscription_inbound_ids() -> List[int]:
     try:
         from db.xui_nodes import get_primary_inbound_ids
@@ -53,13 +64,7 @@ async def get_subscription_inbound_ids() -> List[int]:
             return primary_ids
     except Exception:
         pass
-    stored = await get_setting(SETTING_SUBSCRIPTION_INBOUNDS)
-    if stored and stored.strip():
-        return _parse_inbound_ids(stored)
-    env_raw = (settings.DEFAULT_SUBSCRIPTION_INBOUNDS or "").strip()
-    if env_raw:
-        return _parse_inbound_ids(env_raw)
-    return [settings.DEFAULT_INBOUND_ID]
+    return await get_subscription_inbound_ids_from_settings()
 
 
 async def set_subscription_inbound_ids(inbound_ids: List[int]) -> str:

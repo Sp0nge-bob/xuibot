@@ -15,11 +15,17 @@
 для долгоживущего polling-цикла.
 """
 import asyncio
+
 from bot import start_bot
+from db.database import init_db
 
 if __name__ == "__main__":
     print("Starting Telegram bot (polling mode)...")
     try:
-        asyncio.run(start_bot())
+        async def _main():
+            await init_db()
+            await start_bot()
+
+        asyncio.run(_main())
     except KeyboardInterrupt:
         print("\nBot stopped by user.")
