@@ -325,10 +325,15 @@ async def _unified_add_client(
     expiry_time: int,
     total_gb: int,
     inbound_ids: list[int],
+    enable: bool = True,
 ) -> Client:
     _assert_bot_client_email(email)
     payload = _unified_add_client_body(
-        email=email, expiry_time=expiry_time, total_gb=total_gb, sub_id=sub_id,
+        email=email,
+        expiry_time=expiry_time,
+        total_gb=total_gb,
+        sub_id=sub_id,
+        enable=enable,
     )
     url = api.client._url("panel/api/clients/add")
     await _throttle()
@@ -337,8 +342,8 @@ async def _unified_add_client(
         "inboundIds": inbound_ids,
     })
     logger.success(
-        "clients/add {} → inboundIds {} (subId={}, group={})",
-        email, inbound_ids, sub_id, payload.get("group") or "—",
+        "clients/add {} → inboundIds {} expiryTime={} (subId={}, group={})",
+        email, inbound_ids, expiry_time, sub_id, payload.get("group") or "—",
     )
     await _assign_client_group(api, email)
     panel_cache.invalidate()
@@ -736,6 +741,23 @@ async def get_missing_required_inbounds(
     return missing
 
 
+async def verify_client_inbounds_stable(
+    api: AsyncApi,
+    email: str,
+    *,
+    sub_id: str = "",
+    settle_sec: float = 5.0,
+) -> tuple[bool, list[int]]:
+    """
+    Проверка после add/recreate: ждём same-port drift и смотрим subLinks/unified снова.
+    """
+    if settle_sec > 0:
+        await asyncio.sleep(settle_sec)
+    panel_cache.invalidate()
+    missing = await get_missing_required_inbounds(api, email, sub_id=sub_id)
+    return not missing, missing
+
+
 async def try_attach_missing_inbounds(
     api: AsyncApi, email: str, *, sub_id: str = "",
 ) -> list[int]:
@@ -1034,18 +1056,15 @@ async def _remove_client_on_panel(api: AsyncApi, email: str) -> list[int]:
 
 
 async def remove_client_for_recreate(email: str) -> None:
-    """
-    Удаление перед пересозданием: clients/del на всех нодах, затем settings purge на основной.
-    Не бросает исключение из-за same-port конфликта в settings.
-    """
-    from db.xui_nodes import get_primary_node, list_nodes
+    """Удаление перед пересозданием: POST clients/del/{email} на всех нодах."""
+    from db.xui_nodes import list_nodes
 
     _assert_bot_client_email(email)
     nodes = _dedupe_nodes_by_host(await list_nodes(enabled_only=True))
     if not nodes:
         api = await get_api()
         await _delete_client_by_email(api, email)
-        await _ensure_email_absent_on_panel(api, email)
+        panel_cache.invalidate()
         return
 
     for node in nodes:
@@ -1057,16 +1076,38 @@ async def remove_client_for_recreate(email: str) -> None:
         except Exception as e:
             logger.error("Recreate: clients/del {} на {} failed: {}", email, name, e)
 
-    try:
-        primary = await get_primary_node()
-        api = await get_api_for_node(primary) if primary else await get_api()
-        purged = await _purge_email_from_all_inbound_settings(api, email)
-        if purged:
-            await asyncio.sleep(0.5)
-    except Exception as e:
-        logger.warning("Recreate: settings purge {} на основной: {}", email, e)
-
     panel_cache.invalidate()
+
+
+async def recreate_client_from_db_state(sub: dict) -> None:
+    """
+    Inbounds не совпадают с настройками:
+    1) clients/del на всех нодах
+    2) POST clients/add на основной с inboundIds из настроек и expiryTime из БД
+    """
+    state = sub_desired_state_from_db(sub)
+    email = (sub.get("client_email") or "").strip()
+    if not email:
+        raise ValueError("Подписка без client_email")
+
+    inbound_ids = await get_subscription_inbound_ids()
+    if not inbound_ids:
+        raise ValueError("Нет инбаундов для пересоздания")
+
+    sub_id = state["sub_id"] or (sub.get("sub_id") or "")
+    await remove_client_for_recreate(email)
+    await asyncio.sleep(0.5)
+
+    api = await get_api()
+    await _unified_add_client(
+        api,
+        email=email,
+        sub_id=sub_id,
+        expiry_time=state["expiry_ms"],
+        total_gb=state["total_gb"],
+        inbound_ids=inbound_ids,
+        enable=state["enable"],
+    )
 
 
 async def remove_client_from_secondaries(

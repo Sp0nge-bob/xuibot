@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import datetime
 from typing import Any
 
@@ -21,29 +22,22 @@ from services.xui import (
     get_api_for_node,
     list_bot_client_emails_on_panel,
     provision_client,
+    recreate_client_from_db_state,
     remove_bot_client_on_panel,
     get_missing_required_inbounds,
-    remove_client_for_recreate,
     sub_desired_state_from_db,
     sync_client_state_on_node,
+    verify_client_inbounds_stable,
 )
+
+# recreate не чинит same-port drift — не крутить в цикле
+_BROKEN_INBOUNDS_COOLDOWN_UNTIL: dict[str, float] = {}
+BROKEN_RECREATE_COOLDOWN_SEC = 600
 
 
 async def _recreate_subscription_on_primary(sub: dict[str, Any]) -> None:
-    """Полное удаление на всех нодах и создание заново на основной."""
-    state = sub_desired_state_from_db(sub)
-    email = sub["client_email"]
-    traffic_gb = int(sub.get("traffic_limit_gb") or 0)
-    await remove_client_for_recreate(email)
-    await asyncio.sleep(0.5)
-    await provision_client(
-        tg_id=sub["tg_id"],
-        plan_days=1,
-        traffic_gb=traffic_gb,
-        sub_id=sub.get("sub_id"),
-        target_expiry_ms=state["expiry_ms"],
-        client_email=email,
-    )
+    """clients/del на всех нодах → clients/add на основной (inboundIds + expiryTime из БД)."""
+    await recreate_client_from_db_state(sub)
 
 
 async def ensure_subscription_on_primary(sub: dict[str, Any]) -> str:
@@ -71,23 +65,39 @@ async def ensure_subscription_on_primary(sub: dict[str, Any]) -> str:
         api, email, sub_id=state["sub_id"] or sub.get("sub_id") or "",
     )
     if missing:
+        sub_id = state["sub_id"] or sub.get("sub_id") or ""
+        key = email.lower()
+        now = time.monotonic()
+        if now < _BROKEN_INBOUNDS_COOLDOWN_UNTIL.get(key, 0):
+            left = int(_BROKEN_INBOUNDS_COOLDOWN_UNTIL[key] - now)
+            logger.warning(
+                "Sync primary: {} inbounds битые — recreate недавно не помог, "
+                "пропуск (повтор через {} с, same-port drift панели)",
+                email, left,
+            )
+            return "skipped_broken"
+
         logger.warning(
             "Sync primary: {} не хватает inbounds {} — удаление на всех нодах и пересоздание",
             email, missing,
         )
         await _recreate_subscription_on_primary(sub)
         panel_cache.invalidate()
-        still_missing = await get_missing_required_inbounds(
-            await get_api(), email, sub_id=state["sub_id"] or sub.get("sub_id") or "",
+        ok, still_missing = await verify_client_inbounds_stable(
+            await get_api(), email, sub_id=sub_id, settle_sec=5.0,
         )
-        if still_missing:
-            logger.error(
-                "Sync primary: {} после пересоздания всё ещё без inbounds {}",
-                email, still_missing,
-            )
-        else:
-            logger.info("Sync primary: {} пересоздан, inbounds в порядке", email)
-        return "recreated"
+        if ok:
+            _BROKEN_INBOUNDS_COOLDOWN_UNTIL.pop(key, None)
+            logger.info("Sync primary: {} пересоздан, inbounds стабильны (subLinks OK)", email)
+            return "recreated"
+
+        _BROKEN_INBOUNDS_COOLDOWN_UNTIL[key] = now + BROKEN_RECREATE_COOLDOWN_SEC
+        logger.error(
+            "Sync primary: {} после пересоздания inbounds всё ещё битые: {} — "
+            "инбаунды на одном порту, recreate не помогает (пауза {} мин)",
+            email, still_missing, BROKEN_RECREATE_COOLDOWN_SEC // 60,
+        )
+        return "recreated_broken"
 
     info = await _unified_get_client_info(api, email)
     if info is None:
@@ -152,7 +162,8 @@ async def sync_subscription_to_node(sub: dict[str, Any], node: dict[str, Any]) -
 async def _sync_primary_from_db(subs: list[dict[str, Any]]) -> dict[str, int]:
     stats = {
         "subs": len(subs), "created": 0, "updated": 0,
-        "recreated": 0, "skipped": 0, "failed": 0,
+        "recreated": 0, "recreated_broken": 0, "skipped_broken": 0,
+        "skipped": 0, "failed": 0,
     }
     sem = asyncio.Semaphore(settings.XUI_PANEL_CONCURRENCY)
 
@@ -299,6 +310,8 @@ async def sync_all_secondary_nodes() -> dict[str, int]:
         "primary_created": p1["created"],
         "primary_updated": p1["updated"],
         "primary_recreated": p1.get("recreated", 0),
+        "primary_recreated_broken": p1.get("recreated_broken", 0),
+        "primary_skipped_broken": p1.get("skipped_broken", 0),
         "primary_failed": p1["failed"],
         "secondary_failed": p2["failed"],
         "purged": p2["purged"],
