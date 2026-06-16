@@ -69,14 +69,7 @@ def admin_users_kb(
             text=_admin_user_button_label(u),
             callback_data=f"adm:user:{u['subscription_id']}",
         )])
-    if from_search:
-        back = "adm:users:search"
-    elif category == "paid":
-        back = "adm:users:paid"
-    elif category == "trial":
-        back = "adm:users:trial"
-    else:
-        back = "adm:users"
+    back = "adm:users:search" if from_search else "adm:users"
     rows.append([InlineKeyboardButton(text="« Назад", callback_data=back)])
     rows.append([InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
