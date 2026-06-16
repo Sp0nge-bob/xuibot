@@ -27,10 +27,7 @@ from services.payment_flow import (
 )
 from services.payment_processor import handle_platega_status
 from services.pricing import get_plan_quote, list_plans, validate_promo
-from services.subscription_sync import (
-    get_primary_subscription_for_ui,
-    pull_subscription_from_panel,
-)
+from services.subscription_sync import get_primary_subscription_for_ui
 from services.xui import build_sub_link
 from .ui_helpers import safe_cb_answer, send_or_edit
 from .keyboards import (
@@ -52,7 +49,6 @@ from .messages import (
     test_payment_text,
     test_scenario_result_text,
     subscription_manage_text,
-    subscription_refresh_result_text,
     no_subscription_text,
     refund_confirm_text,
     refund_request_sent_text,
@@ -473,7 +469,10 @@ async def _apply_test_scenario(
     await send_or_edit(cb, text, back_to_main_kb())
 
 
-async def _pending_payment_view(order: dict, tx_id: str):
+PENDING_NOT_PAID_NOTE = "Оплата ещё не прошла"
+
+
+async def _pending_payment_view(order: dict, tx_id: str, *, status_note: str | None = None):
     plan = get_plan(order["plan_id"])
     if not plan:
         return None, None
@@ -497,6 +496,7 @@ async def _pending_payment_view(order: dict, tx_id: str):
             expires_in = sim_status.get("expiresIn")
         except KeyError:
             pass
+    is_test = settings.TEST_MODE and tx_id.startswith("test-")
     text = pending_payment_text(
         plan,
         method["name"] if method else "—",
@@ -504,9 +504,10 @@ async def _pending_payment_view(order: dict, tx_id: str):
         has_active_sub=existing_sub is not None and not extend,
         quote=quote,
         expires_in=expires_in,
-        test_mode=True,
+        test_mode=is_test,
+        status_note=status_note,
     )
-    kb = payment_kb(redirect, tx_id, test_mode=True)
+    kb = payment_kb(redirect, tx_id, test_mode=is_test)
     return text, kb
 
 
@@ -546,13 +547,11 @@ async def _respond_payment_flow(cb: CallbackQuery, order: dict, tx_id: str, flow
         return
     if result.user_message:
         if status == "PENDING" and settings.TEST_MODE and tx_id.startswith("test-"):
-            pending_text, pending_kb = await _pending_payment_view(order, tx_id)
+            pending_text, pending_kb = await _pending_payment_view(
+                order, tx_id, status_note=PENDING_NOT_PAID_NOTE,
+            )
             if pending_text and pending_kb:
-                await send_or_edit(
-                    cb,
-                    f"{result.user_message}\n\n{pending_text}",
-                    pending_kb,
-                )
+                await send_or_edit(cb, pending_text, pending_kb)
                 return
         await cb.message.answer(result.user_message, reply_markup=back_to_main_kb())
         return
@@ -792,32 +791,6 @@ async def msg_promo_code(message: Message, state: FSMContext):
         ),
         reply_markup=payment_methods_kb(plan_id, extend=extend, quote=quote),
     )
-
-
-@router.callback_query(F.data.startswith("sub_refresh:"))
-async def cb_sub_refresh(cb: CallbackQuery):
-    sub_id = int(cb.data.split(":", 1)[1])
-    sub = await db.get_subscription_by_id(sub_id)
-    if not sub or sub["tg_id"] != cb.from_user.id:
-        await safe_cb_answer(cb, "Подписка не найдена", show_alert=True)
-        return
-
-    await safe_cb_answer(cb, "Синхронизация...")
-    result = await pull_subscription_from_panel(sub)
-
-    if not result.get("sub"):
-        await send_or_edit(
-            cb,
-            subscription_refresh_result_text(result),
-            no_subscription_kb() if result["status"] != "unchanged" else back_to_main_kb(),
-        )
-        return
-
-    synced = result["sub"]
-    sub_link = build_sub_link(synced["sub_id"]) if synced.get("sub_id") else None
-    text = subscription_refresh_result_text(result)
-    text += "\n\n" + subscription_manage_text(synced, sub_link)
-    await send_or_edit(cb, text, subscription_manage_kb(synced["id"]))
 
 
 @router.callback_query(F.data.startswith("sub_link:"))

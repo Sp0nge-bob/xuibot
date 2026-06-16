@@ -1,7 +1,10 @@
 """In-memory симулятор Platega API для TEST_MODE."""
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
+
+PENDING_TTL_SEC = 30 * 60
 
 from loguru import logger
 
@@ -31,6 +34,7 @@ class SimulatedTransaction:
     check_status: str = SCENARIO_PENDING
     description: str = ""
     metadata: Dict[str, Any] = field(default_factory=dict)
+    created_at: float = field(default_factory=time.monotonic)
 
 
 _store: Dict[str, SimulatedTransaction] = {}
@@ -38,6 +42,15 @@ _store: Dict[str, SimulatedTransaction] = {}
 
 def clear_store() -> None:
     _store.clear()
+
+
+def _format_expires_in(created_at: float) -> str | None:
+    left = int(PENDING_TTL_SEC - (time.monotonic() - created_at))
+    if left <= 0:
+        return None
+    h, rem = divmod(left, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h:02d}:{m:02d}:{s:02d}"
 
 
 def simulate_create(
@@ -64,7 +77,7 @@ def simulate_create(
         "transactionId": tx_id,
         "status": "PENDING",
         "redirect": f"https://pay.platega.test/sim/{tx_id}",
-        "expiresIn": "00:30:00",
+        "expiresIn": _format_expires_in(_store[tx_id].created_at) if tx_id in _store else "00:30:00",
         "paymentDetails": {"amount": amount, "currency": currency},
         "paymentMethod": str(payment_method),
     }
@@ -91,12 +104,13 @@ def simulate_get_status(tx_id: str) -> Dict[str, Any]:
         raise KeyError(f"Simulated tx {tx_id} not found")
     status = tx.check_status
     expired = status != SCENARIO_PENDING
+    expires_in = None if expired else _format_expires_in(tx.created_at)
     return {
         "id": tx.tx_id,
         "status": status,
         "paymentDetails": {"amount": tx.amount, "currency": tx.currency},
         "paymentMethod": str(tx.payment_method),
-        "expiresIn": None if expired else "00:30:00",
+        "expiresIn": expires_in,
         "payload": tx.payload,
         "description": tx.description,
     }

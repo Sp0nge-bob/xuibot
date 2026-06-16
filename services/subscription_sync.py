@@ -29,16 +29,6 @@ def _iso_to_ms(iso_date: str) -> int:
     return int(dt.timestamp() * 1000)
 
 
-def _date_key(iso_date: str) -> str:
-    if not iso_date:
-        return ""
-    try:
-        dt = datetime.fromisoformat(iso_date.replace("Z", ""))
-        return dt.strftime("%d.%m.%Y")
-    except ValueError:
-        return iso_date[:10]
-
-
 def _traffic_label(gb: int) -> str:
     return "безлимит" if gb <= 0 else f"{gb} ГБ"
 
@@ -160,80 +150,6 @@ async def sync_subscription(
         )
 
     return await _apply_panel_to_db(sub, client)
-
-
-async def pull_subscription_from_panel(sub: Dict[str, Any]) -> dict[str, Any]:
-    """Ручное обновление из панели — один проход, без repair."""
-    before = {
-        "end_date": _date_key(sub.get("end_date", "")),
-        "sub_id": sub.get("sub_id") or "",
-        "traffic_limit_gb": sub.get("traffic_limit_gb") or 0,
-    }
-
-    api = await get_api()
-    await panel_cache.refresh(api, force=True)
-    client = await fetch_panel_client(sub["client_email"])
-
-    if not client:
-        await db.deactivate_subscription(sub["id"])
-        return {
-            "status": "not_found",
-            "message": "Клиент не найден на панели — подписка деактивирована в боте.",
-            "changes": [],
-            "sub": None,
-        }
-
-    if not client.enable:
-        await db.deactivate_subscription(sub["id"])
-        return {
-            "status": "disabled",
-            "message": "Клиент отключён на панели — подписка деактивирована в боте.",
-            "changes": [],
-            "sub": None,
-        }
-
-    now_ms = int(datetime.utcnow().timestamp() * 1000)
-    if (client.expiry_time or 0) <= now_ms:
-        await db.deactivate_subscription(sub["id"])
-        return {
-            "status": "expired",
-            "message": "Срок на панели истёк — подписка деактивирована в боте.",
-            "changes": [],
-            "sub": None,
-        }
-
-    synced = await _apply_panel_to_db(sub, client)
-    if not synced:
-        return {
-            "status": "error",
-            "message": "Не удалось обновить данные. Попробуйте позже.",
-            "changes": [],
-            "sub": None,
-        }
-
-    after = {
-        "end_date": _date_key(synced.get("end_date", "")),
-        "sub_id": synced.get("sub_id") or "",
-        "traffic_limit_gb": synced.get("traffic_limit_gb") or 0,
-    }
-
-    changes: list[str] = []
-    if before["end_date"] != after["end_date"]:
-        changes.append(f"📅 Срок: <b>{before['end_date'] or '—'}</b> → <b>{after['end_date']}</b>")
-    if before["sub_id"] != after["sub_id"]:
-        changes.append("🔗 Ссылка подписки (subId) обновлена")
-    if before["traffic_limit_gb"] != after["traffic_limit_gb"]:
-        changes.append(
-            f"📊 Трафик: <b>{_traffic_label(before['traffic_limit_gb'])}</b> → "
-            f"<b>{_traffic_label(after['traffic_limit_gb'])}</b>"
-        )
-
-    return {
-        "status": "updated" if changes else "unchanged",
-        "message": "Данные в боте обновлены из панели." if changes else "Данные уже совпадают с панелью.",
-        "changes": changes,
-        "sub": synced,
-    }
 
 
 async def sync_user_subscriptions(tg_id: int, *, repair: bool = False) -> List[Dict[str, Any]]:

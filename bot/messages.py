@@ -203,25 +203,10 @@ def subscription_manage_text(sub: Dict[str, Any], sub_link: Optional[str]) -> st
         f"📅 Действует до: <b>{end}</b> ({left} дн.)",
         f"📊 Трафик: {traffic}",
         f"👤 Клиент: <code>{sub['client_email']}</code>",
-        "",
-        "<i>Если срок меняли в панели — нажмите «Обновить из панели».</i>",
     ]
     if sub_link:
         lines += ["", f"🔗 <b>Ссылка:</b>", f"<code>{sub_link}</code>"]
     lines += ["", "Что хотите сделать?"]
-    return "\n".join(lines)
-
-
-def subscription_refresh_result_text(result: Dict[str, Any]) -> str:
-    lines = [
-        "🔄 <b>Обновление из панели</b>",
-        "━━━━━━━━━━━━━━━━",
-        "",
-        result.get("message", ""),
-    ]
-    changes = result.get("changes") or []
-    if changes:
-        lines += ["", "<b>Изменилось:</b>"] + changes
     return "\n".join(lines)
 
 
@@ -277,6 +262,7 @@ def pending_payment_text(
     quote: PriceQuote | None = None,
     expires_in: str | None = None,
     test_mode: bool = False,
+    status_note: str | None = None,
 ) -> str:
     is_renewal = extend or has_active_sub
     action = "Продление" if is_renewal else "Тариф"
@@ -285,8 +271,10 @@ def pending_payment_text(
     else:
         price_part = f"<b>{plan['price']} ₽</b>"
     title = "⏳ <b>Ожидаем оплату</b> (тест)" if test_mode else "⏳ <b>Ожидаем оплату</b>"
-    lines = [
-        title,
+    lines = [title]
+    if status_note:
+        lines += ["", f"⚠️ {status_note}"]
+    lines += [
         "",
         f"{action}: <b>{plan['name']}</b> — {price_part}",
         f"Способ: <b>{method_name}</b>",

@@ -32,7 +32,9 @@ async def send_or_edit(
         await cb.message.edit_text(text, reply_markup=reply_markup)
     except TelegramBadRequest as e:
         msg = str(e).lower()
-        if "no text" in msg or "message is not modified" in msg:
+        if "message is not modified" in msg:
+            return
+        if "no text" in msg:
             await cb.message.answer(text, reply_markup=reply_markup)
         else:
             raise

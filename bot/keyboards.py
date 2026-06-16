@@ -142,7 +142,6 @@ def payment_kb(
 def subscription_manage_kb(sub_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔗 Ссылка и QR", callback_data=f"sub_link:{sub_id}")],
-        [InlineKeyboardButton(text="🔄 Обновить из панели", callback_data=f"sub_refresh:{sub_id}")],
         [InlineKeyboardButton(text="🔄 Продлить подписку", callback_data="extend_menu")],
         [InlineKeyboardButton(text="💸 Запросить возврат", callback_data=f"refund:{sub_id}")],
         [InlineKeyboardButton(text="« Главное меню", callback_data="main_menu")],
