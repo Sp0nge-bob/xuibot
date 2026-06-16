@@ -29,7 +29,11 @@ from services.payment_flow import (
 )
 from services.payment_processor import handle_platega_status
 from services.pricing import get_plan_quote, list_plans, validate_promo
-from services.subscription_sync import get_primary_subscription_for_ui
+from services.subscription_sync import (
+    get_active_subscriptions_for_ui,
+    get_primary_paid_subscription_for_ui,
+    get_primary_subscription_for_ui,
+)
 from services.trial import claim_trial, get_trial_button_visible
 from services.xui import build_sub_link
 from .ui_helpers import safe_cb_answer, send_or_edit
@@ -40,6 +44,7 @@ from .keyboards import (
     test_scenario_kb,
     payment_kb,
     subscription_manage_kb,
+    subscriptions_manage_kb,
     refund_confirm_kb,
     refund_chat_kb,
     no_subscription_kb,
@@ -54,6 +59,7 @@ from .messages import (
     test_payment_text,
     test_scenario_result_text,
     subscription_manage_text,
+    subscriptions_manage_text,
     no_subscription_text,
     refund_confirm_text,
     refund_request_sent_text,
@@ -100,9 +106,9 @@ async def _show_main_menu(target: Message | CallbackQuery, *, edit: bool = False
         await state.update_data(promo_code=None)
 
     await db.get_or_create_user(user.id, user.username, user.first_name)
-    sub = await get_primary_subscription_for_ui(user.id)
+    subs = await get_active_subscriptions_for_ui(user.id)
     trial_available = await get_trial_button_visible(user.id)
-    text = main_menu_text(user.first_name, user.username, sub)
+    text = main_menu_text(user.first_name, user.username, subs)
     kb = main_menu_kb(trial_available=trial_available)
 
     if isinstance(target, CallbackQuery):
@@ -717,30 +723,55 @@ async def cb_test_sim_mismatch(cb: CallbackQuery):
     await _process_pending_test_outcome(cb, tx_id, PendingTestOutcome.WEBHOOK_MISMATCH)
 
 
-@router.callback_query(F.data == "manage_sub")
-async def cb_manage_sub(cb: CallbackQuery):
-    await safe_cb_answer(cb)
-    sub = await get_primary_subscription_for_ui(cb.from_user.id)
-    if not sub:
+async def _pending_refund_ids(tg_id: int) -> dict[int, int]:
+    row = await db.get_pending_refund_for_user(tg_id)
+    if not row or not row.get("subscription_id"):
+        return {}
+    return {row["subscription_id"]: row["id"]}
+
+
+async def _show_subscriptions_manage(cb: CallbackQuery, tg_id: int) -> None:
+    subs = await get_active_subscriptions_for_ui(tg_id)
+    if not subs:
         await send_or_edit(cb, no_subscription_text(), no_subscription_kb())
         return
 
-    pending_refund = await db.get_pending_refund_for_user(cb.from_user.id)
-    sub_link = build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
+    if len(subs) == 1:
+        sub = subs[0]
+        sub_link = build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
+        refund_ids = await _pending_refund_ids(tg_id)
+        await send_or_edit(
+            cb,
+            subscription_manage_text(sub, sub_link),
+            subscription_manage_kb(
+                sub["id"],
+                refund_id=refund_ids.get(sub["id"]),
+                is_trial=is_trial_email(sub.get("client_email")),
+            ),
+        )
+        return
+
+    sub_links = {
+        sub["id"]: build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
+        for sub in subs
+    }
+    refund_ids = await _pending_refund_ids(tg_id)
     await send_or_edit(
         cb,
-        subscription_manage_text(sub, sub_link),
-        subscription_manage_kb(
-            sub["id"],
-            refund_id=pending_refund["id"] if pending_refund else None,
-            is_trial=is_trial_email(sub.get("client_email")),
-        ),
+        subscriptions_manage_text(subs, sub_links),
+        subscriptions_manage_kb(subs, refund_ids=refund_ids),
     )
+
+
+@router.callback_query(F.data == "manage_sub")
+async def cb_manage_sub(cb: CallbackQuery):
+    await safe_cb_answer(cb)
+    await _show_subscriptions_manage(cb, cb.from_user.id)
 
 
 @router.callback_query(F.data == "extend_menu")
 async def cb_extend_menu(cb: CallbackQuery, state: FSMContext):
-    sub = await get_primary_subscription_for_ui(cb.from_user.id)
+    sub = await get_primary_paid_subscription_for_ui(cb.from_user.id)
     if not sub:
         await safe_cb_answer(cb, "Нет активной подписки", show_alert=True)
         return
@@ -865,11 +896,12 @@ async def cb_sub_link(cb: CallbackQuery):
         return
 
     from services.fulfillment import make_qr_photo
+    kind = "🎁 Пробная" if is_trial_email(sub.get("client_email")) else "✅ Платная"
     photo = make_qr_photo(link, "vpn_link.png")
     await safe_cb_answer(cb)
     await cb.message.answer_photo(
         photo,
-        caption=f"🔗 <b>Ваша подписка</b>\n\n<code>{link}</code>",
+        caption=f"🔗 <b>{kind} подписка</b>\n\n<code>{link}</code>",
         reply_markup=back_to_main_kb(),
     )
 

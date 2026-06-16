@@ -2,6 +2,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from config.payments import get_payment_methods
 from config.plans import Plan
 from config.settings import settings
+from config.trial import is_trial_email
 from services.pricing import PriceQuote
 
 
@@ -134,6 +135,43 @@ def payment_kb(
             text="🔄 Проверить оплату",
             callback_data=f"check_pay:{tx_id}",
         )])
+    rows.append([InlineKeyboardButton(text="« Главное меню", callback_data="main_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _sub_action_label(sub: dict) -> str:
+    return "🎁 Пробная" if is_trial_email(sub.get("client_email")) else "✅ Платная"
+
+
+def subscriptions_manage_kb(
+    subs: list[dict],
+    *,
+    refund_ids: dict[int, int] | None = None,
+) -> InlineKeyboardMarkup:
+    refund_ids = refund_ids or {}
+    rows: list[list[InlineKeyboardButton]] = []
+    has_paid = False
+    for sub in subs:
+        label = _sub_action_label(sub)
+        rows.append([InlineKeyboardButton(
+            text=f"🔗 {label} — ссылка и QR",
+            callback_data=f"sub_link:{sub['id']}",
+        )])
+        if not is_trial_email(sub.get("client_email")):
+            has_paid = True
+            refund_id = refund_ids.get(sub["id"])
+            if refund_id:
+                rows.append([InlineKeyboardButton(
+                    text=f"💬 {label} — переписка по возврату",
+                    callback_data=f"refund_chat:{refund_id}",
+                )])
+            else:
+                rows.append([InlineKeyboardButton(
+                    text=f"💸 {label} — запросить возврат",
+                    callback_data=f"refund:{sub['id']}",
+                )])
+    if has_paid:
+        rows.append([InlineKeyboardButton(text="🔄 Продлить платную", callback_data="extend_menu")])
     rows.append([InlineKeyboardButton(text="« Главное меню", callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

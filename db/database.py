@@ -176,6 +176,14 @@ async def get_primary_subscription(tg_id: int) -> Optional[Dict[str, Any]]:
     return subs[0] if subs else None
 
 
+async def get_primary_paid_subscription(tg_id: int) -> Optional[Dict[str, Any]]:
+    subs = await get_active_subscriptions(tg_id)
+    for sub in subs:
+        if not (sub.get("client_email") or "").startswith("tgfree"):
+            return sub
+    return None
+
+
 async def get_subscription_by_id(sub_id: int) -> Optional[Dict[str, Any]]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row

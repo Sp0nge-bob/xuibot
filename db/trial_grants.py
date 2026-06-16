@@ -82,7 +82,9 @@ async def can_claim_trial(tg_id: int) -> tuple[bool, str]:
     for sub in subs:
         if is_trial_email(sub.get("client_email")):
             return False, "У вас уже активен пробный период."
-        return False, "У вас уже есть активная подписка."
+    for sub in subs:
+        if not is_trial_email(sub.get("client_email")):
+            return False, "У вас уже есть активная подписка."
 
     return True, ""
 

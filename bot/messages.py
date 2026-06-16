@@ -31,23 +31,32 @@ def _days_left(iso_date: str) -> int:
         return 0
 
 
+def _sub_kind_label(sub: Dict[str, Any]) -> str:
+    return "🎁 Пробная" if is_trial_email(sub.get("client_email")) else "✅ Платная"
+
+
+def _sub_menu_line(sub: Dict[str, Any]) -> str:
+    end = _format_date(sub["end_date"])
+    left = _days_left(sub["end_date"])
+    traffic = "безлимит" if sub.get("traffic_limit_gb", 0) == 0 else f"{sub['traffic_limit_gb']} ГБ"
+    return f"{_sub_kind_label(sub)} · до <b>{end}</b> · {left} дн. · {traffic}"
+
+
 def main_menu_text(
     first_name: Optional[str],
     username: Optional[str],
-    subscription: Optional[Dict[str, Any]],
+    subscriptions: List[Dict[str, Any]],
 ) -> str:
     lines = ["🌐 <b>VPN Bot</b>", "━━━━━━━━━━━━━━━━", _user_line(first_name, username), ""]
 
-    if subscription:
-        end = _format_date(subscription["end_date"])
-        left = _days_left(subscription["end_date"])
-        kind = "🎁 Пробная" if is_trial_email(subscription.get("client_email")) else "✅ Активна"
-        lines += [
-            f"📊 <b>Подписка:</b> {kind}",
-            f"   └ До <b>{end}</b> · {left} дн.",
-        ]
-    else:
+    if not subscriptions:
         lines.append("📊 <b>Подписка:</b> ❌ Нет активной")
+    elif len(subscriptions) == 1:
+        lines += ["📊 <b>Подписка:</b>", f"   └ {_sub_menu_line(subscriptions[0])}"]
+    else:
+        lines.append("📊 <b>Подписки:</b>")
+        for sub in subscriptions:
+            lines.append(f"   └ {_sub_menu_line(sub)}")
 
     if settings.TEST_MODE:
         lines += ["", "⚠️ <i>Тестовый режим включён</i>"]
@@ -193,21 +202,43 @@ def test_scenario_result_text(scenario: str, tx_id: str | None = None) -> str:
     return "\n".join(lines)
 
 
-def subscription_manage_text(sub: Dict[str, Any], sub_link: Optional[str]) -> str:
+def _subscription_detail_block(sub: Dict[str, Any], sub_link: Optional[str]) -> list[str]:
     end = _format_date(sub["end_date"])
     left = _days_left(sub["end_date"])
     traffic = "безлимит" if sub.get("traffic_limit_gb", 0) == 0 else f"{sub['traffic_limit_gb']} ГБ"
-    title = "🎁 Пробная подписка" if is_trial_email(sub.get("client_email")) else "⚙️ Управление подпиской"
     lines = [
-        f"<b>{title}</b>",
-        "━━━━━━━━━━━━━━━━",
-        "",
+        f"<b>{_sub_kind_label(sub)}</b>",
         f"📅 Действует до: <b>{end}</b> ({left} дн.)",
         f"📊 Трафик: {traffic}",
         f"👤 Клиент: <code>{sub['client_email']}</code>",
     ]
     if sub_link:
-        lines += ["", f"🔗 <b>Ссылка:</b>", f"<code>{sub_link}</code>"]
+        lines += [f"🔗 <b>Ссылка:</b>", f"<code>{sub_link}</code>"]
+    return lines
+
+
+def subscription_manage_text(sub: Dict[str, Any], sub_link: Optional[str]) -> str:
+    lines = [
+        "⚙️ <b>Управление подпиской</b>",
+        "━━━━━━━━━━━━━━━━",
+        "",
+        *_subscription_detail_block(sub, sub_link),
+        "",
+        "Что хотите сделать?",
+    ]
+    return "\n".join(lines)
+
+
+def subscriptions_manage_text(
+    subs: List[Dict[str, Any]],
+    sub_links: Dict[int, Optional[str]],
+) -> str:
+    lines = ["⚙️ <b>Управление подписками</b>", "━━━━━━━━━━━━━━━━", ""]
+    for i, sub in enumerate(subs):
+        if i > 0:
+            lines.append("──────────────")
+            lines.append("")
+        lines.extend(_subscription_detail_block(sub, sub_links.get(sub["id"])))
     lines += ["", "Что хотите сделать?"]
     return "\n".join(lines)
 

@@ -167,6 +167,16 @@ async def get_primary_subscription_for_ui(tg_id: int) -> Optional[Dict[str, Any]
     return await db.get_primary_subscription(tg_id)
 
 
+async def get_active_subscriptions_for_ui(tg_id: int) -> list[dict]:
+    """Все активные подписки пользователя для меню и управления."""
+    return await db.get_active_subscriptions(tg_id)
+
+
+async def get_primary_paid_subscription_for_ui(tg_id: int) -> Optional[dict]:
+    """Платная подписка (без пробной) — для продления и оплаты."""
+    return await db.get_primary_paid_subscription(tg_id)
+
+
 async def get_synced_primary_subscription(
     tg_id: int, *, repair: bool = False,
 ) -> Optional[Dict[str, Any]]:
