@@ -5,19 +5,11 @@ from config.settings import settings
 from services.pricing import PriceQuote
 
 
-def main_menu_kb(has_subscription: bool) -> InlineKeyboardMarkup:
-    rows = [
+def main_menu_kb(_has_subscription: bool) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📦 Тарифы", callback_data="tariffs")],
-    ]
-    if has_subscription:
-        rows.append([
-            InlineKeyboardButton(text="⚙️ Управление подпиской", callback_data="manage_sub")
-        ])
-    else:
-        rows.append([
-            InlineKeyboardButton(text="⚙️ Управление подпиской", callback_data="manage_sub")
-        ])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+        [InlineKeyboardButton(text="⚙️ Управление подпиской", callback_data="manage_sub")],
+    ])
 
 
 def plans_kb(plans: list[Plan], *, extend: bool = False) -> InlineKeyboardMarkup:
@@ -26,7 +18,7 @@ def plans_kb(plans: list[Plan], *, extend: bool = False) -> InlineKeyboardMarkup
     for plan in plans:
         rows.append([
             InlineKeyboardButton(
-                text=f"{plan['name']} — {plan['price']} ₽",
+                text=f"📦 {plan['name']} · {plan['price']} ₽",
                 callback_data=f"{prefix}:{plan['id']}",
             )
         ])
@@ -71,10 +63,10 @@ def test_scenario_kb(plan_id: str, method_key: str, *, extend: bool = False) -> 
     ext_flag = "1" if extend else "0"
     back_prefix = "extend_plan" if extend else "select_plan"
     scenarios = [
-        ("✅ CONFIRMED", "CONFIRMED"),
-        ("❌ CANCELED", "CANCELED"),
-        ("⏳ PENDING", "PENDING"),
-        ("↩️ CHARGEBACKED", "CHARGEBACKED"),
+        ("✅ Оплачено", "CONFIRMED"),
+        ("❌ Отмена", "CANCELED"),
+        ("⏳ Ожидание", "PENDING"),
+        ("↩️ Возврат", "CHARGEBACKED"),
         ("💥 Ошибка API", "CREATE_ERROR"),
     ]
     rows = [
@@ -104,15 +96,15 @@ def payment_kb(
     if test_mode:
         rows += [
             [InlineKeyboardButton(
-                text="🔍 Проверить (не оплачено)",
+                text="🔍 Не оплачено",
                 callback_data=f"test_check_pay:{tx_id}",
             )],
             [InlineKeyboardButton(
-                text="✅ Симулировать оплату (check_pay)",
+                text="✅ Симуляция оплаты",
                 callback_data=f"test_sim_pay:{tx_id}",
             )],
             [InlineKeyboardButton(
-                text="📡 Webhook: оплата прошла",
+                text="📡 Webhook: успех",
                 callback_data=f"test_sim_webhook:{tx_id}",
             )],
             [
@@ -121,12 +113,12 @@ def payment_kb(
                     callback_data=f"test_sim_cancel:{tx_id}",
                 ),
                 InlineKeyboardButton(
-                    text="⏱ Истекло 30м",
+                    text="⏱ Истекло",
                     callback_data=f"test_sim_expired:{tx_id}",
                 ),
             ],
             [InlineKeyboardButton(
-                text="⚠️ Webhook: неверная сумма",
+                text="⚠️ Неверная сумма",
                 callback_data=f"test_sim_mismatch:{tx_id}",
             )],
         ]

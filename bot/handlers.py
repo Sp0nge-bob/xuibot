@@ -362,7 +362,14 @@ async def _apply_test_scenario(
         )
         return
 
-    await safe_cb_answer(cb, f"Симуляция: {scenario}...")
+    scenario_labels = {
+        "CONFIRMED": "Симулируем оплату…",
+        "CANCELED": "Симулируем отмену…",
+        "PENDING": "Симулируем ожидание…",
+        "CHARGEBACKED": "Симулируем возврат…",
+        "CREATE_ERROR": "Симулируем ошибку…",
+    }
+    await safe_cb_answer(cb, scenario_labels.get(scenario, "Симулируем…"))
     bot_username = (await cb.bot.get_me()).username
     return_url, failed_url = get_return_urls(bot_username)
     metadata = _payment_metadata(cb, plan_id, order_type)
@@ -572,9 +579,9 @@ async def _process_payment_check(
         return
 
     if simulate_success:
-        await safe_cb_answer(cb, "Симулируем успешную оплату...")
+        await safe_cb_answer(cb, "Симулируем оплату…")
     else:
-        await safe_cb_answer(cb, "Проверяем статус...")
+        await safe_cb_answer(cb, "Проверяем…")
 
     try:
         flow = await check_payment_status(
@@ -586,7 +593,7 @@ async def _process_payment_check(
         return
 
     if simulate_success and not flow.result.handled and not flow.status:
-        await safe_cb_answer(cb, "Счёт уже обработан или не в PENDING", show_alert=True)
+        await safe_cb_answer(cb, "Счёт уже обработан", show_alert=True)
         return
 
     await _respond_payment_flow(cb, order, tx_id, flow)
@@ -602,14 +609,14 @@ async def _process_pending_test_outcome(cb: CallbackQuery, tx_id: str, outcome: 
         return
 
     labels = {
-        PendingTestOutcome.CHECK_STILL_PENDING: "Проверяем статус...",
-        PendingTestOutcome.SIM_CONFIRM: "Симулируем оплату...",
-        PendingTestOutcome.SIM_CANCEL: "Симулируем отмену...",
-        PendingTestOutcome.SIM_EXPIRED: "Симулируем истечение 30 мин...",
-        PendingTestOutcome.WEBHOOK_CONFIRM: "Симулируем webhook CONFIRMED...",
-        PendingTestOutcome.WEBHOOK_MISMATCH: "Симулируем webhook с неверной суммой...",
+        PendingTestOutcome.CHECK_STILL_PENDING: "Проверяем…",
+        PendingTestOutcome.SIM_CONFIRM: "Симулируем оплату…",
+        PendingTestOutcome.SIM_CANCEL: "Симулируем отмену…",
+        PendingTestOutcome.SIM_EXPIRED: "Симулируем истечение…",
+        PendingTestOutcome.WEBHOOK_CONFIRM: "Симулируем webhook…",
+        PendingTestOutcome.WEBHOOK_MISMATCH: "Симулируем неверную сумму…",
     }
-    await safe_cb_answer(cb, labels.get(outcome, "Обработка..."))
+    await safe_cb_answer(cb, labels.get(outcome, "Обработка…"))
 
     try:
         flow = await apply_pending_test_outcome(tx_id, outcome)
@@ -622,7 +629,7 @@ async def _process_pending_test_outcome(cb: CallbackQuery, tx_id: str, outcome: 
         return
 
     if outcome == PendingTestOutcome.SIM_CONFIRM and not flow.result.handled and not flow.status:
-        await safe_cb_answer(cb, "Счёт уже не в PENDING", show_alert=True)
+        await safe_cb_answer(cb, "Счёт уже обработан", show_alert=True)
         return
 
     await _respond_payment_flow(cb, order, tx_id, flow)

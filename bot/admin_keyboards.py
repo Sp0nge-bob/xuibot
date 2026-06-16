@@ -6,7 +6,7 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📊 Статистика", callback_data="adm:stats")],
         [InlineKeyboardButton(text="💰 Цены тарифов", callback_data="adm:plans")],
         [InlineKeyboardButton(text="🎟 Промокоды", callback_data="adm:promos")],
-        [InlineKeyboardButton(text="👥 Подключённые пользователи", callback_data="adm:users")],
+        [InlineKeyboardButton(text="👥 Пользователи", callback_data="adm:users")],
         [InlineKeyboardButton(text="💸 Запросы на возврат", callback_data="adm:refunds")],
         [InlineKeyboardButton(text="📡 Инбаунды подписки", callback_data="adm:inbounds")],
     ])

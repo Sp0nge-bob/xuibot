@@ -35,15 +35,14 @@ def main_menu_text(
     username: Optional[str],
     subscription: Optional[Dict[str, Any]],
 ) -> str:
-    lines = ["🔐 <b>VPN Shop</b>", "━━━━━━━━━━━━━━━━", _user_line(first_name, username), ""]
+    lines = ["🌐 <b>VPN Bot</b>", "━━━━━━━━━━━━━━━━", _user_line(first_name, username), ""]
 
     if subscription:
         end = _format_date(subscription["end_date"])
         left = _days_left(subscription["end_date"])
         lines += [
             "📊 <b>Подписка:</b> ✅ Активна",
-            f"   └ До <b>{end}</b> ({left} дн.)",
-            "   └ <i>данные с панели 3x-ui</i>",
+            f"   └ До <b>{end}</b> · {left} дн.",
         ]
     else:
         lines.append("📊 <b>Подписка:</b> ❌ Нет активной")
@@ -143,7 +142,7 @@ def test_payment_text(
         else f"📦 {action}: <b>{plan['name']}</b> — <b>{plan['price']} ₽</b>"
     )
     lines = [
-        "⚠️ <b>ТЕСТОВЫЙ РЕЖИМ</b>",
+        "⚠️ <b>Тестовый режим</b>",
         "━━━━━━━━━━━━━━━━",
         "",
         price_line,
@@ -167,18 +166,18 @@ def test_payment_text(
     lines += [
         "",
         "Реальные деньги не списываются.",
-        "Выберите сценарий ответа API:",
+        "Выберите сценарий:",
     ]
     return "\n".join(lines)
 
 
 def test_scenario_result_text(scenario: str, tx_id: str | None = None) -> str:
     labels = {
-        "CONFIRMED": "✅ CONFIRMED — оплата подтверждена",
-        "CANCELED": "❌ CANCELED — платёж отменён",
-        "PENDING": "⏳ PENDING — ожидание оплаты",
-        "CHARGEBACKED": "↩️ CHARGEBACKED — возврат средств",
-        "CREATE_ERROR": "💥 Ошибка API при создании",
+        "CONFIRMED": "✅ Оплачено",
+        "CANCELED": "❌ Отмена",
+        "PENDING": "⏳ Ожидание оплаты",
+        "CHARGEBACKED": "↩️ Возврат средств",
+        "CREATE_ERROR": "💥 Ошибка API",
     }
     label = labels.get(scenario, scenario)
     lines = [
@@ -231,7 +230,8 @@ def refund_confirm_text() -> str:
 
 def refund_request_sent_text() -> str:
     return (
-        "💸 <b>Запрос на возврат отправлен</b>\n\n"
+        "💸 <b>Запрос на возврат отправлен</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
         "Администратор рассмотрит ваш запрос.\n"
         "Переписка — в «Управление подпиской» → <b>Переписка по возврату</b>."
     )
@@ -271,13 +271,13 @@ def pending_payment_text(
     else:
         price_part = f"<b>{plan['price']} ₽</b>"
     title = "⏳ <b>Ожидаем оплату</b> (тест)" if test_mode else "⏳ <b>Ожидаем оплату</b>"
-    lines = [title]
+    lines = [title, "━━━━━━━━━━━━━━━━"]
     if status_note:
         lines += ["", f"⚠️ {status_note}"]
     lines += [
         "",
-        f"{action}: <b>{plan['name']}</b> — {price_part}",
-        f"Способ: <b>{method_name}</b>",
+        f"📦 {action}: <b>{plan['name']}</b> — {price_part}",
+        f"💳 Способ: <b>{method_name}</b>",
     ]
     if expires_in:
         lines.append(f"⏱ Истекает через: <b>{expires_in}</b>")
@@ -289,12 +289,8 @@ def pending_payment_text(
     lines += [""]
     if test_mode:
         lines += [
-            "<b>Тест PENDING</b> (таймер ~30 мин, как Platega API):",
-            "• <b>Проверить (не оплачено)</b> — GET status PENDING",
-            "• <b>Симулировать оплату</b> — PENDING→CONFIRMED + check_pay",
-            "• <b>Webhook: оплата</b> — callback CONFIRMED (как в проде)",
-            "• <b>Отмена / Истекло</b> — CANCELED",
-            "• <b>Неверная сумма</b> — webhook с amount mismatch",
+            "<i>Тест: таймер ~30 мин, как у Platega.</i>",
+            "Кнопки ниже симулируют проверку, оплату, webhook и отмену.",
         ]
     else:
         lines += [
