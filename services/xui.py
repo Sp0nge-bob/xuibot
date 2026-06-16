@@ -751,8 +751,45 @@ async def extend_client(
     return new_expiry
 
 
+async def _list_bot_group_emails_on_panel(api: AsyncApi) -> set[str]:
+    """tg/tgfree из unified store (группа бота) — дополняет settings на child-нодах."""
+    group = _bot_group()
+    if not group:
+        return set()
+    url = api.client._url(f"panel/api/clients/groups/{group}/emails")
+    await _throttle()
+    try:
+        resp = await api.client._get(url, {"Accept": "application/json"})
+        data = resp.json()
+        if not data.get(ApiFields.SUCCESS):
+            logger.debug(
+                "groups/{}/emails: {}",
+                group, data.get(ApiFields.MSG) or "not success",
+            )
+            return set()
+        obj = data.get(ApiFields.OBJ) or []
+    except Exception as e:
+        if not _is_not_found_error(e):
+            logger.warning("groups/{}/emails: {}", group, e)
+        return set()
+
+    emails: set[str] = set()
+    if not isinstance(obj, list):
+        return emails
+    for item in obj:
+        if isinstance(item, str):
+            email = item.strip()
+        elif isinstance(item, dict):
+            email = (item.get("email") or "").strip()
+        else:
+            continue
+        if is_bot_client_email(email):
+            emails.add(email.lower())
+    return emails
+
+
 async def list_bot_client_emails_on_panel(api: AsyncApi) -> set[str]:
-    """Все tg/tgfree клиенты бота на панели (по settings инбаундов)."""
+    """Все tg/tgfree клиенты бота: settings инбаундов ∪ группа telegram-bot."""
     panel_cache.invalidate()
     inbounds = await panel_cache.refresh(api, force=True)
     emails: set[str] = set()
@@ -761,6 +798,7 @@ async def list_bot_client_emails_on_panel(api: AsyncApi) -> set[str]:
             email = (client.email or "").strip()
             if is_bot_client_email(email):
                 emails.add(email.lower())
+    emails.update(await _list_bot_group_emails_on_panel(api))
     return emails
 
 

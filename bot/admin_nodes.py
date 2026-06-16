@@ -459,7 +459,7 @@ async def cb_nodes_sync(cb: CallbackQuery):
             f"<b>Фаза 2</b> (основная → вторичные)\n"
             f"Нод: {stats['nodes']}\n"
             f"Синхронизировано: {stats['ok']}\n"
-            f"Удалено лишних tg: {stats.get('purged', 0)}\n"
+            f"Удалено лишних tg (не в БД): {stats.get('purged', 0)}\n"
             f"Нет на ноде (ожидается sync панели): {stats.get('secondary_missing', 0)}\n"
             f"Ошибок: {stats.get('secondary_failed', 0)}"
         )

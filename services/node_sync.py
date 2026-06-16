@@ -110,43 +110,67 @@ async def _sync_primary_from_db(subs: list[dict[str, Any]]) -> dict[str, int]:
     return stats
 
 
+def _allowed_subscription_emails(subs: list[dict[str, Any]]) -> set[str]:
+    return {
+        (sub.get("client_email") or "").strip().lower()
+        for sub in subs
+        if (sub.get("client_email") or "").strip()
+    }
+
+
 async def _sync_secondaries_vs_primary(
     subs: list[dict[str, Any]],
-    primary_emails: set[str],
 ) -> dict[str, int]:
     nodes = _dedupe_nodes_by_host(await nodes_db.get_secondary_nodes(healthy_only=True))
     stats = {"nodes": len(nodes), "synced": 0, "missing": 0, "purged": 0, "failed": 0}
     if not nodes:
         return stats
 
+    allowed_emails = _allowed_subscription_emails(subs)
     sem = asyncio.Semaphore(settings.XUI_PANEL_CONCURRENCY)
+    stats_lock = asyncio.Lock()
 
     async def _one_node(node: dict) -> None:
         node_id = node["id"]
+        node_purged = 0
+        node_synced = 0
+        node_missing = 0
+        node_failed = 0
         try:
             api = await get_api_for_node(node)
             secondary_emails = await list_bot_client_emails_on_panel(api)
-            excess = secondary_emails - primary_emails
+            excess = secondary_emails - allowed_emails
+            logger.info(
+                "Sync secondary {}: на панели {} tg, в БД {}, лишних {}",
+                node.get("name"), len(secondary_emails), len(allowed_emails), len(excess),
+            )
             for email in sorted(excess):
                 async with sem:
-                    await remove_bot_client_on_panel(api, email)
-                    stats["purged"] += 1
-                    logger.info(
-                        "Sync secondary {}: удалён лишний {} (нет на основной)",
-                        node.get("name"), email,
-                    )
+                    try:
+                        await remove_bot_client_on_panel(api, email)
+                        node_purged += 1
+                        logger.info(
+                            "Sync secondary {}: удалён лишний {} (нет в активных подписках БД)",
+                            node.get("name"), email,
+                        )
+                    except Exception as e:
+                        node_failed += 1
+                        logger.error(
+                            "Sync secondary {}: не удалось удалить {}: {}",
+                            node.get("name"), email, e,
+                        )
 
             for sub in subs:
                 async with sem:
                     r = await sync_subscription_to_node(sub, node)
                     if not r.get("ok"):
-                        stats["failed"] += 1
+                        node_failed += 1
                         continue
                     action = r.get("action")
                     if action == "missing":
-                        stats["missing"] += 1
+                        node_missing += 1
                     else:
-                        stats["synced"] += 1
+                        node_synced += 1
 
             await nodes_db.update_node(
                 node_id,
@@ -154,10 +178,16 @@ async def _sync_secondaries_vs_primary(
                 last_sync_error=None,
             )
         except Exception as e:
-            stats["failed"] += 1
+            node_failed += 1
             err = f"{type(e).__name__}: {e}"[:200]
             await nodes_db.update_node(node_id, last_sync_error=err)
             logger.error("Secondary sync failed for node {}: {}", node_id, e)
+
+        async with stats_lock:
+            stats["purged"] += node_purged
+            stats["synced"] += node_synced
+            stats["missing"] += node_missing
+            stats["failed"] += node_failed
 
     await asyncio.gather(*[_one_node(n) for n in nodes])
     return stats
@@ -181,9 +211,13 @@ async def run_full_nodes_sync() -> dict[str, Any]:
 
     api_primary = await get_api_for_node(primary)
     primary_emails = await list_bot_client_emails_on_panel(api_primary)
-    logger.info("Full nodes sync: {} tg clients on primary", len(primary_emails))
+    allowed = _allowed_subscription_emails(subs)
+    logger.info(
+        "Full nodes sync: {} tg on primary, {} active subs in DB",
+        len(primary_emails), len(allowed),
+    )
 
-    phase2 = await _sync_secondaries_vs_primary(subs, primary_emails)
+    phase2 = await _sync_secondaries_vs_primary(subs)
 
     logger.info(
         "Full nodes sync done: primary created={} updated={} failed={}; "
