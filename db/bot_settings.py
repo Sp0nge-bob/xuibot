@@ -46,6 +46,13 @@ def _parse_inbound_ids(raw: str) -> List[int]:
 
 
 async def get_subscription_inbound_ids() -> List[int]:
+    try:
+        from db.xui_nodes import get_primary_inbound_ids
+        primary_ids = await get_primary_inbound_ids()
+        if primary_ids:
+            return primary_ids
+    except Exception:
+        pass
     stored = await get_setting(SETTING_SUBSCRIPTION_INBOUNDS)
     if stored and stored.strip():
         return _parse_inbound_ids(stored)

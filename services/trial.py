@@ -14,6 +14,7 @@ from config.trial import (
 from db import database as db
 from db import trial_grants as trial_db
 from services.fulfillment import make_qr_photo
+from services.node_sync import schedule_secondary_sync
 from services.subscription_admin import admin_reset_trial_for_user
 from services.xui import provision_client
 
@@ -47,6 +48,7 @@ async def claim_trial(tg_id: int) -> Tuple[str, Optional[BufferedInputFile]]:
         traffic_gb=TRIAL_TRAFFIC_GB,
     )
     await trial_db.record_trial_grant(tg_id, sub_db_id)
+    schedule_secondary_sync(sub_db_id)
 
     end_date = (datetime.utcnow() + timedelta(days=TRIAL_DAYS)).strftime("%d.%m.%Y")
     lines = [

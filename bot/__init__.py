@@ -10,6 +10,7 @@ from config.settings import settings
 from services.xui import ensure_bot_group, log_inbound_port_conflicts
 from .handlers import router as main_router
 from .admin import router as admin_router
+from .admin_nodes import router as admin_nodes_router
 from .middlewares import ActionLockMiddleware
 from .scheduler import start_scheduler
 from .sender import send_message
@@ -26,6 +27,7 @@ dp.message.middleware(_action_lock)
 
 dp.include_router(main_router)
 dp.include_router(admin_router)
+dp.include_router(admin_nodes_router)
 
 
 async def start_bot():

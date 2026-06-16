@@ -11,6 +11,8 @@ from db import database as db
 from services.panel_cache import panel_cache
 from services.xui import disable_client, get_api
 from services.subscription_sync import sync_subscription
+from services.node_sync import sync_all_secondary_nodes
+from services.node_health import check_all_nodes_health
 
 scheduler = AsyncIOScheduler()
 
@@ -52,8 +54,20 @@ async def check_expired_subscriptions():
             logger.error("Error deactivating sub {}: {}", sub["id"], e)
 
 
+async def check_nodes_health_job():
+    await check_all_nodes_health()
+
+
+async def sync_secondary_nodes_job():
+    await sync_all_secondary_nodes()
+
+
 def start_scheduler():
+    scheduler.add_job(check_nodes_health_job, "interval", minutes=5, id="check_nodes_health")
+    scheduler.add_job(sync_secondary_nodes_job, "interval", hours=2, id="sync_secondary_nodes")
     scheduler.add_job(sync_all_subscriptions, "interval", hours=6, id="sync_panel")
     scheduler.add_job(check_expired_subscriptions, "interval", hours=1, id="check_expired")
     scheduler.start()
-    logger.info("Scheduler started (sync every 6h, expiry check hourly)")
+    logger.info(
+        "Scheduler started (health 5m, secondary sync 2h, panel sync 6h, expiry 1h)"
+    )

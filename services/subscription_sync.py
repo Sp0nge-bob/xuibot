@@ -10,6 +10,8 @@ from services.panel_cache import panel_cache
 from services.xui import (
     audit_client_inbounds,
     get_panel_client_for_sync,
+    is_bot_client_email,
+    remove_client_from_secondaries,
     repair_client_inbounds,
     get_api,
 )
@@ -91,6 +93,18 @@ async def _auto_repair_if_needed(
     return True
 
 
+async def _deactivate_after_primary_delete(sub: Dict[str, Any]) -> None:
+    email = sub["client_email"]
+    if not is_bot_client_email(email):
+        logger.warning(
+            "Пропуск каскадного удаления #{}: email {} не tg-клиент бота",
+            sub["id"], email,
+        )
+        return
+    await remove_client_from_secondaries(email)
+    await db.deactivate_subscription(sub["id"])
+
+
 async def _apply_panel_to_db(sub: Dict[str, Any], client) -> Optional[Dict[str, Any]]:
     if not client:
         await db.deactivate_subscription(sub["id"])
@@ -101,7 +115,8 @@ async def _apply_panel_to_db(sub: Dict[str, Any], client) -> Optional[Dict[str, 
     db_expiry_ms = _iso_to_ms(sub["end_date"])
     expiry_ms = max(panel_expiry_ms, db_expiry_ms)
 
-    if not client.enable or expiry_ms <= now_ms:
+    # Ручной disable в панели игнорируем — деактивируем только по expiry.
+    if expiry_ms <= now_ms:
         await db.deactivate_subscription(sub["id"])
         return None
 
@@ -124,8 +139,11 @@ async def sync_subscription(
     audit = await audit_client_inbounds(sub["client_email"])
 
     if not audit["present_allowed"] and not audit["extra"]:
-        logger.info("Клиент {} удалён с панели — деактивируем #{}", sub["client_email"], sub["id"])
-        await db.deactivate_subscription(sub["id"])
+        logger.info(
+            "Клиент {} удалён с основной панели — каскад на вторичные, деактивируем #{}",
+            sub["client_email"], sub["id"],
+        )
+        await _deactivate_after_primary_delete(sub)
         return None
 
     client = await fetch_panel_client(sub["client_email"])
@@ -137,9 +155,10 @@ async def sync_subscription(
 
     if not audit["present_allowed"]:
         logger.error(
-            "Клиент {} отсутствует в инбаундах {}", sub["client_email"], audit["allowed"],
+            "Клиент {} отсутствует в инбаундах {} — каскад на вторичные",
+            sub["client_email"], audit["allowed"],
         )
-        await db.deactivate_subscription(sub["id"])
+        await _deactivate_after_primary_delete(sub)
         return None
 
     if audit["missing_allowed"]:

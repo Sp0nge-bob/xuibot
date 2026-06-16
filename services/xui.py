@@ -23,13 +23,17 @@ from config.settings import settings
 from db.bot_settings import get_subscription_inbound_ids
 from services.panel_cache import panel_cache
 
-_api: Optional[AsyncApi] = None
-_bot_group_ensured: bool = False
+_apis: dict[int, AsyncApi] = {}
+_bot_group_ensured: set[int] = set()
 _BOT_CLIENT_EMAIL = re.compile(r"^tg(?:free)?\d+$")
 
 
+def is_bot_client_email(email: str) -> bool:
+    return bool(_BOT_CLIENT_EMAIL.match(email or ""))
+
+
 def _assert_bot_client_email(email: str) -> None:
-    if not _BOT_CLIENT_EMAIL.match(email or ""):
+    if not is_bot_client_email(email):
         raise ValueError(f"Запрещено: операция только для tg-клиентов бота, получено {email!r}")
 
 
@@ -51,27 +55,65 @@ def normalize_xui_host(host: str) -> str:
     return host
 
 
-def build_sub_link(sub_id: str) -> str:
+async def build_sub_link(sub_id: str) -> str:
     if settings.SUBSCRIPTION_BASE_URL:
         base = settings.SUBSCRIPTION_BASE_URL.rstrip("/")
         return f"{base}/{sub_id}"
+    try:
+        from db.xui_nodes import get_primary_node
+        primary = await get_primary_node()
+        if primary and primary.get("host"):
+            base = normalize_xui_host(primary["host"]).rstrip("/")
+            return f"{base}/sub/{sub_id}"
+    except Exception:
+        pass
     base = normalize_xui_host(settings.XUI_HOST).rstrip("/")
     return f"{base}/sub/{sub_id}"
 
 
-async def get_api() -> AsyncApi:
-    global _api
-    if _api is None:
-        host = normalize_xui_host(settings.XUI_HOST)
-        if settings.XUI_TOKEN:
-            _api = AsyncApi(host, token=settings.XUI_TOKEN, use_tls_verify=True)
+def invalidate_api_cache(node_id: int) -> None:
+    _apis.pop(node_id, None)
+
+
+async def get_api_for_node(node: dict, *, force_new: bool = False) -> AsyncApi:
+    node_id = int(node.get("id") or 0)
+    if force_new:
+        invalidate_api_cache(node_id)
+    if node_id not in _apis:
+        host = normalize_xui_host(node["host"])
+        token = (node.get("token") or "").strip()
+        if token:
+            _apis[node_id] = AsyncApi(host, token=token, use_tls_verify=True)
         else:
-            _api = AsyncApi(
-                host, settings.XUI_USERNAME, settings.XUI_PASSWORD, use_tls_verify=True,
+            api = AsyncApi(
+                host,
+                node.get("username") or "",
+                node.get("password") or "",
+                use_tls_verify=True,
             )
-            await _api.login()
-        logger.info("Connected to 3x-ui at {}", host)
-    return _api
+            await api.login()
+            _apis[node_id] = api
+        logger.info("Connected to 3x-ui [{}] at {}", node.get("name") or node_id, host)
+    return _apis[node_id]
+
+
+async def get_api() -> AsyncApi:
+    try:
+        from db.xui_nodes import get_primary_node
+        primary = await get_primary_node()
+        if primary:
+            return await get_api_for_node(primary)
+    except Exception:
+        pass
+    fallback = {
+        "id": 0,
+        "name": "env",
+        "host": settings.XUI_HOST,
+        "username": settings.XUI_USERNAME or "",
+        "password": settings.XUI_PASSWORD or "",
+        "token": settings.XUI_TOKEN or "",
+    }
+    return await get_api_for_node(fallback)
 
 
 async def _throttle() -> None:
@@ -89,14 +131,11 @@ def _bot_group() -> str:
     return (settings.XUI_CLIENT_GROUP or "").strip()
 
 
-async def ensure_bot_group() -> str:
-    """Один раз при старте бота — не в hot-path оплаты."""
-    global _bot_group_ensured
+async def ensure_bot_group_on_node(api: AsyncApi, node_id: int = 0) -> str:
+    """Создать группу бота на панели ноды (идемпотентно)."""
     group = _bot_group()
-    if not group or _bot_group_ensured:
+    if not group or node_id in _bot_group_ensured:
         return group
-
-    api = await get_api()
     names: set[str] = set()
     url = api.client._url("panel/api/clients/groups")
     await _throttle()
@@ -119,8 +158,20 @@ async def ensure_bot_group() -> str:
             if not _is_not_found_error(e):
                 logger.warning("Не удалось создать группу {}: {}", group, e)
 
-    _bot_group_ensured = True
+    _bot_group_ensured.add(node_id)
     return group
+
+
+async def ensure_bot_group() -> str:
+    """Один раз при старте бота на основной ноде."""
+    api = await get_api()
+    try:
+        from db.xui_nodes import get_primary_node
+        primary = await get_primary_node()
+        node_id = int((primary or {}).get("id") or 0)
+    except Exception:
+        node_id = 0
+    return await ensure_bot_group_on_node(api, node_id)
 
 
 async def _assign_client_group(api: AsyncApi, email: str) -> bool:
@@ -645,7 +696,8 @@ async def provision_client(
             inbound_ids=inbound_ids,
         )
 
-    return email, resolved_sub_id, build_sub_link(resolved_sub_id)
+    sub_link = await build_sub_link(resolved_sub_id)
+    return email, resolved_sub_id, sub_link
 
 
 async def extend_client(
@@ -682,9 +734,7 @@ async def extend_client(
     return new_expiry
 
 
-async def remove_client_everywhere(email: str) -> list[int]:
-    _assert_bot_client_email(email)
-    api = await get_api()
+async def _remove_client_on_panel(api: AsyncApi, email: str) -> list[int]:
     located = await _locate_client_inbounds(api, email, force=False)
     if (
         not located
@@ -700,24 +750,156 @@ async def remove_client_everywhere(email: str) -> list[int]:
     purged = await _ensure_email_absent_on_panel(api, email)
     removed.update(purged)
     await panel_cache.refresh(api, force=True)
-    remaining = panel_cache.locate(email)
-    if remaining:
-        logger.warning(
-            "После удаления {} остался в inbounds {}",
-            email, sorted(remaining.keys()),
-        )
     return sorted(removed)
 
 
-async def disable_client(email: str, inbound_id: Optional[int] = None):
-    api = await get_api()
+async def remove_client_from_secondaries(email: str) -> list[int]:
+    """Удаление tg-клиента только на вторичных нодах."""
+    _assert_bot_client_email(email)
     try:
-        info = await _unified_get_client_info(api, email)
-        if not info:
-            return
-        client, _, _ = info
-        if client.enable:
-            await _unified_update_client(api, client, enable=False)
-            logger.info("Disabled client {}", email)
-    except Exception as e:
-        logger.error("Failed to disable client {}: {}", email, e)
+        from db.xui_nodes import get_secondary_nodes
+        nodes = await get_secondary_nodes(healthy_only=False)
+    except Exception:
+        nodes = []
+    all_removed: list[int] = []
+    for node in nodes:
+        if not node.get("is_enabled", True):
+            continue
+        try:
+            api = await get_api_for_node(node)
+            removed = await _remove_client_on_panel(api, email)
+            all_removed.extend(removed)
+        except Exception as e:
+            logger.error(
+                "Remove {} on secondary node {} failed: {}",
+                email, node.get("id"), e,
+            )
+    return sorted(set(all_removed))
+
+
+async def remove_client_everywhere(email: str) -> list[int]:
+    """Удаление tg-клиента: сначала основная нода, затем вторичные."""
+    _assert_bot_client_email(email)
+    all_removed: list[int] = []
+    try:
+        from db.xui_nodes import get_primary_node
+        primary = await get_primary_node()
+    except Exception:
+        primary = None
+    if primary and primary.get("host"):
+        try:
+            api = await get_api_for_node(primary)
+            all_removed.extend(await _remove_client_on_panel(api, email))
+        except Exception as e:
+            logger.error(
+                "Remove {} on primary node {} failed: {}",
+                email, primary.get("id"), e,
+            )
+    else:
+        api = await get_api()
+        all_removed.extend(await _remove_client_on_panel(api, email))
+    all_removed.extend(await remove_client_from_secondaries(email))
+    return sorted(set(all_removed))
+
+
+async def disable_client(email: str, inbound_id: Optional[int] = None):
+    _assert_bot_client_email(email)
+    try:
+        from db.xui_nodes import list_nodes
+        nodes = await list_nodes(enabled_only=True)
+    except Exception:
+        nodes = []
+    if not nodes:
+        nodes = [{"id": 0}]
+    for node in nodes:
+        try:
+            api = await get_api_for_node(node) if node.get("host") else await get_api()
+            info = await _unified_get_client_info(api, email)
+            if not info:
+                continue
+            client, _, _ = info
+            if client.enable:
+                await _unified_update_client(api, client, enable=False)
+                logger.info("Disabled client {} on node {}", email, node.get("id"))
+        except Exception as e:
+            logger.error("Failed to disable {} on node {}: {}", email, node.get("id"), e)
+
+
+def sub_desired_state_from_db(sub: dict) -> dict:
+    end = datetime.fromisoformat(str(sub["end_date"]).replace("Z", ""))
+    now = datetime.utcnow()
+    traffic_gb = int(sub.get("traffic_limit_gb") or 0)
+    total_gb = traffic_gb * 1024 * 1024 * 1024 if traffic_gb > 0 else 0
+    return {
+        "sub_id": sub.get("sub_id") or "",
+        "expiry_ms": int(end.timestamp() * 1000),
+        "total_gb": total_gb,
+        "enable": bool(sub.get("is_active")) and end > now,
+    }
+
+
+def _client_needs_replica_update(
+    client: Client,
+    *,
+    expiry_ms: int,
+    total_gb: int,
+    sub_id: str,
+    enable: bool,
+) -> bool:
+    if client.enable != enable:
+        return True
+    if abs((client.total_gb or 0) - total_gb) > 1024:
+        return True
+    if _client_needs_update(client, expiry_time=expiry_ms, sub_id=sub_id, enable=enable):
+        return True
+    return False
+
+
+async def replicate_client_on_node(
+    api: AsyncApi,
+    *,
+    node: dict,
+    email: str,
+    sub_id: str,
+    expiry_ms: int,
+    total_gb: int,
+    enable: bool,
+) -> str:
+    from db.xui_nodes import parse_inbound_ids
+
+    _assert_bot_client_email(email)
+    inbound_ids = parse_inbound_ids(node.get("inbound_ids") or "")
+    if not inbound_ids:
+        raise ValueError(f"У ноды {node.get('name')} не заданы inbound_ids")
+
+    info = await _unified_get_client_info(api, email)
+    if info is None:
+        await _unified_add_client(
+            api,
+            email=email,
+            sub_id=sub_id or secrets.token_urlsafe(12)[:16],
+            expiry_time=expiry_ms,
+            total_gb=total_gb,
+            inbound_ids=inbound_ids,
+        )
+        if not enable:
+            ref = await _unified_get_client_info(api, email)
+            if ref:
+                await _unified_update_client(api, ref[0], enable=False)
+        return "created"
+
+    client, _, _ = info
+    if not _client_needs_replica_update(
+        client, expiry_ms=expiry_ms, total_gb=total_gb, sub_id=sub_id, enable=enable,
+    ):
+        return "skipped"
+
+    await _unified_update_client(
+        api,
+        client,
+        expiryTime=expiry_ms,
+        totalGB=total_gb,
+        subId=sub_id or client.sub_id or "",
+        enable=enable,
+    )
+    return "updated"

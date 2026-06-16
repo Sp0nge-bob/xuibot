@@ -738,7 +738,9 @@ async def _show_subscriptions_manage(cb: CallbackQuery, tg_id: int) -> None:
 
     if len(subs) == 1:
         sub = subs[0]
-        sub_link = build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
+        sub_link = (
+            await build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
+        )
         refund_ids = await _pending_refund_ids(tg_id)
         await send_or_edit(
             cb,
@@ -751,10 +753,11 @@ async def _show_subscriptions_manage(cb: CallbackQuery, tg_id: int) -> None:
         )
         return
 
-    sub_links = {
-        sub["id"]: build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
-        for sub in subs
-    }
+    sub_links = {}
+    for sub in subs:
+        sub_links[sub["id"]] = (
+            await build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
+        )
     refund_ids = await _pending_refund_ids(tg_id)
     await send_or_edit(
         cb,
@@ -890,7 +893,7 @@ async def cb_sub_link(cb: CallbackQuery):
         await safe_cb_answer(cb, "Подписка неактивна", show_alert=True)
         return
 
-    link = build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
+    link = await build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
     if not link:
         await safe_cb_answer(cb, "Ссылка недоступна", show_alert=True)
         return

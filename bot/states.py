@@ -11,6 +11,12 @@ class AdminStates(StatesGroup):
     waiting_user_search = State()
     waiting_refund_reply = State()
     waiting_trial_reset = State()
+    waiting_node_name = State()
+    waiting_node_host = State()
+    waiting_node_token = State()
+    waiting_node_login = State()
+    waiting_node_password = State()
+    waiting_node_inbounds = State()
 
 
 class AdminPricingStates(StatesGroup):

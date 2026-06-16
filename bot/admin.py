@@ -8,10 +8,7 @@ from loguru import logger
 
 from config.settings import settings
 from db import database as db
-from db.bot_settings import (
-    get_subscription_inbounds_display,
-    set_subscription_inbound_ids,
-)
+from db import xui_nodes as nodes_db
 from db import promo_codes as promo_db
 from db.plan_prices import set_plan_price
 from services.pricing import list_plans
@@ -35,10 +32,10 @@ from .admin_users import (
     split_connected_users,
     subscription_kind_label,
 )
+from .admin_auth import is_admin
 from .admin_keyboards import (
     admin_menu_kb,
     admin_back_kb,
-    admin_inbounds_kb,
     admin_plans_kb,
     admin_promos_kb,
     admin_promo_detail_kb,
@@ -56,10 +53,6 @@ from .admin_keyboards import (
 from .ui_helpers import safe_cb_answer, send_or_edit
 
 router = Router()
-
-
-def is_admin(user_id: int) -> bool:
-    return user_id in settings.BOT_ADMINS
 
 
 def _user_label(username: str | None, first_name: str | None, tg_id: int) -> str:
@@ -81,13 +74,22 @@ def _admin_stats_block(stats: dict[str, int]) -> str:
 
 
 async def _admin_menu_text() -> str:
-    inbounds = await get_subscription_inbounds_display()
     stats = await db.get_admin_stats()
+    summary = await nodes_db.nodes_summary()
+    primary = await nodes_db.get_primary_node()
+    primary_name = primary["name"] if primary else "—"
+    primary_inbounds = primary.get("inbound_ids") if primary else "—"
+    nodes_line = (
+        f"🖧 Ноды: <b>{summary['total']}</b> "
+        f"(healthy <b>{summary['healthy']}</b>/<b>{summary['enabled']}</b>)"
+    )
     return (
         "🛠 <b>Админ-панель</b>\n"
         "━━━━━━━━━━━━━━━━\n\n"
         f"{_admin_stats_block(stats)}\n\n"
-        f"📡 Инбаунды: <code>{inbounds}</code> · группа: <code>{settings.XUI_CLIENT_GROUP}</code>\n\n"
+        f"{nodes_line}\n"
+        f"★ Основная: <b>{primary_name}</b> · inbounds: <code>{primary_inbounds or '—'}</code>\n"
+        f"Группа 3x-ui: <code>{settings.XUI_CLIENT_GROUP}</code>\n\n"
         "Выберите раздел:"
     )
 
@@ -115,12 +117,15 @@ async def cb_admin_stats(cb: CallbackQuery):
     if not is_admin(cb.from_user.id):
         return
     stats = await db.get_admin_stats()
-    inbounds = await get_subscription_inbounds_display()
+    summary = await nodes_db.nodes_summary()
+    primary = await nodes_db.get_primary_node()
     text = (
         "📊 <b>Статистика</b>\n"
         "━━━━━━━━━━━━━━━━\n\n"
         f"{_admin_stats_block(stats)}\n\n"
-        f"📡 Инбаунды: <code>{inbounds}</code>"
+        f"🖧 Ноды: <b>{summary['total']}</b> · healthy <b>{summary['healthy']}</b>"
+        f"/<b>{summary['enabled']}</b>\n"
+        f"★ Основная: <b>{primary['name'] if primary else '—'}</b>"
     )
     await safe_cb_answer(cb)
     await send_or_edit(cb, text, admin_back_kb())
@@ -510,61 +515,6 @@ async def cb_admin_refund_close(cb: CallbackQuery):
         )
         kb = admin_refunds_kb(rows)
     await send_or_edit(cb, text, kb)
-
-
-@router.callback_query(F.data == "adm:inbounds")
-async def cb_admin_inbounds(cb: CallbackQuery):
-    if not is_admin(cb.from_user.id):
-        return
-    inbounds = await get_subscription_inbounds_display()
-    group = settings.XUI_CLIENT_GROUP or "—"
-    text = (
-        "📡 <b>Инбаунды дефолтной подписки</b>\n"
-        "━━━━━━━━━━━━━━━━\n\n"
-        f"Текущие ID: <code>{inbounds}</code>\n"
-        f"Группа 3x-ui: <code>{group}</code>\n\n"
-        "Клиенты tg* создаются через unified API только в этих инбаундах.\n"
-        "Лишние инбаунды снимаются через detach при покупке, продлении и авто-ремонте."
-    )
-    await safe_cb_answer(cb)
-    await send_or_edit(cb, text, admin_inbounds_kb())
-
-
-@router.callback_query(F.data == "adm:inbounds:edit")
-async def cb_admin_inbounds_edit(cb: CallbackQuery, state: FSMContext):
-    if not is_admin(cb.from_user.id):
-        return
-    await state.set_state(AdminStates.waiting_inbounds)
-    await safe_cb_answer(cb)
-    await send_or_edit(
-        cb,
-        "✏️ <b>Изменение инбаундов</b>\n\n"
-        "Отправьте ID инбаундов через запятую.\n"
-        "Пример: <code>1,16</code>\n\n"
-        "Для отмены: /admin",
-        admin_back_kb(),
-    )
-
-
-@router.message(AdminStates.waiting_inbounds)
-async def msg_set_inbounds(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        return
-    raw = message.text.strip()
-    if not re.fullmatch(r"[\d,\s]+", raw):
-        await message.answer("❌ Неверный формат. Пример: 1,16")
-        return
-    ids = [int(x.strip()) for x in raw.split(",") if x.strip()]
-    if not ids:
-        await message.answer("❌ Укажите хотя бы один ID инбаунда.")
-        return
-    value = await set_subscription_inbound_ids(ids)
-    await state.clear()
-    await message.answer(
-        f"✅ Инбаунды обновлены: <code>{value}</code>\n\n"
-        "Новые покупки и продления будут использовать этот список.",
-        reply_markup=admin_menu_kb(),
-    )
 
 
 @router.callback_query(F.data == "adm:plans")

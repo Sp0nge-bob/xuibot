@@ -18,6 +18,7 @@ from services.xui import (
 )
 
 from services.pricing import apply_promo_on_paid_order
+from services.node_sync import schedule_secondary_sync
 
 
 async def fulfill_paid_order(order: dict) -> Tuple[str, Optional[BufferedInputFile]]:
@@ -68,7 +69,10 @@ async def fulfill_paid_order(order: dict) -> Tuple[str, Optional[BufferedInputFi
                     target_expiry_ms=new_expiry_ms,
                 )
             sub = await db.get_subscription_by_id(existing_sub["id"])
-            sub_link = build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
+            sub_link = (
+                await build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
+            )
+            schedule_secondary_sync(existing_sub["id"])
             title = "Подписка продлена!"
             end_date = new_end_iso[:10]
         else:
@@ -78,7 +82,7 @@ async def fulfill_paid_order(order: dict) -> Tuple[str, Optional[BufferedInputFi
                 traffic_gb=plan["traffic_gb"],
             )
             end_date = (datetime.utcnow() + timedelta(days=plan["days"])).strftime("%Y-%m-%d")
-            await db.create_subscription(
+            sub_db_id = await db.create_subscription(
                 tg_id=tg_id,
                 order_id=order["id"],
                 inbound_id=0,
@@ -88,6 +92,7 @@ async def fulfill_paid_order(order: dict) -> Tuple[str, Optional[BufferedInputFi
                 days=plan["days"],
                 traffic_gb=plan["traffic_gb"],
             )
+            schedule_secondary_sync(sub_db_id)
             title = "Подписка продлена!"
 
         text = _success_text(
@@ -109,7 +114,7 @@ async def fulfill_paid_order(order: dict) -> Tuple[str, Optional[BufferedInputFi
     )
 
     end_date = (datetime.utcnow() + timedelta(days=plan["days"])).strftime("%Y-%m-%d")
-    await db.create_subscription(
+    sub_db_id = await db.create_subscription(
         tg_id=tg_id,
         order_id=order["id"],
         inbound_id=0,
@@ -119,6 +124,7 @@ async def fulfill_paid_order(order: dict) -> Tuple[str, Optional[BufferedInputFi
         days=plan["days"],
         traffic_gb=plan["traffic_gb"],
     )
+    schedule_secondary_sync(sub_db_id)
     text = _success_text(
         title="Оплата прошла успешно!",
         plan=plan,
