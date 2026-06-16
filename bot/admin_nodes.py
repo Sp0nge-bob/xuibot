@@ -7,6 +7,7 @@ from aiogram.types import CallbackQuery, Message
 from loguru import logger
 
 from db import xui_nodes as nodes_db
+from db.bot_settings import set_subscription_inbound_ids
 from services.node_health import check_all_nodes_health, check_node_health
 from services.node_sync import sync_all_secondary_nodes
 from services.xui import normalize_xui_host
@@ -53,8 +54,13 @@ async def nodes_list_text() -> str:
     if dupes > 0:
         lines.append(f"⚠️ Дубликатов в БД: <b>{dupes}</b> — нажмите «Очистить дубликаты»")
         lines.append("")
+    lines.append(
+        "<i>★ Основная — создание клиентов и инбаунды подписки.\n"
+        "Вторичные — синк срока, трафика, enable и удаление.</i>"
+    )
+    lines.append("")
     if not nodes:
-        lines.append("Нод не настроено. Добавьте основную и вторичные.")
+        lines.append("Нод не настроено. Сначала добавьте основную.")
     else:
         lines.append("Краткий список (подробности — по кнопке ноды):")
         for n in nodes[:15]:
@@ -101,7 +107,7 @@ def nodes_list_kb(nodes: list) -> "InlineKeyboardMarkup":
             callback_data="adm:nodes:dedupe",
         )])
     rows += [
-        [InlineKeyboardButton(text="🔄 Синхронизировать вторичные", callback_data="adm:nodes:sync")],
+        [InlineKeyboardButton(text="🔄 Синхронизация нод", callback_data="adm:nodes:sync")],
         [InlineKeyboardButton(text="🩺 Проверить все ноды", callback_data="adm:nodes:health")],
         [InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")],
     ]
@@ -134,21 +140,110 @@ async def node_detail_text(node: dict) -> str:
     checked = (node.get("last_health_check_at") or "—")[:19]
     synced = (node.get("last_sync_at") or "—")[:19]
     err = node.get("last_health_error") or node.get("last_sync_error") or "—"
-    return (
-        f"🖧 <b>{node['name']}</b>\n"
-        "━━━━━━━━━━━━━━━━\n\n"
-        f"Роль: {'★ Основная' if node.get('is_primary') else 'Вторичная'}\n"
-        f"Статус: {_health_icon(node)} "
-        f"{'online' if node.get('is_healthy') else 'offline'}\n"
-        f"Host: <code>{_short_host(node['host'], 64)}</code>\n"
-        f"Inbounds: <code>{node.get('inbound_ids') or '—'}</code>\n"
-        f"Enabled: {'да' if node.get('is_enabled') else 'нет'}\n\n"
-        f"Uptime 24h: <b>{uptime}</b>\n"
-        f"Latency: <b>{node.get('health_latency_ms') or '—'}</b> ms\n"
-        f"Последняя проверка: {checked}\n"
-        f"Последний синк: {synced}\n"
-        f"Ошибка: <code>{str(err)[:200]}</code>"
+    is_primary = bool(node.get("is_primary"))
+    role_hint = (
+        "Создание клиентов, продление, ссылка подписки"
+        if is_primary
+        else "Синхронизация expiry / трафика / enable / удаление"
     )
+    lines = [
+        f"🖧 <b>{node['name']}</b>",
+        "━━━━━━━━━━━━━━━━",
+        "",
+        f"Роль: {'★ Основная' if is_primary else 'Вторичная'}",
+        f"<i>{role_hint}</i>",
+        f"Статус: {_health_icon(node)} "
+        f"{'online' if node.get('is_healthy') else 'offline'}",
+        f"Host: <code>{_short_host(node['host'], 64)}</code>",
+    ]
+    if is_primary:
+        lines.append(f"Inbounds подписки: <code>{node.get('inbound_ids') or '—'}</code>")
+    lines += [
+        f"Enabled: {'да' if node.get('is_enabled') else 'нет'}",
+        "",
+        f"Uptime 24h: <b>{uptime}</b>",
+        f"Latency: <b>{node.get('health_latency_ms') or '—'}</b> ms",
+        f"Последняя проверка: {checked}",
+        f"Последний синк: {synced}",
+        f"Ошибка: <code>{str(err)[:200]}</code>",
+    ]
+    return "\n".join(lines)
+
+
+async def _node_will_be_primary(data: dict) -> bool:
+    edit_id = data.get("node_edit_id")
+    if edit_id:
+        node = await nodes_db.get_node(edit_id)
+        return bool(node and node.get("is_primary"))
+    return await nodes_db.count_nodes() == 0
+
+
+async def _save_node_from_draft(
+    message: Message,
+    state: FSMContext,
+    *,
+    inbound_ids: list[int],
+) -> None:
+    data = await state.get_data()
+    draft = data.get("node_draft") or {}
+    edit_id = data.get("node_edit_id")
+
+    if edit_id:
+        node_before = await nodes_db.get_node(edit_id)
+        await nodes_db.update_node(
+            edit_id,
+            name=draft.get("name"),
+            host=draft.get("host"),
+            username=draft.get("username", ""),
+            password=draft.get("password", ""),
+            token=draft.get("token", ""),
+            inbound_ids=inbound_ids if (node_before or {}).get("is_primary") else [],
+        )
+        if (node_before or {}).get("is_primary") and inbound_ids:
+            await set_subscription_inbound_ids(inbound_ids)
+        node = await nodes_db.get_node(edit_id)
+        await state.clear()
+        await message.answer("✅ Нода обновлена.", reply_markup=node_detail_kb(node))
+        return
+
+    count = await nodes_db.count_nodes()
+    is_primary = count == 0
+    try:
+        node_id = await nodes_db.create_node(
+            name=draft["name"],
+            host=draft["host"],
+            username=draft.get("username", ""),
+            password=draft.get("password", ""),
+            token=draft.get("token", ""),
+            inbound_ids=inbound_ids if is_primary else [],
+            is_primary=is_primary,
+        )
+    except ValueError as e:
+        await message.answer(f"❌ {e}")
+        return
+    if is_primary and inbound_ids:
+        await set_subscription_inbound_ids(inbound_ids)
+    await state.clear()
+    node = await nodes_db.get_node(node_id)
+    await message.answer(
+        f"✅ Нода <b>{node['name']}</b> добавлена"
+        + (" как ★ основная." if is_primary else " как вторичная."),
+        reply_markup=node_detail_kb(node),
+    )
+
+
+async def _proceed_after_node_auth(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    if await _node_will_be_primary(data):
+        await state.set_state(AdminStates.waiting_node_inbounds)
+        await message.answer(
+            "ID инбаундов подписки через запятую\n"
+            "(только ★ основная; на ноды уйдёт через панель):\n"
+            "Пример: <code>1,16</code>",
+            parse_mode="HTML",
+        )
+        return
+    await _save_node_from_draft(message, state, inbound_ids=[])
 
 
 @router.callback_query(F.data == "adm:nodes")
@@ -188,7 +283,10 @@ async def cb_node_add(cb: CallbackQuery, state: FSMContext):
     await safe_cb_answer(cb)
     await send_or_edit(
         cb,
-        "➕ <b>Новая нода</b>\n\nВведите название (например NL, US):",
+        "➕ <b>Новая нода</b>\n\n"
+        "Первая нода станет ★ основной (с инбаундами подписки).\n"
+        "Остальные — вторичные (только синк и удаление).\n\n"
+        "Название (например NL, US):",
     )
 
 
@@ -257,8 +355,7 @@ async def msg_node_token(message: Message, state: FSMContext):
     draft["username"] = ""
     draft["password"] = ""
     await state.update_data(node_draft=draft)
-    await state.set_state(AdminStates.waiting_node_inbounds)
-    await message.answer("ID инбаундов через запятую (на этой панели):")
+    await _proceed_after_node_auth(message, state)
 
 
 @router.message(AdminStates.waiting_node_login)
@@ -279,8 +376,7 @@ async def msg_node_password(message: Message, state: FSMContext):
     draft = (await state.get_data()).get("node_draft") or {}
     draft["password"] = message.text or ""
     await state.update_data(node_draft=draft)
-    await state.set_state(AdminStates.waiting_node_inbounds)
-    await message.answer("ID инбаундов через запятую:")
+    await _proceed_after_node_auth(message, state)
 
 
 @router.message(AdminStates.waiting_node_inbounds)
@@ -296,47 +392,7 @@ async def msg_node_inbounds(message: Message, state: FSMContext):
         await message.answer("Укажите хотя бы один inbound ID.")
         return
 
-    data = await state.get_data()
-    draft = data.get("node_draft") or {}
-    edit_id = data.get("node_edit_id")
-
-    if edit_id:
-        await nodes_db.update_node(
-            edit_id,
-            name=draft.get("name"),
-            host=draft.get("host"),
-            username=draft.get("username", ""),
-            password=draft.get("password", ""),
-            token=draft.get("token", ""),
-            inbound_ids=ids,
-        )
-        node = await nodes_db.get_node(edit_id)
-        await state.clear()
-        await message.answer("✅ Нода обновлена.", reply_markup=node_detail_kb(node))
-        return
-
-    count = await nodes_db.count_nodes()
-    is_primary = count == 0
-    try:
-        node_id = await nodes_db.create_node(
-            name=draft["name"],
-            host=draft["host"],
-            username=draft.get("username", ""),
-            password=draft.get("password", ""),
-            token=draft.get("token", ""),
-            inbound_ids=ids,
-            is_primary=is_primary,
-        )
-    except ValueError as e:
-        await message.answer(f"❌ {e}")
-        return
-    await state.clear()
-    node = await nodes_db.get_node(node_id)
-    await message.answer(
-        f"✅ Нода <b>{node['name']}</b> добавлена"
-        + (" как основная." if is_primary else "."),
-        reply_markup=node_detail_kb(node),
-    )
+    await _save_node_from_draft(message, state, inbound_ids=ids)
 
 
 @router.callback_query(F.data.startswith("adm:node:health:"))
@@ -390,15 +446,22 @@ async def cb_nodes_sync(cb: CallbackQuery):
     if not is_admin(cb.from_user.id):
         return
     await safe_cb_answer(cb, "Синхронизация…")
-    await send_or_edit(cb, "⏳ Синхронизация вторичных нод…")
+    await send_or_edit(cb, "⏳ Синхронизация…\n1/2 БД ↔ основная\n2/2 Основная ↔ вторичные")
     try:
         stats = await sync_all_secondary_nodes()
         text = (
             "✅ <b>Синхронизация завершена</b>\n\n"
+            f"<b>Фаза 1</b> (БД → основная)\n"
             f"Подписок: {stats['subs']}\n"
+            f"Создано: {stats.get('primary_created', 0)}\n"
+            f"Обновлено: {stats.get('primary_updated', 0)}\n"
+            f"Ошибок: {stats.get('primary_failed', 0)}\n\n"
+            f"<b>Фаза 2</b> (основная → вторичные)\n"
             f"Нод: {stats['nodes']}\n"
-            f"Успешно: {stats['ok']}\n"
-            f"Ошибок: {stats['failed']}"
+            f"Синхронизировано: {stats['ok']}\n"
+            f"Удалено лишних tg: {stats.get('purged', 0)}\n"
+            f"Нет на ноде (ожидается sync панели): {stats.get('secondary_missing', 0)}\n"
+            f"Ошибок: {stats.get('secondary_failed', 0)}"
         )
     except Exception as e:
         logger.exception("Manual sync failed: {}", e)
@@ -412,8 +475,8 @@ async def cb_node_set_primary(cb: CallbackQuery):
     if not is_admin(cb.from_user.id):
         return
     node_id = int(cb.data.split(":")[3])
-    ok = await nodes_db.set_primary_node(node_id)
-    await safe_cb_answer(cb, "Основная нода обновлена" if ok else "Ошибка")
+    ok, msg = await nodes_db.set_primary_node(node_id)
+    await safe_cb_answer(cb, "Основная нода обновлена" if ok else msg, show_alert=not ok)
     nodes = await nodes_db.list_nodes()
     await send_or_edit(cb, await nodes_list_text(), nodes_list_kb(nodes))
 

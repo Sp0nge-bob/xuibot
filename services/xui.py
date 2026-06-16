@@ -751,6 +751,24 @@ async def extend_client(
     return new_expiry
 
 
+async def list_bot_client_emails_on_panel(api: AsyncApi) -> set[str]:
+    """Все tg/tgfree клиенты бота на панели (по settings инбаундов)."""
+    panel_cache.invalidate()
+    inbounds = await panel_cache.refresh(api, force=True)
+    emails: set[str] = set()
+    for inbound in inbounds:
+        for client in inbound.settings.clients or []:
+            email = (client.email or "").strip()
+            if is_bot_client_email(email):
+                emails.add(email.lower())
+    return emails
+
+
+async def remove_bot_client_on_panel(api: AsyncApi, email: str) -> list[int]:
+    """Удалить tg-клиента с панели (unified del + settings purge)."""
+    return await _remove_client_on_node(api, email, inbound_ids=None)
+
+
 async def _remove_client_on_node(
     api: AsyncApi,
     email: str,
@@ -797,7 +815,7 @@ async def remove_client_from_secondaries(
     skip_hosts: set[str] | None = None,
 ) -> list[int]:
     """Удаление tg-клиента только на вторичных нодах (без дублей host)."""
-    from db.xui_nodes import get_secondary_nodes, parse_inbound_ids
+    from db.xui_nodes import get_secondary_nodes
 
     _assert_bot_client_email(email)
     try:
@@ -817,10 +835,7 @@ async def remove_client_from_secondaries(
             continue
         try:
             api = await get_api_for_node(node)
-            inbound_ids = parse_inbound_ids(node.get("inbound_ids") or "")
-            removed = await _remove_client_on_node(
-                api, email, inbound_ids=inbound_ids or None,
-            )
+            removed = await _remove_client_on_node(api, email, inbound_ids=None)
             all_removed.extend(removed)
             logger.info(
                 "Removed {} from secondary {} ({}) inbounds {}",
@@ -925,7 +940,7 @@ def _client_needs_replica_update(
     return False
 
 
-async def replicate_client_on_node(
+async def sync_client_state_on_node(
     api: AsyncApi,
     *,
     node: dict,
@@ -935,28 +950,18 @@ async def replicate_client_on_node(
     total_gb: int,
     enable: bool,
 ) -> str:
-    from db.xui_nodes import parse_inbound_ids
-
+    """
+    Вторичная нода: только синхронизация существующего клиента.
+    Создание — только на основной (inboundIds из админки); на ноды уходит через панель.
+    """
     _assert_bot_client_email(email)
-    inbound_ids = parse_inbound_ids(node.get("inbound_ids") or "")
-    if not inbound_ids:
-        raise ValueError(f"У ноды {node.get('name')} не заданы inbound_ids")
-
     info = await _unified_get_client_info(api, email)
     if info is None:
-        await _unified_add_client(
-            api,
-            email=email,
-            sub_id=sub_id or secrets.token_urlsafe(12)[:16],
-            expiry_time=expiry_ms,
-            total_gb=total_gb,
-            inbound_ids=inbound_ids,
+        logger.debug(
+            "Клиент {} отсутствует на вторичной {} — пропуск (ожидается sync с основной)",
+            email, node.get("name"),
         )
-        if not enable:
-            ref = await _unified_get_client_info(api, email)
-            if ref:
-                await _unified_update_client(api, ref[0], enable=False)
-        return "created"
+        return "missing"
 
     client, _, _ = info
     if not _client_needs_replica_update(
@@ -973,3 +978,7 @@ async def replicate_client_on_node(
         enable=enable,
     )
     return "updated"
+
+
+# обратная совместимость для импортов
+replicate_client_on_node = sync_client_state_on_node

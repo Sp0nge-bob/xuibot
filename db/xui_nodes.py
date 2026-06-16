@@ -271,12 +271,15 @@ async def create_node(
     username: str = "",
     password: str = "",
     token: str = "",
-    inbound_ids: list[int],
+    inbound_ids: list[int] | None = None,
     is_primary: bool = False,
     is_enabled: bool = True,
 ) -> int:
     await _ensure_init()
     host = host.strip()
+    ids = inbound_ids or []
+    if is_primary and not ids:
+        raise ValueError("Для основной ноды укажите inbound IDs подписки")
     if await get_node_by_host(host):
         raise ValueError("Нода с таким host уже зарегистрирована")
     async with aiosqlite.connect(DB_PATH) as db:
@@ -293,7 +296,7 @@ async def create_node(
                 username,
                 password,
                 token,
-                format_inbound_ids(inbound_ids),
+                format_inbound_ids(ids),
                 int(is_primary),
                 int(is_enabled),
                 await _count_nodes(),
@@ -333,15 +336,24 @@ async def update_node(node_id: int, **fields: Any) -> bool:
         return True
 
 
-async def set_primary_node(node_id: int) -> bool:
+async def set_primary_node(node_id: int) -> tuple[bool, str]:
     await _ensure_init()
+    node = await get_node(node_id)
+    if not node:
+        return False, "Нода не найдена"
+    if not parse_inbound_ids(node.get("inbound_ids") or ""):
+        return False, "Сначала укажите inbound IDs подписки на этой ноде (редактирование)"
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("UPDATE xui_nodes SET is_primary = 0")
         cursor = await db.execute(
             "UPDATE xui_nodes SET is_primary = 1 WHERE id = ?", (node_id,),
         )
         await db.commit()
-        return cursor.rowcount > 0
+    if cursor.rowcount > 0:
+        from db.bot_settings import set_subscription_inbound_ids
+        await set_subscription_inbound_ids(parse_inbound_ids(node["inbound_ids"]))
+        return True, ""
+    return False, "Не удалось назначить основную"
 
 
 async def delete_node(node_id: int) -> tuple[bool, str]:

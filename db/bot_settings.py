@@ -57,6 +57,7 @@ async def get_subscription_inbound_ids_from_settings() -> List[int]:
 
 
 async def get_subscription_inbound_ids() -> List[int]:
+    """Инбаунды подписки — только с ★ основной ноды (админка), иначе bot_settings / .env."""
     try:
         from db.xui_nodes import get_primary_inbound_ids
         primary_ids = await get_primary_inbound_ids()
