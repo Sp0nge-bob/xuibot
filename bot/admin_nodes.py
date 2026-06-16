@@ -46,14 +46,18 @@ async def nodes_list_text() -> str:
         "",
         f"Всего: <b>{summary['total']}</b> · healthy: <b>{summary['healthy']}</b>"
         f" / <b>{summary['enabled']}</b>",
-        f"Основная: <b>{summary.get('primary', 0)}</b> · вторичные: <b>{summary.get('secondary', 0)}</b>",
+        f"Уникальных панелей: <b>{summary.get('unique_hosts', summary['total'])}</b>",
         "",
     ]
+    dupes = summary["total"] - summary.get("unique_hosts", summary["total"])
+    if dupes > 0:
+        lines.append(f"⚠️ Дубликатов в БД: <b>{dupes}</b> — нажмите «Очистить дубликаты»")
+        lines.append("")
     if not nodes:
         lines.append("Нод не настроено. Добавьте основную и вторичные.")
     else:
         lines.append("Краткий список (подробности — по кнопке ноды):")
-        for n in nodes[:30]:
+        for n in nodes[:15]:
             primary = " ★" if n.get("is_primary") else ""
             uptime = await _uptime_str(n["id"])
             status = _health_icon(n)
@@ -61,21 +65,40 @@ async def nodes_list_text() -> str:
                 f"{status} <b>{n['name']}</b>{primary} · {uptime} · "
                 f"<code>{_short_host(n['host'], 28)}</code>"
             )
-        if len(nodes) > 30:
-            lines.append(f"… и ещё <b>{len(nodes) - 30}</b> (см. кнопки ниже)")
+        if len(nodes) > 15:
+            lines.append(f"… и ещё <b>{len(nodes) - 15}</b> записей в БД")
     return "\n".join(lines)
+
+
+_NODES_KB_LIMIT = 12
 
 
 def nodes_list_kb(nodes: list) -> "InlineKeyboardMarkup":
     from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
     rows = [[InlineKeyboardButton(text="➕ Добавить ноду", callback_data="adm:node:add")]]
+    shown = 0
+    seen_hosts: set[str] = set()
     for n in nodes:
+        if shown >= _NODES_KB_LIMIT:
+            break
+        host_key = nodes_db.normalize_node_host(n.get("host") or "")
+        if host_key in seen_hosts:
+            continue
+        seen_hosts.add(host_key)
         icon = _health_icon(n)
         primary = "★ " if n.get("is_primary") else ""
         rows.append([InlineKeyboardButton(
             text=f"{icon} {primary}{n['name']}",
             callback_data=f"adm:node:{n['id']}",
+        )])
+        shown += 1
+    unique_hosts = len({nodes_db.normalize_node_host(n.get("host") or "") for n in nodes if n.get("host")})
+    dupes = len(nodes) - unique_hosts
+    if dupes > 0:
+        rows.append([InlineKeyboardButton(
+            text=f"🧹 Очистить дубликаты ({dupes})",
+            callback_data="adm:nodes:dedupe",
         )])
     rows += [
         [InlineKeyboardButton(text="🔄 Синхронизировать вторичные", callback_data="adm:nodes:sync")],
@@ -294,15 +317,19 @@ async def msg_node_inbounds(message: Message, state: FSMContext):
 
     count = await nodes_db.count_nodes()
     is_primary = count == 0
-    node_id = await nodes_db.create_node(
-        name=draft["name"],
-        host=draft["host"],
-        username=draft.get("username", ""),
-        password=draft.get("password", ""),
-        token=draft.get("token", ""),
-        inbound_ids=ids,
-        is_primary=is_primary,
-    )
+    try:
+        node_id = await nodes_db.create_node(
+            name=draft["name"],
+            host=draft["host"],
+            username=draft.get("username", ""),
+            password=draft.get("password", ""),
+            token=draft.get("token", ""),
+            inbound_ids=ids,
+            is_primary=is_primary,
+        )
+    except ValueError as e:
+        await message.answer(f"❌ {e}")
+        return
     await state.clear()
     node = await nodes_db.get_node(node_id)
     await message.answer(
@@ -330,6 +357,22 @@ async def cb_node_health(cb: CallbackQuery):
         await node_detail_text(node) + f"\n\n🩺 Проверка: <b>{status}</b>",
         node_detail_kb(node),
     )
+
+
+@router.callback_query(F.data == "adm:nodes:dedupe")
+async def cb_nodes_dedupe(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    await safe_cb_answer(cb, "Очищаем дубликаты…")
+    stats = await nodes_db.dedupe_nodes()
+    nodes = await nodes_db.list_nodes()
+    text = (
+        "🧹 <b>Дубликаты очищены</b>\n\n"
+        f"Было записей: <b>{stats['before']}</b>\n"
+        f"Удалено: <b>{stats['removed']}</b>\n"
+        f"Осталось: <b>{stats['after']}</b>"
+    )
+    await send_or_edit(cb, text, nodes_list_kb(nodes))
 
 
 @router.callback_query(F.data == "adm:nodes:health")

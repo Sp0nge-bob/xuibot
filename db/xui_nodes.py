@@ -21,6 +21,79 @@ def format_inbound_ids(ids: list[int]) -> str:
     return ",".join(str(x) for x in ids)
 
 
+def normalize_node_host(host: str) -> str:
+    h = (host or "").strip().rstrip("/")
+    if h.endswith("/panel"):
+        h = h[: -len("/panel")]
+    return h.lower()
+
+
+async def _ensure_single_primary() -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT id FROM xui_nodes ORDER BY is_primary DESC, id ASC LIMIT 1"
+        ) as cur:
+            row = await cur.fetchone()
+        if not row:
+            return
+        keep_id = row[0]
+        await db.execute("UPDATE xui_nodes SET is_primary = 0")
+        await db.execute("UPDATE xui_nodes SET is_primary = 1 WHERE id = ?", (keep_id,))
+        await db.commit()
+
+
+async def dedupe_nodes() -> dict[str, int]:
+    """Одна запись на host, одна primary. Удаляет дубликаты и health_checks."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM xui_nodes ORDER BY id") as cur:
+            rows = [dict(r) for r in await cur.fetchall()]
+
+    before = len(rows)
+    if before <= 1:
+        await _ensure_single_primary()
+        return {"before": before, "after": before, "removed": 0}
+
+    by_host: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        key = normalize_node_host(row.get("host") or "")
+        if not key:
+            key = f"__id_{row['id']}"
+        by_host.setdefault(key, []).append(row)
+
+    keep_ids: list[int] = []
+    remove_ids: list[int] = []
+    for group in by_host.values():
+        group.sort(
+            key=lambda r: (
+                -int(r.get("is_primary") or 0),
+                -(1 if (r.get("token") or "").strip() else 0),
+                r["id"],
+            ),
+        )
+        keep_ids.append(group[0]["id"])
+        remove_ids.extend(r["id"] for r in group[1:])
+
+    if remove_ids:
+        async with aiosqlite.connect(DB_PATH) as db:
+            for rid in remove_ids:
+                await db.execute(
+                    "DELETE FROM node_health_checks WHERE node_id = ?", (rid,),
+                )
+                await db.execute("DELETE FROM xui_nodes WHERE id = ?", (rid,))
+            await db.commit()
+            for rid in remove_ids:
+                try:
+                    from services.xui import invalidate_api_cache
+                    invalidate_api_cache(rid)
+                except Exception:
+                    pass
+
+    await _ensure_single_primary()
+    after = before - len(remove_ids)
+    return {"before": before, "after": after, "removed": len(remove_ids)}
+
+
 async def init_xui_nodes() -> None:
     global _INIT_DONE, _INIT_IN_PROGRESS
     if _INIT_DONE:
@@ -78,6 +151,14 @@ async def _init_xui_nodes_impl() -> None:
     count = await _count_nodes()
     if count == 0:
         await _migrate_primary_from_env()
+    else:
+        stats = await dedupe_nodes()
+        if stats["removed"]:
+            from loguru import logger
+            logger.warning(
+                "xui_nodes: удалено {} дубликатов (было {}, осталось {})",
+                stats["removed"], stats["before"], stats["after"],
+            )
 
 
 async def _ensure_init() -> None:
@@ -121,6 +202,17 @@ async def list_nodes(*, enabled_only: bool = False) -> list[dict[str, Any]]:
         db.row_factory = aiosqlite.Row
         async with db.execute(sql) as cur:
             return [dict(r) for r in await cur.fetchall()]
+
+
+async def get_node_by_host(host: str) -> Optional[dict[str, Any]]:
+    await _ensure_init()
+    key = normalize_node_host(host)
+    if not key:
+        return None
+    for node in await list_nodes():
+        if normalize_node_host(node.get("host") or "") == key:
+            return node
+    return None
 
 
 async def get_node(node_id: int) -> Optional[dict[str, Any]]:
@@ -184,6 +276,9 @@ async def create_node(
     is_enabled: bool = True,
 ) -> int:
     await _ensure_init()
+    host = host.strip()
+    if await get_node_by_host(host):
+        raise ValueError("Нода с таким host уже зарегистрирована")
     async with aiosqlite.connect(DB_PATH) as db:
         if is_primary:
             await db.execute("UPDATE xui_nodes SET is_primary = 0")
@@ -210,6 +305,10 @@ async def create_node(
 
 async def update_node(node_id: int, **fields: Any) -> bool:
     await _ensure_init()
+    if "host" in fields:
+        other = await get_node_by_host(str(fields["host"]))
+        if other and other["id"] != node_id:
+            raise ValueError("Нода с таким host уже существует")
     allowed = {
         "name", "host", "username", "password", "token", "inbound_ids",
         "is_enabled", "sort_order", "last_sync_at", "last_sync_error",
@@ -328,8 +427,10 @@ async def get_uptime_24h(node_id: int) -> Optional[float]:
 async def nodes_summary() -> dict[str, int]:
     nodes = await list_nodes()
     enabled = [n for n in nodes if n.get("is_enabled")]
+    unique_hosts = len({normalize_node_host(n.get("host") or "") for n in nodes if n.get("host")})
     return {
         "total": len(nodes),
+        "unique_hosts": unique_hosts,
         "enabled": len(enabled),
         "primary": sum(1 for n in nodes if n.get("is_primary")),
         "secondary": sum(1 for n in nodes if not n.get("is_primary")),
