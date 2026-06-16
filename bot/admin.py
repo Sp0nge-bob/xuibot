@@ -19,9 +19,11 @@ from .messages import (
     admin_promos_text,
     admin_promo_detail_text,
     admin_trial_menu_text,
+    admin_trial_reset_all_confirm_text,
     admin_trial_reset_confirm_text,
 )
-from services.trial import admin_reset_trial
+from config.trial import is_trial_email
+from services.trial import admin_reset_all_trial_subscriptions, admin_reset_trial
 from .states import AdminPricingStates, AdminStates
 from .refund_chat import format_refund_chat_history, store_and_deliver_refund_message
 from services.subscription_admin import admin_delete_subscription
@@ -48,6 +50,7 @@ from .admin_keyboards import (
     admin_refund_detail_kb,
     admin_refund_chat_kb,
     admin_trial_kb,
+    admin_trial_reset_all_confirm_kb,
     admin_trial_reset_confirm_kb,
 )
 from .ui_helpers import safe_cb_answer, send_or_edit
@@ -780,14 +783,75 @@ async def cb_admin_promo_delete(cb: CallbackQuery):
     await send_or_edit(cb, admin_promos_text(promos), admin_promos_kb(promos))
 
 
+async def _active_trial_count() -> int:
+    subs = await db.get_all_active_subscriptions()
+    return sum(1 for s in subs if is_trial_email(s.get("client_email")))
+
+
 @router.callback_query(F.data == "adm:trial")
 async def cb_admin_trial_menu(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
         return
     await state.set_state(None)
     grants = await trial_db.list_recent_trial_grants()
+    trial_count = await _active_trial_count()
     await safe_cb_answer(cb)
-    await send_or_edit(cb, admin_trial_menu_text(grants), admin_trial_kb(grants))
+    await send_or_edit(
+        cb,
+        admin_trial_menu_text(grants),
+        admin_trial_kb(grants, trial_count=trial_count),
+    )
+
+
+@router.callback_query(F.data == "adm:trial:reset_all")
+async def cb_admin_trial_reset_all_confirm(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    trial_count = await _active_trial_count()
+    grants_count = await trial_db.count_trial_grants()
+    await safe_cb_answer(cb)
+    await send_or_edit(
+        cb,
+        admin_trial_reset_all_confirm_text(
+            trial_count=trial_count,
+            grants_count=grants_count,
+        ),
+        admin_trial_reset_all_confirm_kb(),
+    )
+
+
+@router.callback_query(F.data == "adm:trial:reset_all:confirm")
+async def cb_admin_trial_reset_all(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    await safe_cb_answer(cb, "Сбрасываем все пробные…")
+    await send_or_edit(cb, "⏳ Сброс всех пробных подписок…")
+    try:
+        result = await admin_reset_all_trial_subscriptions()
+    except Exception as e:
+        logger.exception("Bulk trial reset error: {}", e)
+        await send_or_edit(
+            cb,
+            f"❌ Ошибка: <code>{str(e)[:120]}</code>",
+            admin_back_kb(),
+        )
+        return
+
+    removed = result.get("removed_trials") or []
+    errors = result.get("errors") or []
+    text = (
+        "✅ <b>Сброс всех пробных завершён</b>\n\n"
+        f"Снято подписок: <b>{len(removed)}</b>\n"
+        f"Сброшено лимитов (grants): <b>{result.get('grants_deleted', 0)}</b>\n"
+        f"Ошибок: <b>{len(errors)}</b>"
+    )
+    if errors:
+        text += "\n\n" + "\n".join(
+            f"• #{e.get('subscription_id')} <code>{e.get('email')}</code>"
+            for e in errors[:5]
+        )
+    grants = await trial_db.list_recent_trial_grants()
+    await send_or_edit(cb, text, admin_trial_kb(grants, trial_count=0))
 
 
 @router.callback_query(F.data == "adm:trial:search")
@@ -866,4 +930,10 @@ async def cb_admin_trial_reset(cb: CallbackQuery):
         f"Снято с панели: {removed_text}\n\n"
         "Пользователь может снова взять пробный период."
     )
-    await send_or_edit(cb, text, admin_trial_kb(await trial_db.list_recent_trial_grants()))
+    await send_or_edit(
+        cb, text,
+        admin_trial_kb(
+            await trial_db.list_recent_trial_grants(),
+            trial_count=await _active_trial_count(),
+        ),
+    )

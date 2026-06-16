@@ -642,6 +642,40 @@ def _needs_sync(
     return False
 
 
+async def get_missing_required_inbounds(api: AsyncApi, email: str) -> list[int]:
+    """Инбаунды подписки, которых нет ни в settings, ни в unified inboundIds."""
+    inbound_ids = await get_subscription_inbound_ids()
+    if not inbound_ids:
+        return []
+    missing: set[int] = set()
+    located = await _locate_client_inbounds(api, email, force=True)
+    for ib in inbound_ids:
+        if ib not in located:
+            missing.add(ib)
+    info = await _unified_get_client_info(api, email)
+    if info:
+        _, present_ids, _ = info
+        present = set(present_ids or [])
+        for ib in inbound_ids:
+            if ib not in present:
+                missing.add(ib)
+    return sorted(missing)
+
+
+async def try_attach_missing_inbounds(api: AsyncApi, email: str) -> list[int]:
+    """Одна попытка attach; возвращает inbounds, которые всё ещё отсутствуют."""
+    missing = await get_missing_required_inbounds(api, email)
+    if not missing:
+        return []
+    try:
+        await _unified_attach(api, email, missing)
+        await asyncio.sleep(0.3)
+        panel_cache.invalidate()
+    except Exception as e:
+        logger.warning("clients/attach {} → {}: {}", email, missing, e)
+    return await get_missing_required_inbounds(api, email)
+
+
 async def audit_client_inbounds(email: str) -> dict:
     api = await get_api()
     inbound_ids = await get_subscription_inbound_ids()

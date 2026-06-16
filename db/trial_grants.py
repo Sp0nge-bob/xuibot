@@ -98,6 +98,23 @@ async def reset_trial_eligibility(tg_id: int) -> int:
         return cursor.rowcount
 
 
+async def reset_all_trial_grants() -> int:
+    """Полный сброс лимитов пробного периода для всех пользователей."""
+    await _ensure_init()
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("DELETE FROM trial_grants")
+        await db.commit()
+        return cursor.rowcount
+
+
+async def count_trial_grants() -> int:
+    await _ensure_init()
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT COUNT(*) FROM trial_grants") as cur:
+            row = await cur.fetchone()
+            return int(row[0] if row else 0)
+
+
 async def list_recent_trial_grants(limit: int = 15) -> List[Dict[str, Any]]:
     await _ensure_init()
     async with aiosqlite.connect(DB_PATH) as db:

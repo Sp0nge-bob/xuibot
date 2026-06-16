@@ -15,7 +15,7 @@ from db import database as db
 from db import trial_grants as trial_db
 from services.fulfillment import make_qr_photo
 from services.node_sync import schedule_secondary_sync
-from services.subscription_admin import admin_reset_trial_for_user
+from services.subscription_admin import admin_reset_all_trials, admin_reset_trial_for_user
 from services.xui import provision_client
 
 
@@ -75,3 +75,7 @@ async def claim_trial(tg_id: int) -> Tuple[str, Optional[BufferedInputFile]]:
 
 async def admin_reset_trial(tg_id: int) -> dict:
     return await admin_reset_trial_for_user(tg_id)
+
+
+async def admin_reset_all_trial_subscriptions() -> dict:
+    return await admin_reset_all_trials()

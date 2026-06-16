@@ -21,9 +21,27 @@ from services.xui import (
     list_bot_client_emails_on_panel,
     provision_client,
     remove_bot_client_on_panel,
+    remove_client_everywhere,
     sub_desired_state_from_db,
     sync_client_state_on_node,
+    try_attach_missing_inbounds,
 )
+
+
+async def _recreate_subscription_on_primary(sub: dict[str, Any]) -> None:
+    """Полное удаление на всех нодах и создание заново на основной."""
+    state = sub_desired_state_from_db(sub)
+    email = sub["client_email"]
+    traffic_gb = int(sub.get("traffic_limit_gb") or 0)
+    await remove_client_everywhere(email)
+    await provision_client(
+        tg_id=sub["tg_id"],
+        plan_days=1,
+        traffic_gb=traffic_gb,
+        sub_id=sub.get("sub_id"),
+        target_expiry_ms=state["expiry_ms"],
+        client_email=email,
+    )
 
 
 async def ensure_subscription_on_primary(sub: dict[str, Any]) -> str:
@@ -46,6 +64,20 @@ async def ensure_subscription_on_primary(sub: dict[str, Any]) -> str:
         )
         logger.info("Sync primary: создан {} из БД", email)
         return "created"
+
+    still_missing = await try_attach_missing_inbounds(api, email)
+    if still_missing:
+        logger.warning(
+            "Sync primary: {} не хватает inbounds {} — удаление на всех нодах и пересоздание",
+            email, still_missing,
+        )
+        await _recreate_subscription_on_primary(sub)
+        return "recreated"
+
+    info = await _unified_get_client_info(api, email)
+    if info is None:
+        await _recreate_subscription_on_primary(sub)
+        return "recreated"
 
     client, _, _ = info
     if _client_needs_replica_update(
@@ -94,7 +126,10 @@ async def sync_subscription_to_node(sub: dict[str, Any], node: dict[str, Any]) -
 
 
 async def _sync_primary_from_db(subs: list[dict[str, Any]]) -> dict[str, int]:
-    stats = {"subs": len(subs), "created": 0, "updated": 0, "skipped": 0, "failed": 0}
+    stats = {
+        "subs": len(subs), "created": 0, "updated": 0,
+        "recreated": 0, "skipped": 0, "failed": 0,
+    }
     sem = asyncio.Semaphore(settings.XUI_PANEL_CONCURRENCY)
 
     async def _one(sub: dict) -> None:
@@ -220,9 +255,9 @@ async def run_full_nodes_sync() -> dict[str, Any]:
     phase2 = await _sync_secondaries_vs_primary(subs)
 
     logger.info(
-        "Full nodes sync done: primary created={} updated={} failed={}; "
+        "Full nodes sync done: primary created={} updated={} recreated={} failed={}; "
         "secondary purged={} synced={} failed={}",
-        phase1["created"], phase1["updated"], phase1["failed"],
+        phase1["created"], phase1["updated"], phase1.get("recreated", 0), phase1["failed"],
         phase2["purged"], phase2["synced"], phase2["failed"],
     )
     return {"phase1": phase1, "phase2": phase2}
@@ -239,6 +274,7 @@ async def sync_all_secondary_nodes() -> dict[str, int]:
         "failed": p1["failed"] + p2["failed"],
         "primary_created": p1["created"],
         "primary_updated": p1["updated"],
+        "primary_recreated": p1.get("recreated", 0),
         "primary_failed": p1["failed"],
         "secondary_failed": p2["failed"],
         "purged": p2["purged"],

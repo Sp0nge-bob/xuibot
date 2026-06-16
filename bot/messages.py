@@ -285,6 +285,20 @@ def admin_trial_menu_text(grants: list) -> str:
     return "\n".join(lines)
 
 
+def admin_trial_reset_all_confirm_text(*, trial_count: int, grants_count: int) -> str:
+    return (
+        "🗑 <b>Сброс всех пробных подписок</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        f"Активных пробных подписок: <b>{trial_count}</b>\n"
+        f"Записей о выдаче (лимит 90 дн.): <b>{grants_count}</b>\n\n"
+        "Будет выполнено:\n"
+        "• удаление tgfree* с панели на всех нодах\n"
+        "• деактивация пробных подписок в БД\n"
+        "• сброс лимита пробного периода для всех\n\n"
+        "Продолжить?"
+    )
+
+
 def admin_trial_reset_confirm_text(tg_id: int, label: str) -> str:
     return (
         "🔄 <b>Сброс пробного периода</b>\n"

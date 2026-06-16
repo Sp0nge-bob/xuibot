@@ -594,6 +594,7 @@ async def cb_nodes_sync(cb: CallbackQuery):
             f"Подписок: {stats['subs']}\n"
             f"Создано: {stats.get('primary_created', 0)}\n"
             f"Обновлено: {stats.get('primary_updated', 0)}\n"
+            f"Пересоздано (inbounds): {stats.get('primary_recreated', 0)}\n"
             f"Ошибок: {stats.get('primary_failed', 0)}\n\n"
             f"<b>Фаза 2</b> (основная → вторичные)\n"
             f"Нод: {stats['nodes']}\n"

@@ -33,6 +33,46 @@ async def admin_delete_subscription(subscription_id: int) -> dict[str, Any]:
     }
 
 
+async def admin_reset_all_trials() -> dict[str, Any]:
+    """Сброс всех активных пробных подписок и лимитов выдачи."""
+    subs = await db.get_all_active_subscriptions()
+    trial_subs = [s for s in subs if is_trial_email(s.get("client_email"))]
+    removed_trials: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+
+    for sub in trial_subs:
+        email = sub["client_email"]
+        try:
+            removed = await remove_client_everywhere(email)
+            await db.deactivate_subscription(sub["id"])
+            await db.cancel_refund_requests_for_subscription(sub["id"])
+            removed_trials.append({
+                "subscription_id": sub["id"],
+                "tg_id": sub["tg_id"],
+                "email": email,
+                "removed_inbounds": removed,
+            })
+        except Exception as e:
+            logger.error("Bulk trial reset failed for #{} ({}): {}", sub["id"], email, e)
+            errors.append({
+                "subscription_id": sub["id"],
+                "tg_id": sub["tg_id"],
+                "email": email,
+                "error": str(e)[:200],
+            })
+
+    grants_deleted = await trial_db.reset_all_trial_grants()
+    logger.info(
+        "Admin reset ALL trials: removed={}, errors={}, grants_deleted={}",
+        len(removed_trials), len(errors), grants_deleted,
+    )
+    return {
+        "removed_trials": removed_trials,
+        "errors": errors,
+        "grants_deleted": grants_deleted,
+    }
+
+
 async def admin_reset_trial_for_user(tg_id: int) -> dict[str, Any]:
     """Сброс лимита пробного периода и деактивация активной пробной подписки."""
     removed_trials: list[dict[str, Any]] = []

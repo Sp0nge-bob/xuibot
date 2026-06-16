@@ -200,10 +200,25 @@ def admin_refund_detail_kb(refund_id: int) -> InlineKeyboardMarkup:
     ])
 
 
-def admin_trial_kb(grants: list) -> InlineKeyboardMarkup:
+def admin_trial_reset_all_confirm_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="⚠️ Подтвердить сброс всех",
+            callback_data="adm:trial:reset_all:confirm",
+        )],
+        [InlineKeyboardButton(text="« Отмена", callback_data="adm:trial")],
+    ])
+
+
+def admin_trial_kb(grants: list, *, trial_count: int = 0) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="🔍 Сброс по TG ID", callback_data="adm:trial:search")],
     ]
+    if trial_count > 0:
+        rows.append([InlineKeyboardButton(
+            text=f"🗑 Сбросить все пробные ({trial_count})",
+            callback_data="adm:trial:reset_all",
+        )])
     for g in grants[:8]:
         label = g.get("username") or g.get("first_name") or str(g["tg_id"])
         if len(label) > 16:
