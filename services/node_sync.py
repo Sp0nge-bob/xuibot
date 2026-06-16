@@ -10,6 +10,7 @@ from loguru import logger
 from config.settings import settings
 from db import database as db
 from db import xui_nodes as nodes_db
+from services.panel_cache import panel_cache
 from services.xui import (
     _client_needs_replica_update,
     _dedupe_nodes_by_host,
@@ -21,10 +22,10 @@ from services.xui import (
     list_bot_client_emails_on_panel,
     provision_client,
     remove_bot_client_on_panel,
-    remove_client_everywhere,
+    get_missing_required_inbounds,
+    remove_client_for_recreate,
     sub_desired_state_from_db,
     sync_client_state_on_node,
-    try_attach_missing_inbounds,
 )
 
 
@@ -33,7 +34,8 @@ async def _recreate_subscription_on_primary(sub: dict[str, Any]) -> None:
     state = sub_desired_state_from_db(sub)
     email = sub["client_email"]
     traffic_gb = int(sub.get("traffic_limit_gb") or 0)
-    await remove_client_everywhere(email)
+    await remove_client_for_recreate(email)
+    await asyncio.sleep(0.5)
     await provision_client(
         tg_id=sub["tg_id"],
         plan_days=1,
@@ -65,13 +67,22 @@ async def ensure_subscription_on_primary(sub: dict[str, Any]) -> str:
         logger.info("Sync primary: создан {} из БД", email)
         return "created"
 
-    still_missing = await try_attach_missing_inbounds(api, email)
-    if still_missing:
+    missing = await get_missing_required_inbounds(api, email)
+    if missing:
         logger.warning(
             "Sync primary: {} не хватает inbounds {} — удаление на всех нодах и пересоздание",
-            email, still_missing,
+            email, missing,
         )
         await _recreate_subscription_on_primary(sub)
+        panel_cache.invalidate()
+        still_missing = await get_missing_required_inbounds(await get_api(), email)
+        if still_missing:
+            logger.error(
+                "Sync primary: {} после пересоздания всё ещё без inbounds {}",
+                email, still_missing,
+            )
+        else:
+            logger.info("Sync primary: {} пересоздан, inbounds в порядке", email)
         return "recreated"
 
     info = await _unified_get_client_info(api, email)

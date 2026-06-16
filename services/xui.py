@@ -179,6 +179,11 @@ def _is_not_found_error(exc: Exception) -> bool:
     return "record not found" in msg or "not found" in msg
 
 
+def _is_port_conflict_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return "port" in msg and "already used" in msg
+
+
 def _bot_group() -> str:
     return (settings.XUI_CLIENT_GROUP or "").strip()
 
@@ -440,7 +445,17 @@ async def _remove_email_from_inbound_settings(
         return False
     inbound.settings.clients = filtered
     await _throttle()
-    await api.inbound.update(inbound_id, inbound)
+    try:
+        await api.inbound.update(inbound_id, inbound)
+    except Exception as e:
+        if _is_port_conflict_error(e):
+            logger.warning(
+                "settings purge {} из inbound {} пропущен (same-port): {}",
+                email, inbound_id, e,
+            )
+            panel_cache.invalidate()
+            return False
+        raise
     panel_cache.invalidate()
     logger.info("settings purge {} из inbound {}", email, inbound_id)
     return True
@@ -467,7 +482,11 @@ async def _purge_email_from_all_inbound_settings(api: AsyncApi, email: str) -> l
 async def _ensure_email_absent_on_panel(api: AsyncApi, email: str) -> list[int]:
     """Полная очистка перед add: unified del + settings всех инбаундов."""
     await _delete_client_by_email(api, email)
-    purged = await _purge_email_from_all_inbound_settings(api, email)
+    try:
+        purged = await _purge_email_from_all_inbound_settings(api, email)
+    except Exception as e:
+        logger.warning("settings purge {} на панели: {}", email, e)
+        purged = []
     if purged:
         await asyncio.sleep(0.5)
     return purged
@@ -957,6 +976,42 @@ async def _remove_client_on_panel(api: AsyncApi, email: str) -> list[int]:
     return sorted(removed)
 
 
+async def remove_client_for_recreate(email: str) -> None:
+    """
+    Удаление перед пересозданием: clients/del на всех нодах, затем settings purge на основной.
+    Не бросает исключение из-за same-port конфликта в settings.
+    """
+    from db.xui_nodes import get_primary_node, list_nodes
+
+    _assert_bot_client_email(email)
+    nodes = _dedupe_nodes_by_host(await list_nodes(enabled_only=True))
+    if not nodes:
+        api = await get_api()
+        await _delete_client_by_email(api, email)
+        await _ensure_email_absent_on_panel(api, email)
+        return
+
+    for node in nodes:
+        name = node.get("name") or node.get("id")
+        try:
+            api = await get_api_for_node(node)
+            await _delete_client_by_email(api, email)
+            logger.info("Recreate: clients/del {} на {}", email, name)
+        except Exception as e:
+            logger.error("Recreate: clients/del {} на {} failed: {}", email, name, e)
+
+    try:
+        primary = await get_primary_node()
+        api = await get_api_for_node(primary) if primary else await get_api()
+        purged = await _purge_email_from_all_inbound_settings(api, email)
+        if purged:
+            await asyncio.sleep(0.5)
+    except Exception as e:
+        logger.warning("Recreate: settings purge {} на основной: {}", email, e)
+
+    panel_cache.invalidate()
+
+
 async def remove_client_from_secondaries(
     email: str,
     *,
@@ -1013,7 +1068,15 @@ async def remove_client_everywhere(email: str) -> list[int]:
         host_key = _node_host_key(primary)
         try:
             api = await get_api_for_node(primary)
-            all_removed.extend(await _remove_client_on_panel(api, email))
+            await _delete_client_by_email(api, email)
+            try:
+                purged = await _purge_email_from_all_inbound_settings(api, email)
+                all_removed.extend(purged)
+            except Exception as e:
+                logger.warning(
+                    "Remove {} settings purge on primary {}: {}",
+                    email, primary.get("id"), e,
+                )
             processed_hosts.add(host_key)
             logger.info(
                 "Removed {} from primary {} ({})",
