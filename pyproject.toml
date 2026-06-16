@@ -1,0 +1,39 @@
+[project]
+name = "vpn-platega-bot"
+version = "0.1.0"
+description = "Полноценный Telegram-бот для продажи VPN подписок с оплатой через Platega и выдачей ключей через 3x-ui"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "aiogram>=3.7.0,<4.0.0",
+    "py3xui>=0.7.0",
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+    "python-dotenv>=1.0.0",
+    "pydantic-settings>=2.2.0",
+    "aiosqlite>=0.20.0",
+    "pydantic>=2.7.0",
+    "apscheduler>=3.10.0",
+    "qrcode[pil]>=7.4.2",
+    "pillow>=10.0.0",
+    "httpx>=0.27.0",
+    "loguru>=0.7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff",
+    "mypy",
+]
+
+[tool.ruff]
+line-length = 100
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["bot*", "config*", "db*", "services*"]
+exclude = ["data*", "grokerrorreports*", "tests*"]
