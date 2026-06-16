@@ -38,6 +38,7 @@ from .keyboards import (
     payment_kb,
     subscription_manage_kb,
     refund_confirm_kb,
+    refund_chat_kb,
     no_subscription_kb,
     back_to_main_kb,
 )
@@ -58,6 +59,7 @@ from .messages import (
     promo_applied_text,
 )
 from .states import UserStates
+from .refund_chat import format_refund_chat_history, store_and_deliver_refund_message
 
 router = Router()
 
@@ -676,11 +678,15 @@ async def cb_manage_sub(cb: CallbackQuery):
         await send_or_edit(cb, no_subscription_text(), no_subscription_kb())
         return
 
+    pending_refund = await db.get_pending_refund_for_user(cb.from_user.id)
     sub_link = build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
     await send_or_edit(
         cb,
         subscription_manage_text(sub, sub_link),
-        subscription_manage_kb(sub["id"]),
+        subscription_manage_kb(
+            sub["id"],
+            refund_id=pending_refund["id"] if pending_refund else None,
+        ),
     )
 
 
@@ -848,7 +854,7 @@ async def cb_refund_confirm(cb: CallbackQuery):
         await safe_cb_answer(cb, "Подписка неактивна", show_alert=True)
         return
 
-    await db.create_refund_request(cb.from_user.id, sub_id)
+    refund_id = await db.create_refund_request(cb.from_user.id, sub_id)
     await _notify_admins(
         refund_admin_text(
             cb.from_user.id,
@@ -856,6 +862,87 @@ async def cb_refund_confirm(cb: CallbackQuery):
             cb.from_user.first_name,
             sub,
         )
+        + f"\n\n💬 Переписка: /admin → Возвраты → #{refund_id}"
     )
     await safe_cb_answer(cb, "Запрос отправлен")
     await send_or_edit(cb, refund_request_sent_text(), back_to_main_kb())
+
+
+@router.callback_query(F.data.startswith("refund_chat:"))
+async def cb_refund_chat(cb: CallbackQuery, state: FSMContext):
+    refund_id = int(cb.data.split(":", 1)[1])
+    row = await db.get_refund_request_by_id(refund_id)
+    if not row or row["tg_id"] != cb.from_user.id or row.get("status") != "pending":
+        await safe_cb_answer(cb, "Переписка недоступна", show_alert=True)
+        return
+
+    await state.set_state(None)
+    messages = await db.get_refund_messages(refund_id)
+    text = format_refund_chat_history(messages, refund_id=refund_id, for_admin=False)
+    await safe_cb_answer(cb)
+    await send_or_edit(cb, text, refund_chat_kb(refund_id))
+
+
+@router.callback_query(F.data.startswith("refund_reply:"))
+async def cb_refund_reply_start(cb: CallbackQuery, state: FSMContext):
+    refund_id = int(cb.data.split(":", 1)[1])
+    row = await db.get_refund_request_by_id(refund_id)
+    if not row or row["tg_id"] != cb.from_user.id or row.get("status") != "pending":
+        await safe_cb_answer(cb, "Переписка недоступна", show_alert=True)
+        return
+
+    await state.set_state(UserStates.waiting_refund_reply)
+    await state.update_data(refund_chat_id=refund_id)
+    await safe_cb_answer(cb)
+    await send_or_edit(
+        cb,
+        f"✏️ <b>Сообщение по возврату #{refund_id}</b>\n\n"
+        "Опишите ситуацию или ответьте администратору.\n"
+        "Для отмены: /start",
+        refund_chat_kb(refund_id),
+    )
+
+
+@router.message(UserStates.waiting_refund_reply)
+async def msg_refund_reply(message: Message, state: FSMContext):
+    data = await state.get_data()
+    refund_id = data.get("refund_chat_id")
+    if not refund_id:
+        await state.clear()
+        await message.answer("Сессия истекла. Откройте «Управление подпиской».")
+        return
+
+    body = (message.text or "").strip()
+    if not body:
+        await message.answer("❌ Введите текст сообщения.")
+        return
+
+    cmd = _message_command(body)
+    if cmd == "/start":
+        await state.clear()
+        await _show_main_menu(message, state=state)
+        return
+    if cmd:
+        await message.answer("Ввод отменён. Откройте переписку снова из меню подписки.")
+        await state.clear()
+        return
+
+    from bot import bot as tg_bot
+    saved = await store_and_deliver_refund_message(
+        refund_id=refund_id,
+        sender_tg_id=message.from_user.id,
+        is_admin=False,
+        body=body,
+        bot=tg_bot,
+    )
+    if not saved:
+        await state.clear()
+        await message.answer("❌ Запрос на возврат уже закрыт.")
+        return
+
+    messages = await db.get_refund_messages(refund_id)
+    text = format_refund_chat_history(messages, refund_id=refund_id, for_admin=False)
+    await message.answer(
+        "✅ Сообщение отправлено.\n\n" + text,
+        reply_markup=refund_chat_kb(refund_id),
+    )

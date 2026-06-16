@@ -43,6 +43,17 @@ async def init_db():
                 FOREIGN KEY(subscription_id) REFERENCES subscriptions(id)
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS refund_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                refund_id INTEGER NOT NULL,
+                sender_tg_id INTEGER NOT NULL,
+                is_admin INTEGER NOT NULL DEFAULT 0,
+                body TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(refund_id) REFERENCES refund_requests(id)
+            )
+        """)
         # Миграции для существующих БД
         async with db.execute("PRAGMA table_info(orders)") as cur:
             cols = {row[1] for row in await cur.fetchall()}
@@ -274,6 +285,42 @@ async def get_admin_stats() -> Dict[str, int]:
     }
 
 
+async def search_connected_users(query: str, limit: int = 25) -> List[Dict[str, Any]]:
+    q = (query or "").strip()
+    if not q:
+        return []
+    if q.startswith("@"):
+        q = q[1:]
+
+    base_sql = """
+        SELECT s.id AS subscription_id, u.tg_id, u.username, u.first_name,
+               s.end_date, s.client_email, s.sub_id
+        FROM subscriptions s
+        JOIN users u ON u.tg_id = s.tg_id
+        WHERE s.is_active = 1
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        if q.isdigit():
+            tg_id = int(q)
+            sql = base_sql + " AND (u.tg_id = ? OR s.client_email = ?) ORDER BY s.end_date DESC LIMIT ?"
+            params: tuple = (tg_id, f"tg{tg_id}", limit)
+        else:
+            pattern = f"%{q}%"
+            sql = base_sql + """
+                AND (
+                    LOWER(COALESCE(u.username, '')) LIKE LOWER(?)
+                    OR LOWER(COALESCE(u.first_name, '')) LIKE LOWER(?)
+                    OR LOWER(s.client_email) LIKE LOWER(?)
+                )
+                ORDER BY s.end_date DESC LIMIT ?
+            """
+            params = (pattern, pattern, pattern, limit)
+        async with db.execute(sql, params) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+
 async def get_connected_users(limit: int = 30) -> List[Dict[str, Any]]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
@@ -324,6 +371,63 @@ async def close_refund_request(refund_id: int) -> bool:
         )
         await db.commit()
         return cursor.rowcount > 0
+
+
+async def get_pending_refund_for_user(tg_id: int) -> Optional[Dict[str, Any]]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT r.id, r.tg_id, r.subscription_id, r.status, r.created_at,
+                      s.client_email, s.end_date
+               FROM refund_requests r
+               JOIN subscriptions s ON s.id = r.subscription_id
+               WHERE r.tg_id = ? AND r.status = 'pending'
+               ORDER BY r.id DESC LIMIT 1""",
+            (tg_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
+async def add_refund_message(
+    *,
+    refund_id: int,
+    sender_tg_id: int,
+    is_admin: bool,
+    body: str,
+) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """INSERT INTO refund_messages (refund_id, sender_tg_id, is_admin, body)
+               VALUES (?, ?, ?, ?)""",
+            (refund_id, sender_tg_id, int(is_admin), body),
+        )
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def get_refund_message_by_id(message_id: int) -> Optional[Dict[str, Any]]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM refund_messages WHERE id = ?", (message_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
+async def get_refund_messages(refund_id: int, limit: int = 50) -> List[Dict[str, Any]]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT id, refund_id, sender_tg_id, is_admin, body, created_at
+               FROM refund_messages
+               WHERE refund_id = ?
+               ORDER BY id ASC LIMIT ?""",
+            (refund_id, limit),
+        ) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
 
 
 async def get_pending_refunds(limit: int = 20) -> List[Dict[str, Any]]:

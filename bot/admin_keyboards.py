@@ -25,8 +25,10 @@ def admin_inbounds_kb() -> InlineKeyboardMarkup:
     ])
 
 
-def admin_users_kb(users: list) -> InlineKeyboardMarkup:
-    rows = []
+def admin_users_kb(users: list, *, from_search: bool = False) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text="🔍 Поиск по @user или TG ID", callback_data="adm:users:search")],
+    ]
     for u in users:
         label = u.get("username") or u.get("first_name") or str(u["tg_id"])
         if len(label) > 24:
@@ -37,22 +39,27 @@ def admin_users_kb(users: list) -> InlineKeyboardMarkup:
                 callback_data=f"adm:user:{u['subscription_id']}",
             )
         ])
+    back = "adm:users:search" if from_search else "adm:users"
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data=back)])
     rows.append([InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def admin_user_detail_kb(subscription_id: int) -> InlineKeyboardMarkup:
+def admin_user_detail_kb(subscription_id: int, *, from_search: bool = False) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="🗑 Удалить подписку",
             callback_data=f"adm:del_sub:{subscription_id}",
         )],
-        [InlineKeyboardButton(text="« К списку", callback_data="adm:users")],
+        [InlineKeyboardButton(
+            text="« К списку",
+            callback_data="adm:users:search" if from_search else "adm:users",
+        )],
         [InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")],
     ])
 
 
-def admin_delete_confirm_kb(subscription_id: int) -> InlineKeyboardMarkup:
+def admin_delete_confirm_kb(subscription_id: int, *, from_search: bool = False) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="⚠️ Подтвердить удаление",
@@ -60,7 +67,7 @@ def admin_delete_confirm_kb(subscription_id: int) -> InlineKeyboardMarkup:
         )],
         [InlineKeyboardButton(
             text="« Отмена",
-            callback_data=f"adm:user:{subscription_id}",
+            callback_data=f"adm:user:{subscription_id}:search" if from_search else f"adm:user:{subscription_id}",
         )],
     ])
 
@@ -121,9 +128,27 @@ def admin_promo_detail_kb(promo_id: int, *, is_active: bool) -> InlineKeyboardMa
 def admin_refund_detail_kb(refund_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
+            text="💬 Переписка",
+            callback_data=f"adm:refund:chat:{refund_id}",
+        )],
+        [InlineKeyboardButton(
             text="✅ Закрыть запрос",
             callback_data=f"adm:refund:close:{refund_id}",
         )],
         [InlineKeyboardButton(text="« К списку", callback_data="adm:refunds")],
         [InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")],
+    ])
+
+
+def admin_refund_chat_kb(refund_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="✏️ Написать пользователю",
+            callback_data=f"adm:refund:reply:{refund_id}",
+        )],
+        [InlineKeyboardButton(
+            text="« К запросу",
+            callback_data=f"adm:refund:{refund_id}",
+        )],
+        [InlineKeyboardButton(text="« К списку", callback_data="adm:refunds")],
     ])

@@ -3,7 +3,6 @@ import re
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, CallbackQuery
 
 from config.settings import settings
@@ -17,7 +16,8 @@ from db.plan_prices import set_plan_price
 from services.pricing import list_plans
 from config.plans import get_plan
 from .messages import admin_plans_text, admin_promos_text, admin_promo_detail_text
-from .states import AdminPricingStates
+from .states import AdminPricingStates, AdminStates
+from .refund_chat import format_refund_chat_history, store_and_deliver_refund_message
 from services.subscription_admin import admin_delete_subscription
 from .admin_keyboards import (
     admin_menu_kb,
@@ -31,14 +31,11 @@ from .admin_keyboards import (
     admin_delete_confirm_kb,
     admin_refunds_kb,
     admin_refund_detail_kb,
+    admin_refund_chat_kb,
 )
 from .ui_helpers import safe_cb_answer, send_or_edit
 
 router = Router()
-
-
-class AdminStates(StatesGroup):
-    waiting_inbounds = State()
 
 
 def is_admin(user_id: int) -> bool:
@@ -106,20 +103,26 @@ async def cb_admin_stats(cb: CallbackQuery):
 
 
 @router.callback_query(F.data == "adm:users")
-async def cb_admin_users(cb: CallbackQuery):
+async def cb_admin_users(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
         return
+    await state.update_data(admin_user_from_search=False)
     users = await db.get_connected_users(limit=25)
     if not users:
-        text = "👥 <b>Подключённые пользователи</b>\n\nНет активных подписок."
-        kb = admin_back_kb()
+        text = (
+            "👥 <b>Подключённые пользователи</b>\n"
+            "━━━━━━━━━━━━━━━━\n\n"
+            "Нет активных подписок.\n"
+            "Используйте поиск по @username или TG ID."
+        )
+        kb = admin_users_kb([])
     else:
         lines = [
             "👥 <b>Подключённые пользователи</b>",
             "━━━━━━━━━━━━━━━━",
             "",
-            f"Активных: <b>{len(users)}</b>",
-            "Выберите пользователя для управления:",
+            f"Показано: <b>{len(users)}</b> (последние по сроку)",
+            "Или нажмите <b>Поиск</b> по @user / TG ID:",
         ]
         text = "\n".join(lines)
         kb = admin_users_kb(users)
@@ -127,11 +130,85 @@ async def cb_admin_users(cb: CallbackQuery):
     await send_or_edit(cb, text, kb)
 
 
-@router.callback_query(F.data.startswith("adm:user:"))
-async def cb_admin_user_detail(cb: CallbackQuery):
+@router.callback_query(F.data == "adm:users:search")
+async def cb_admin_users_search(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
         return
-    sub_id = int(cb.data.split(":", 2)[2])
+    await state.set_state(AdminStates.waiting_user_search)
+    await safe_cb_answer(cb)
+    await send_or_edit(
+        cb,
+        "🔍 <b>Поиск подписки</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        "Отправьте:\n"
+        "• <code>@username</code> или <code>username</code>\n"
+        "• <code>123456789</code> — Telegram ID\n"
+        "• <code>tg123456789</code> — email клиента\n\n"
+        "Для отмены: /admin",
+        admin_back_kb(),
+    )
+
+
+@router.message(AdminStates.waiting_user_search)
+async def msg_admin_user_search(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    query = (message.text or "").strip()
+    if not query:
+        await message.answer("❌ Введите @username, TG ID или email.")
+        return
+
+    users = await db.search_connected_users(query, limit=25)
+    await state.set_state(None)
+    await state.update_data(admin_user_from_search=True)
+
+    if not users:
+        await message.answer(
+            f"🔍 По запросу <code>{query}</code> активных подписок не найдено.",
+            reply_markup=admin_users_kb([], from_search=True),
+        )
+        return
+
+    if len(users) == 1:
+        u = users[0]
+        sub_id = u["subscription_id"]
+        label = _user_label(u.get("username"), u.get("first_name"), u["tg_id"])
+        text = (
+            "🔍 <b>Найден 1 пользователь</b>\n"
+            "━━━━━━━━━━━━━━━━\n\n"
+            f"Имя: {label}\n"
+            f"TG ID: <code>{u['tg_id']}</code>\n"
+            f"Подписка: <code>#{sub_id}</code>\n"
+            f"Клиент: <code>{u['client_email']}</code>\n"
+            f"До: <b>{u['end_date'][:10]}</b>"
+        )
+        await message.answer(text, reply_markup=admin_user_detail_kb(sub_id, from_search=True))
+        return
+
+    lines = [
+        f"🔍 <b>Найдено: {len(users)}</b>",
+        f"Запрос: <code>{query}</code>",
+        "",
+        "Выберите пользователя:",
+    ]
+    await message.answer(
+        "\n".join(lines),
+        reply_markup=admin_users_kb(users, from_search=True),
+    )
+
+
+@router.callback_query(F.data.startswith("adm:user:"))
+async def cb_admin_user_detail(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    parts = cb.data.split(":")
+    sub_id = int(parts[2])
+    from_search = len(parts) > 3 and parts[3] == "search"
+    if from_search:
+        await state.update_data(admin_user_from_search=True)
+    else:
+        data = await state.get_data()
+        from_search = bool(data.get("admin_user_from_search"))
     sub = await db.get_subscription_by_id(sub_id)
     if not sub or not sub.get("is_active"):
         await safe_cb_answer(cb, "Подписка не найдена", show_alert=True)
@@ -150,14 +227,15 @@ async def cb_admin_user_detail(cb: CallbackQuery):
         f"subId: <code>{sub.get('sub_id') or '—'}</code>"
     )
     await safe_cb_answer(cb)
-    await send_or_edit(cb, text, admin_user_detail_kb(sub_id))
+    await send_or_edit(cb, text, admin_user_detail_kb(sub_id, from_search=from_search))
 
 
 @router.callback_query(F.data.startswith("adm:del_sub:") & ~F.data.startswith("adm:del_sub:confirm:"))
-async def cb_admin_delete_sub_confirm(cb: CallbackQuery):
+async def cb_admin_delete_sub_confirm(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
         return
     sub_id = int(cb.data.split(":", 2)[2])
+    from_search = bool((await state.get_data()).get("admin_user_from_search"))
     sub = await db.get_subscription_by_id(sub_id)
     if not sub or not sub.get("is_active"):
         await safe_cb_answer(cb, "Подписка не найдена", show_alert=True)
@@ -173,11 +251,11 @@ async def cb_admin_delete_sub_confirm(cb: CallbackQuery):
         "⚠️ Действие необратимо."
     )
     await safe_cb_answer(cb)
-    await send_or_edit(cb, text, admin_delete_confirm_kb(sub_id))
+    await send_or_edit(cb, text, admin_delete_confirm_kb(sub_id, from_search=from_search))
 
 
 @router.callback_query(F.data.startswith("adm:del_sub:confirm:"))
-async def cb_admin_delete_sub(cb: CallbackQuery):
+async def cb_admin_delete_sub(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
         return
     sub_id = int(cb.data.split(":", 3)[3])
@@ -229,10 +307,91 @@ async def cb_admin_refunds(cb: CallbackQuery):
     await send_or_edit(cb, text, kb)
 
 
-@router.callback_query(F.data.regexp(r"^adm:refund:\d+$"))
-async def cb_admin_refund_detail(cb: CallbackQuery):
+@router.callback_query(F.data.startswith("adm:refund:chat:"))
+async def cb_admin_refund_chat(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
         return
+    await state.set_state(None)
+    refund_id = int(cb.data.split(":")[3])
+    row = await db.get_refund_request_by_id(refund_id)
+    if not row or row.get("status") != "pending":
+        await safe_cb_answer(cb, "Запрос не найден или уже закрыт", show_alert=True)
+        return
+
+    messages = await db.get_refund_messages(refund_id)
+    text = format_refund_chat_history(messages, refund_id=refund_id, for_admin=True)
+    await safe_cb_answer(cb)
+    await send_or_edit(cb, text, admin_refund_chat_kb(refund_id))
+
+
+@router.callback_query(F.data.startswith("adm:refund:reply:"))
+async def cb_admin_refund_reply_start(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    refund_id = int(cb.data.split(":")[3])
+    row = await db.get_refund_request_by_id(refund_id)
+    if not row or row.get("status") != "pending":
+        await safe_cb_answer(cb, "Запрос закрыт", show_alert=True)
+        return
+    await state.set_state(AdminStates.waiting_refund_reply)
+    await state.update_data(refund_chat_id=refund_id)
+    await safe_cb_answer(cb)
+    await send_or_edit(
+        cb,
+        f"✏️ <b>Ответ по возврату #{refund_id}</b>\n\n"
+        "Отправьте сообщение пользователю.\n"
+        "Для отмены: /admin",
+        admin_refund_chat_kb(refund_id),
+    )
+
+
+@router.message(AdminStates.waiting_refund_reply)
+async def msg_admin_refund_reply(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    refund_id = data.get("refund_chat_id")
+    if not refund_id:
+        await state.clear()
+        await message.answer("Сессия истекла. /admin")
+        return
+
+    body = (message.text or "").strip()
+    if not body:
+        await message.answer("❌ Пустое сообщение. Введите текст.")
+        return
+    if body.startswith("/"):
+        if body.split("@")[0].lower() == "/admin":
+            await state.set_state(None)
+            await message.answer(await _admin_menu_text(), reply_markup=admin_menu_kb())
+        return
+
+    from bot import bot as tg_bot
+    saved = await store_and_deliver_refund_message(
+        refund_id=refund_id,
+        sender_tg_id=message.from_user.id,
+        is_admin=True,
+        body=body,
+        bot=tg_bot,
+    )
+    if not saved:
+        await state.set_state(None)
+        await message.answer("❌ Запрос на возврат уже закрыт.")
+        return
+
+    messages = await db.get_refund_messages(refund_id)
+    text = format_refund_chat_history(messages, refund_id=refund_id, for_admin=True)
+    await message.answer(
+        "✅ Сообщение отправлено.\n\n" + text,
+        reply_markup=admin_refund_chat_kb(refund_id),
+    )
+
+
+@router.callback_query(F.data.regexp(r"^adm:refund:\d+$"))
+async def cb_admin_refund_detail(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    await state.set_state(None)
     refund_id = int(cb.data.split(":")[2])
     row = await db.get_refund_request_by_id(refund_id)
     if not row or row.get("status") != "pending":
@@ -240,6 +399,7 @@ async def cb_admin_refund_detail(cb: CallbackQuery):
         return
 
     label = _user_label(row.get("username"), row.get("first_name"), row["tg_id"])
+    msg_count = len(await db.get_refund_messages(refund_id))
     text = (
         "💸 <b>Запрос на возврат</b>\n"
         "━━━━━━━━━━━━━━━━\n\n"
@@ -248,7 +408,8 @@ async def cb_admin_refund_detail(cb: CallbackQuery):
         f"TG ID: <code>{row['tg_id']}</code>\n"
         f"Клиент: <code>{row['client_email']}</code>\n"
         f"Подписка до: <b>{row['end_date'][:10]}</b>\n"
-        f"Создан: {row['created_at'][:16]}"
+        f"Создан: {row['created_at'][:16]}\n"
+        f"💬 Сообщений в переписке: <b>{msg_count}</b>"
     )
     await safe_cb_answer(cb)
     await send_or_edit(cb, text, admin_refund_detail_kb(refund_id))

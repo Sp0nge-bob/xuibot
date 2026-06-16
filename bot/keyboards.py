@@ -139,11 +139,32 @@ def payment_kb(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def subscription_manage_kb(sub_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
+def subscription_manage_kb(sub_id: int, *, refund_id: int | None = None) -> InlineKeyboardMarkup:
+    rows = [
         [InlineKeyboardButton(text="🔗 Ссылка и QR", callback_data=f"sub_link:{sub_id}")],
         [InlineKeyboardButton(text="🔄 Продлить подписку", callback_data="extend_menu")],
-        [InlineKeyboardButton(text="💸 Запросить возврат", callback_data=f"refund:{sub_id}")],
+    ]
+    if refund_id:
+        rows.append([InlineKeyboardButton(
+            text="💬 Переписка по возврату",
+            callback_data=f"refund_chat:{refund_id}",
+        )])
+    else:
+        rows.append([InlineKeyboardButton(
+            text="💸 Запросить возврат",
+            callback_data=f"refund:{sub_id}",
+        )])
+    rows.append([InlineKeyboardButton(text="« Главное меню", callback_data="main_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def refund_chat_kb(refund_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="✏️ Написать сообщение",
+            callback_data=f"refund_reply:{refund_id}",
+        )],
+        [InlineKeyboardButton(text="« Управление подпиской", callback_data="manage_sub")],
         [InlineKeyboardButton(text="« Главное меню", callback_data="main_menu")],
     ])
 
