@@ -284,15 +284,24 @@ async def get_admin_stats() -> Dict[str, int]:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("SELECT COUNT(*) FROM users") as cur:
             users = (await cur.fetchone())[0]
-        async with db.execute("SELECT COUNT(*) FROM subscriptions WHERE is_active = 1") as cur:
-            active_subs = (await cur.fetchone())[0]
+        async with db.execute(
+            """SELECT COUNT(*) FROM subscriptions
+               WHERE is_active = 1 AND client_email NOT LIKE 'tgfree%'""",
+        ) as cur:
+            paid_subs = (await cur.fetchone())[0]
+        async with db.execute(
+            """SELECT COUNT(*) FROM subscriptions
+               WHERE is_active = 1 AND client_email LIKE 'tgfree%'""",
+        ) as cur:
+            trial_subs = (await cur.fetchone())[0]
         async with db.execute("SELECT COUNT(*) FROM orders WHERE status = 'paid'") as cur:
             paid_orders = (await cur.fetchone())[0]
         async with db.execute("SELECT COUNT(*) FROM refund_requests WHERE status = 'pending'") as cur:
             pending_refunds = (await cur.fetchone())[0]
     return {
         "users": users,
-        "active_subs": active_subs,
+        "paid_subs": paid_subs,
+        "trial_subs": trial_subs,
         "paid_orders": paid_orders,
         "pending_refunds": pending_refunds,
     }
@@ -338,15 +347,38 @@ async def search_connected_users(query: str, limit: int = 25) -> List[Dict[str, 
             return [dict(r) for r in rows]
 
 
-async def get_connected_users(limit: int = 30) -> List[Dict[str, Any]]:
+def _connected_users_trial_clause(trial_only: Optional[bool]) -> str:
+    if trial_only is True:
+        return " AND s.client_email LIKE 'tgfree%'"
+    if trial_only is False:
+        return " AND s.client_email NOT LIKE 'tgfree%'"
+    return ""
+
+
+async def count_connected_users(*, trial_only: Optional[bool] = None) -> int:
+    clause = _connected_users_trial_clause(trial_only)
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            f"""SELECT COUNT(*) FROM subscriptions s
+                WHERE s.is_active = 1{clause}""",
+        ) as cur:
+            return (await cur.fetchone())[0]
+
+
+async def get_connected_users(
+    limit: int = 30,
+    *,
+    trial_only: Optional[bool] = None,
+) -> List[Dict[str, Any]]:
+    clause = _connected_users_trial_clause(trial_only)
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            """SELECT s.id AS subscription_id, u.tg_id, u.username, u.first_name,
+            f"""SELECT s.id AS subscription_id, u.tg_id, u.username, u.first_name,
                       s.end_date, s.client_email, s.sub_id
                FROM subscriptions s
                JOIN users u ON u.tg_id = s.tg_id
-               WHERE s.is_active = 1
+               WHERE s.is_active = 1{clause}
                ORDER BY s.end_date DESC
                LIMIT ?""",
             (limit,),

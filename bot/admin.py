@@ -28,6 +28,13 @@ from services.trial import admin_reset_trial
 from .states import AdminPricingStates, AdminStates
 from .refund_chat import format_refund_chat_history, store_and_deliver_refund_message
 from services.subscription_admin import admin_delete_subscription
+from .admin_users import (
+    admin_users_category_text,
+    admin_users_menu_text,
+    admin_users_search_text,
+    split_connected_users,
+    subscription_kind_label,
+)
 from .admin_keyboards import (
     admin_menu_kb,
     admin_back_kb,
@@ -36,6 +43,8 @@ from .admin_keyboards import (
     admin_promos_kb,
     admin_promo_detail_kb,
     admin_users_kb,
+    admin_users_menu_kb,
+    admin_users_search_kb,
     admin_user_detail_kb,
     admin_delete_confirm_kb,
     admin_refunds_kb,
@@ -61,16 +70,23 @@ def _user_label(username: str | None, first_name: str | None, tg_id: int) -> str
     return str(tg_id)
 
 
+def _admin_stats_block(stats: dict[str, int]) -> str:
+    return (
+        f"👥 Пользователей: <b>{stats['users']}</b>\n"
+        f"✅ Платных подписок: <b>{stats['paid_subs']}</b>\n"
+        f"🎁 Пробных подписок: <b>{stats['trial_subs']}</b>\n"
+        f"💰 Оплаченных заказов: <b>{stats['paid_orders']}</b>\n"
+        f"💸 Запросов на возврат: <b>{stats['pending_refunds']}</b>"
+    )
+
+
 async def _admin_menu_text() -> str:
     inbounds = await get_subscription_inbounds_display()
     stats = await db.get_admin_stats()
     return (
         "🛠 <b>Админ-панель</b>\n"
         "━━━━━━━━━━━━━━━━\n\n"
-        f"👥 Пользователей: <b>{stats['users']}</b>\n"
-        f"✅ Активных подписок: <b>{stats['active_subs']}</b>\n"
-        f"💰 Оплаченных заказов: <b>{stats['paid_orders']}</b>\n"
-        f"💸 Запросов на возврат: <b>{stats['pending_refunds']}</b>\n\n"
+        f"{_admin_stats_block(stats)}\n\n"
         f"📡 Инбаунды: <code>{inbounds}</code> · группа: <code>{settings.XUI_CLIENT_GROUP}</code>\n\n"
         "Выберите раздел:"
     )
@@ -103,42 +119,72 @@ async def cb_admin_stats(cb: CallbackQuery):
     text = (
         "📊 <b>Статистика</b>\n"
         "━━━━━━━━━━━━━━━━\n\n"
-        f"👥 Пользователей: <b>{stats['users']}</b>\n"
-        f"✅ Активных подписок: <b>{stats['active_subs']}</b>\n"
-        f"💰 Оплаченных заказов: <b>{stats['paid_orders']}</b>\n"
-        f"💸 Открытых возвратов: <b>{stats['pending_refunds']}</b>\n\n"
+        f"{_admin_stats_block(stats)}\n\n"
         f"📡 Инбаунды: <code>{inbounds}</code>"
     )
     await safe_cb_answer(cb)
     await send_or_edit(cb, text, admin_back_kb())
 
 
+_USERS_LIST_LIMIT = 25
+
+
+async def _show_admin_users_menu(cb: CallbackQuery, state: FSMContext) -> None:
+    paid_count = await db.count_connected_users(trial_only=False)
+    trial_count = await db.count_connected_users(trial_only=True)
+    await state.update_data(admin_user_from_search=False, admin_user_category=None)
+    await send_or_edit(
+        cb,
+        admin_users_menu_text(paid_count=paid_count, trial_count=trial_count),
+        admin_users_menu_kb(paid_count=paid_count, trial_count=trial_count),
+    )
+
+
+async def _show_admin_users_category(
+    cb: CallbackQuery,
+    state: FSMContext,
+    *,
+    category: str,
+) -> None:
+    trial_only = category == "trial"
+    users = await db.get_connected_users(_USERS_LIST_LIMIT, trial_only=trial_only)
+    await state.update_data(
+        admin_user_from_search=False,
+        admin_user_category=category,
+    )
+    await send_or_edit(
+        cb,
+        admin_users_category_text(
+            category=category,
+            users=users,
+            limit=_USERS_LIST_LIMIT,
+        ),
+        admin_users_kb(users, category=category),
+    )
+
+
 @router.callback_query(F.data == "adm:users")
 async def cb_admin_users(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
         return
-    await state.update_data(admin_user_from_search=False)
-    users = await db.get_connected_users(limit=25)
-    if not users:
-        text = (
-            "👥 <b>Подключённые пользователи</b>\n"
-            "━━━━━━━━━━━━━━━━\n\n"
-            "Нет активных подписок.\n"
-            "Используйте поиск по @username или TG ID."
-        )
-        kb = admin_users_kb([])
-    else:
-        lines = [
-            "👥 <b>Подключённые пользователи</b>",
-            "━━━━━━━━━━━━━━━━",
-            "",
-            f"Показано: <b>{len(users)}</b> (последние по сроку)",
-            "Или нажмите <b>Поиск</b> по @user / TG ID:",
-        ]
-        text = "\n".join(lines)
-        kb = admin_users_kb(users)
     await safe_cb_answer(cb)
-    await send_or_edit(cb, text, kb)
+    await _show_admin_users_menu(cb, state)
+
+
+@router.callback_query(F.data == "adm:users:paid")
+async def cb_admin_users_paid(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    await safe_cb_answer(cb)
+    await _show_admin_users_category(cb, state, category="paid")
+
+
+@router.callback_query(F.data == "adm:users:trial")
+async def cb_admin_users_trial(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    await safe_cb_answer(cb)
+    await _show_admin_users_category(cb, state, category="trial")
 
 
 @router.callback_query(F.data == "adm:users:search")
@@ -154,7 +200,8 @@ async def cb_admin_users_search(cb: CallbackQuery, state: FSMContext):
         "Отправьте:\n"
         "• <code>@username</code> или <code>username</code>\n"
         "• <code>123456789</code> — Telegram ID\n"
-        "• <code>tg123456789</code> — email клиента\n\n"
+        "• <code>tg123456789</code> — платный клиент\n"
+        "• <code>tgfree123456789</code> — пробный клиент\n\n"
         "Для отмены: /admin",
         admin_back_kb(),
     )
@@ -173,10 +220,11 @@ async def msg_admin_user_search(message: Message, state: FSMContext):
     await state.set_state(None)
     await state.update_data(admin_user_from_search=True)
 
-    if not users:
+    paid, trial = split_connected_users(users)
+    if not paid and not trial:
         await message.answer(
             f"🔍 По запросу <code>{query}</code> активных подписок не найдено.",
-            reply_markup=admin_users_kb([], from_search=True),
+            reply_markup=admin_users_search_kb([], []),
         )
         return
 
@@ -184,9 +232,11 @@ async def msg_admin_user_search(message: Message, state: FSMContext):
         u = users[0]
         sub_id = u["subscription_id"]
         label = _user_label(u.get("username"), u.get("first_name"), u["tg_id"])
+        kind = subscription_kind_label(u.get("client_email"))
         text = (
             "🔍 <b>Найден 1 пользователь</b>\n"
             "━━━━━━━━━━━━━━━━\n\n"
+            f"Тип: {kind}\n"
             f"Имя: {label}\n"
             f"TG ID: <code>{u['tg_id']}</code>\n"
             f"Подписка: <code>#{sub_id}</code>\n"
@@ -199,15 +249,9 @@ async def msg_admin_user_search(message: Message, state: FSMContext):
         )
         return
 
-    lines = [
-        f"🔍 <b>Найдено: {len(users)}</b>",
-        f"Запрос: <code>{query}</code>",
-        "",
-        "Выберите пользователя:",
-    ]
     await message.answer(
-        "\n".join(lines),
-        reply_markup=admin_users_kb(users, from_search=True),
+        admin_users_search_text(query, paid, trial),
+        reply_markup=admin_users_search_kb(paid, trial),
     )
 
 
@@ -223,6 +267,7 @@ async def cb_admin_user_detail(cb: CallbackQuery, state: FSMContext):
     else:
         data = await state.get_data()
         from_search = bool(data.get("admin_user_from_search"))
+    category = (await state.get_data()).get("admin_user_category")
     sub = await db.get_subscription_by_id(sub_id)
     if not sub or not sub.get("is_active"):
         await safe_cb_answer(cb, "Подписка не найдена", show_alert=True)
@@ -230,9 +275,11 @@ async def cb_admin_user_detail(cb: CallbackQuery, state: FSMContext):
 
     user = await db.get_or_create_user(sub["tg_id"])
     label = _user_label(user.get("username"), user.get("first_name"), sub["tg_id"])
+    kind = subscription_kind_label(sub.get("client_email"))
     text = (
         "👤 <b>Пользователь</b>\n"
         "━━━━━━━━━━━━━━━━\n\n"
+        f"Тип: {kind}\n"
         f"Имя: {label}\n"
         f"TG ID: <code>{sub['tg_id']}</code>\n"
         f"Подписка: <code>#{sub_id}</code>\n"
@@ -244,7 +291,12 @@ async def cb_admin_user_detail(cb: CallbackQuery, state: FSMContext):
     await send_or_edit(
         cb,
         text,
-        admin_user_detail_kb(sub_id, sub["tg_id"], from_search=from_search),
+        admin_user_detail_kb(
+            sub_id,
+            sub["tg_id"],
+            from_search=from_search,
+            category=category,
+        ),
     )
 
 

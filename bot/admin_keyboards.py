@@ -1,5 +1,7 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+from config.trial import is_trial_email
+
 
 def admin_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -26,22 +28,70 @@ def admin_inbounds_kb() -> InlineKeyboardMarkup:
     ])
 
 
-def admin_users_kb(users: list, *, from_search: bool = False) -> InlineKeyboardMarkup:
-    rows = [
+def admin_users_menu_kb(*, paid_count: int, trial_count: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=f"✅ Платные ({paid_count})",
+            callback_data="adm:users:paid",
+        )],
+        [InlineKeyboardButton(
+            text=f"🎁 Пробные ({trial_count})",
+            callback_data="adm:users:trial",
+        )],
         [InlineKeyboardButton(text="🔍 Поиск по @user или TG ID", callback_data="adm:users:search")],
-    ]
+        [InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")],
+    ])
+
+
+def _admin_user_button_label(u: dict) -> str:
+    label = u.get("username") or u.get("first_name") or str(u["tg_id"])
+    if len(label) > 18:
+        label = label[:15] + "..."
+    kind = "🎁" if is_trial_email(u.get("client_email")) else "✅"
+    end = (u.get("end_date") or "")[:10]
+    return f"{kind} {label} · {end}"
+
+
+def admin_users_kb(
+    users: list,
+    *,
+    category: str | None = None,
+    from_search: bool = False,
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if not from_search and category is None:
+        rows.append([InlineKeyboardButton(
+            text="🔍 Поиск по @user или TG ID",
+            callback_data="adm:users:search",
+        )])
     for u in users:
-        label = u.get("username") or u.get("first_name") or str(u["tg_id"])
-        if len(label) > 24:
-            label = label[:21] + "..."
-        rows.append([
-            InlineKeyboardButton(
-                text=f"👤 {label}",
-                callback_data=f"adm:user:{u['subscription_id']}",
-            )
-        ])
-    back = "adm:users:search" if from_search else "adm:users"
+        rows.append([InlineKeyboardButton(
+            text=_admin_user_button_label(u),
+            callback_data=f"adm:user:{u['subscription_id']}",
+        )])
+    if from_search:
+        back = "adm:users:search"
+    elif category == "paid":
+        back = "adm:users:paid"
+    elif category == "trial":
+        back = "adm:users:trial"
+    else:
+        back = "adm:users"
     rows.append([InlineKeyboardButton(text="« Назад", callback_data=back)])
+    rows.append([InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_users_search_kb(paid: list, trial: list) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for group in (paid, trial):
+        for u in group:
+            rows.append([InlineKeyboardButton(
+                text=_admin_user_button_label(u),
+                callback_data=f"adm:user:{u['subscription_id']}",
+            )])
+    rows.append([InlineKeyboardButton(text="🔍 Новый поиск", callback_data="adm:users:search")])
+    rows.append([InlineKeyboardButton(text="« К категориям", callback_data="adm:users")])
     rows.append([InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -51,7 +101,16 @@ def admin_user_detail_kb(
     tg_id: int,
     *,
     from_search: bool = False,
+    category: str | None = None,
 ) -> InlineKeyboardMarkup:
+    if from_search:
+        back = "adm:users:search"
+    elif category == "paid":
+        back = "adm:users:paid"
+    elif category == "trial":
+        back = "adm:users:trial"
+    else:
+        back = "adm:users"
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="🔄 Сброс пробного",
@@ -61,10 +120,7 @@ def admin_user_detail_kb(
             text="🗑 Удалить подписку",
             callback_data=f"adm:del_sub:{subscription_id}",
         )],
-        [InlineKeyboardButton(
-            text="« К списку",
-            callback_data="adm:users:search" if from_search else "adm:users",
-        )],
+        [InlineKeyboardButton(text="« К списку", callback_data=back)],
         [InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")],
     ])
 
