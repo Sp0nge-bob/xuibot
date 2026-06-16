@@ -67,7 +67,9 @@ async def ensure_subscription_on_primary(sub: dict[str, Any]) -> str:
         logger.info("Sync primary: создан {} из БД", email)
         return "created"
 
-    missing = await get_missing_required_inbounds(api, email)
+    missing = await get_missing_required_inbounds(
+        api, email, sub_id=state["sub_id"] or sub.get("sub_id") or "",
+    )
     if missing:
         logger.warning(
             "Sync primary: {} не хватает inbounds {} — удаление на всех нодах и пересоздание",
@@ -75,7 +77,9 @@ async def ensure_subscription_on_primary(sub: dict[str, Any]) -> str:
         )
         await _recreate_subscription_on_primary(sub)
         panel_cache.invalidate()
-        still_missing = await get_missing_required_inbounds(await get_api(), email)
+        still_missing = await get_missing_required_inbounds(
+            await get_api(), email, sub_id=state["sub_id"] or sub.get("sub_id") or "",
+        )
         if still_missing:
             logger.error(
                 "Sync primary: {} после пересоздания всё ещё без inbounds {}",
@@ -108,6 +112,15 @@ async def ensure_subscription_on_primary(sub: dict[str, Any]) -> str:
         )
         logger.info("Sync primary: обновлён {}", email)
         return "updated"
+
+    from db.bot_settings import get_subscription_inbound_ids
+
+    required = await get_subscription_inbound_ids()
+    _, unified_ids, _ = info
+    logger.info(
+        "Sync primary: {} skipped (unified={}, required={})",
+        email, sorted(set(unified_ids or [])), required,
+    )
     return "skipped"
 
 

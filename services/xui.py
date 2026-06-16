@@ -661,29 +661,86 @@ def _needs_sync(
     return False
 
 
-async def get_missing_required_inbounds(api: AsyncApi, email: str) -> list[int]:
-    """Инбаунды подписки, которых нет ни в settings, ни в unified inboundIds."""
+async def _fetch_sub_links(
+    api: AsyncApi,
+    sub_id: str,
+    email: str,
+) -> list[Any]:
+    """Фактические ссылки подписки — надёжнее settings при same-port drift."""
+    for endpoint in (
+        f"panel/api/clients/subLinks/{sub_id}",
+        f"panel/api/clients/links/{email}",
+    ):
+        url = api.client._url(endpoint)
+        await _throttle()
+        try:
+            resp = await api.client._get(url, {"Accept": "application/json"})
+            obj = resp.json().get(ApiFields.OBJ)
+            if isinstance(obj, list):
+                return obj
+            if isinstance(obj, dict):
+                links = obj.get("links") or obj.get("subs") or []
+                if isinstance(links, list):
+                    return links
+        except Exception as e:
+            if not _is_not_found_error(e):
+                logger.debug("subLinks {}: {}", endpoint, e)
+    return []
+
+
+async def get_missing_required_inbounds(
+    api: AsyncApi,
+    email: str,
+    *,
+    sub_id: str = "",
+) -> list[int]:
+    """
+    Нехватка инбаундов: unified inboundIds и subLinks (не settings — там ghost на same-port).
+    """
     inbound_ids = await get_subscription_inbound_ids()
     if not inbound_ids:
         return []
-    missing: set[int] = set()
-    located = await _locate_client_inbounds(api, email, force=True)
-    for ib in inbound_ids:
-        if ib not in located:
-            missing.add(ib)
+
+    required = set(inbound_ids)
     info = await _unified_get_client_info(api, email)
-    if info:
-        _, present_ids, _ = info
-        present = set(present_ids or [])
-        for ib in inbound_ids:
-            if ib not in present:
-                missing.add(ib)
-    return sorted(missing)
+    if not info:
+        return sorted(required)
+
+    client, unified_ids, _ = info
+    unified_set = set(unified_ids or [])
+    missing = sorted(required - unified_set)
+
+    resolved_sub = (sub_id or client.sub_id or "").strip()
+    link_count = 0
+    if resolved_sub:
+        links = await _fetch_sub_links(api, resolved_sub, email)
+        link_count = len(links)
+        if link_count and link_count < len(required):
+            logger.info(
+                "Инбаунды {}: subLinks={} < required={} (unified={}) — нужно пересоздание",
+                email, link_count, sorted(required), sorted(unified_set),
+            )
+            return sorted(required)
+
+    if missing:
+        logger.info(
+            "Инбаунды {}: unified не хватает {} (есть {}, нужно {})",
+            email, missing, sorted(unified_set), sorted(required),
+        )
+    elif link_count:
+        logger.debug(
+            "Инбаунды {}: unified={} subLinks={} required={}",
+            email, sorted(unified_set), link_count, sorted(required),
+        )
+
+    return missing
 
 
-async def try_attach_missing_inbounds(api: AsyncApi, email: str) -> list[int]:
+async def try_attach_missing_inbounds(
+    api: AsyncApi, email: str, *, sub_id: str = "",
+) -> list[int]:
     """Одна попытка attach; возвращает inbounds, которые всё ещё отсутствуют."""
-    missing = await get_missing_required_inbounds(api, email)
+    missing = await get_missing_required_inbounds(api, email, sub_id=sub_id)
     if not missing:
         return []
     try:
@@ -692,7 +749,7 @@ async def try_attach_missing_inbounds(api: AsyncApi, email: str) -> list[int]:
         panel_cache.invalidate()
     except Exception as e:
         logger.warning("clients/attach {} → {}: {}", email, missing, e)
-    return await get_missing_required_inbounds(api, email)
+    return await get_missing_required_inbounds(api, email, sub_id=sub_id)
 
 
 async def audit_client_inbounds(email: str) -> dict:
