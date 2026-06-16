@@ -22,6 +22,7 @@ from loguru import logger
 from config.settings import settings
 from db.bot_settings import get_subscription_inbound_ids
 from services.panel_cache import panel_cache
+from services.panel_inbounds import fetch_inbound_by_id, fetch_inbounds_list
 
 _apis: dict[int, AsyncApi] = {}
 _bot_group_ensured: set[int] = set()
@@ -90,6 +91,24 @@ async def build_sub_link(sub_id: str) -> str:
 
 def invalidate_api_cache(node_id: int) -> None:
     _apis.pop(node_id, None)
+    _bot_group_ensured.discard(node_id)
+
+
+async def _probe_panel_read_api(api: AsyncApi) -> bool:
+    """Проверка чтения панели: inbounds/list или unified clients/list."""
+    try:
+        await fetch_inbounds_list(api)
+        return True
+    except Exception:
+        pass
+    url = api.client._url("panel/api/clients/list")
+    await _throttle()
+    try:
+        resp = await api.client._get(url, {"Accept": "application/json"})
+        data = resp.json()
+        return bool(data.get(ApiFields.SUCCESS, True))
+    except Exception:
+        return False
 
 
 async def get_api_for_node(node: dict, *, force_new: bool = False) -> AsyncApi:
@@ -99,17 +118,33 @@ async def get_api_for_node(node: dict, *, force_new: bool = False) -> AsyncApi:
     if node_id not in _apis:
         host = normalize_xui_host(node["host"])
         token = (node.get("token") or "").strip()
+        username = (node.get("username") or "").strip()
+        password = node.get("password") or ""
+        api: AsyncApi | None = None
+
         if token:
-            _apis[node_id] = AsyncApi(host, token=token, use_tls_verify=True)
-        else:
-            api = AsyncApi(
-                host,
-                node.get("username") or "",
-                node.get("password") or "",
-                use_tls_verify=True,
-            )
+            api = AsyncApi(host, token=token, use_tls_verify=True)
+            if not await _probe_panel_read_api(api) and username and password:
+                logger.warning(
+                    "Token API недоступен для [{}], пробуем login/password",
+                    node.get("name") or node_id,
+                )
+                api = None
+
+        if api is None:
+            if not username or not password:
+                raise ValueError(
+                    f"Нода {node.get('name') or node_id}: укажите API token или login/password",
+                )
+            api = AsyncApi(host, username, password, use_tls_verify=True)
             await api.login()
-            _apis[node_id] = api
+            if not await _probe_panel_read_api(api):
+                logger.warning(
+                    "Панель [{}] отвечает, но inbounds/list и clients/list недоступны",
+                    node.get("name") or node_id,
+                )
+
+        _apis[node_id] = api
         logger.info("Connected to 3x-ui [{}] at {}", node.get("name") or node_id, host)
     return _apis[node_id]
 
@@ -153,29 +188,33 @@ async def ensure_bot_group_on_node(api: AsyncApi, node_id: int = 0) -> str:
     group = _bot_group()
     if not group or node_id in _bot_group_ensured:
         return group
-    names: set[str] = set()
-    url = api.client._url("panel/api/clients/groups")
-    await _throttle()
     try:
-        resp = await api.client._get(url, {"Accept": "application/json"})
-        for item in resp.json().get(ApiFields.OBJ) or []:
-            if isinstance(item, dict) and item.get("name"):
-                names.add(str(item["name"]))
-    except Exception as e:
-        logger.warning("Не удалось получить список групп: {}", e)
-        return group
-
-    if group not in names:
-        create_url = api.client._url("panel/api/clients/groups/create")
+        names: set[str] = set()
+        url = api.client._url("panel/api/clients/groups")
         await _throttle()
         try:
-            await api.client._post(create_url, {"Accept": "application/json"}, {"name": group})
-            logger.info("Создана группа {} на панели", group)
+            resp = await api.client._get(url, {"Accept": "application/json"})
+            for item in resp.json().get(ApiFields.OBJ) or []:
+                if isinstance(item, dict) and item.get("name"):
+                    names.add(str(item["name"]))
         except Exception as e:
-            if not _is_not_found_error(e):
-                logger.warning("Не удалось создать группу {}: {}", group, e)
+            if _is_not_found_error(e):
+                logger.debug("groups API недоступен на панели — пропуск")
+            else:
+                logger.warning("Не удалось получить список групп: {}", e)
+            return group
 
-    _bot_group_ensured.add(node_id)
+        if group not in names:
+            create_url = api.client._url("panel/api/clients/groups/create")
+            await _throttle()
+            try:
+                await api.client._post(create_url, {"Accept": "application/json"}, {"name": group})
+                logger.info("Создана группа {} на панели", group)
+            except Exception as e:
+                if not _is_not_found_error(e):
+                    logger.warning("Не удалось создать группу {}: {}", group, e)
+    finally:
+        _bot_group_ensured.add(node_id)
     return group
 
 
@@ -394,7 +433,7 @@ async def _remove_email_from_inbound_settings(
 ) -> bool:
     """Убрать клиента из settings инбаунда → SyncInbound на подключённых нодах."""
     _assert_bot_client_email(email)
-    inbound = await api.inbound.get_by_id(inbound_id)
+    inbound = await fetch_inbound_by_id(api, inbound_id)
     clients = list(inbound.settings.clients or [])
     filtered = [c for c in clients if (c.email or "").lower() != email.lower()]
     if len(filtered) == len(clients):
@@ -473,7 +512,11 @@ async def get_inbound_port_conflict_groups(
 
 
 async def log_inbound_port_conflicts() -> None:
-    conflicts = await get_inbound_port_conflict_groups()
+    try:
+        conflicts = await get_inbound_port_conflict_groups()
+    except Exception as e:
+        logger.warning("Не удалось проверить конфликты портов инбаундов: {}", e)
+        return
     for port, ids in conflicts.items():
         logger.info("Инбаунды {} на порту {}", ids, port)
 
@@ -751,6 +794,37 @@ async def extend_client(
     return new_expiry
 
 
+async def _list_unified_clients_emails_on_panel(api: AsyncApi) -> set[str]:
+    """tg/tgfree через GET clients/list — fallback без inbounds/settings."""
+    url = api.client._url("panel/api/clients/list")
+    await _throttle()
+    try:
+        resp = await api.client._get(url, {"Accept": "application/json"})
+        data = resp.json()
+        if not data.get(ApiFields.SUCCESS, True):
+            logger.debug("clients/list: {}", data.get(ApiFields.MSG) or "not success")
+            return set()
+        obj = data.get(ApiFields.OBJ) or []
+    except Exception as e:
+        if not _is_not_found_error(e):
+            logger.warning("clients/list: {}", e)
+        return set()
+
+    emails: set[str] = set()
+    if not isinstance(obj, list):
+        return emails
+    for item in obj:
+        if isinstance(item, str):
+            email = item.strip()
+        elif isinstance(item, dict):
+            email = (item.get("email") or "").strip()
+        else:
+            continue
+        if is_bot_client_email(email):
+            emails.add(email.lower())
+    return emails
+
+
 async def _list_bot_group_emails_on_panel(api: AsyncApi) -> set[str]:
     """tg/tgfree из unified store (группа бота) — дополняет settings на child-нодах."""
     group = _bot_group()
@@ -789,16 +863,18 @@ async def _list_bot_group_emails_on_panel(api: AsyncApi) -> set[str]:
 
 
 async def list_bot_client_emails_on_panel(api: AsyncApi) -> set[str]:
-    """Все tg/tgfree клиенты бота: settings инбаундов ∪ группа telegram-bot."""
+    """Все tg/tgfree: settings ∪ groups/emails ∪ clients/list (fallback)."""
+    emails: set[str] = set()
     panel_cache.invalidate()
     inbounds = await panel_cache.refresh(api, force=True)
-    emails: set[str] = set()
     for inbound in inbounds:
         for client in inbound.settings.clients or []:
             email = (client.email or "").strip()
             if is_bot_client_email(email):
                 emails.add(email.lower())
     emails.update(await _list_bot_group_emails_on_panel(api))
+    if not emails:
+        emails.update(await _list_unified_clients_emails_on_panel(api))
     return emails
 
 

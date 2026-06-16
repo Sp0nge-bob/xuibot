@@ -5,7 +5,7 @@ from typing import Any, Optional
 from loguru import logger
 
 from db import xui_nodes as nodes_db
-from services.xui import get_api_for_node, invalidate_api_cache
+from services.xui import _probe_panel_read_api, get_api_for_node, invalidate_api_cache
 
 
 async def check_node_health(node: dict[str, Any]) -> dict[str, Any]:
@@ -16,7 +16,8 @@ async def check_node_health(node: dict[str, Any]) -> dict[str, Any]:
     latency_ms: Optional[int] = None
     try:
         api = await get_api_for_node(node, force_new=False)
-        await api.inbound.get_list()
+        if not await _probe_panel_read_api(api):
+            raise RuntimeError("inbounds/list и clients/list недоступны")
         latency_ms = int((time.monotonic() - started) * 1000)
         ok = True
     except Exception as e:

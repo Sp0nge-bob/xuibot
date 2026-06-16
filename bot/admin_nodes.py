@@ -13,7 +13,7 @@ from db.bot_settings import (
 )
 from services.node_health import check_all_nodes_health, check_node_health
 from services.node_sync import sync_all_secondary_nodes
-from services.xui import normalize_xui_host
+from services.xui import invalidate_api_cache, normalize_xui_host
 from .admin_auth import is_admin
 from .admin_keyboards import admin_inbounds_kb
 from .states import AdminStates
@@ -246,6 +246,7 @@ async def _save_node_from_draft(
         )
         if (node_before or {}).get("is_primary") and inbound_ids:
             await set_subscription_inbound_ids(inbound_ids)
+        invalidate_api_cache(edit_id)
         node = await nodes_db.get_node(edit_id)
         await state.clear()
         await message.answer("✅ Нода обновлена.", reply_markup=node_detail_kb(node))

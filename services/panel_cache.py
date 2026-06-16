@@ -3,10 +3,12 @@ import asyncio
 import time
 from typing import Optional
 
+from loguru import logger
 from py3xui import AsyncApi, Client
 from py3xui.inbound import Inbound
 
 from config.settings import settings
+from services.panel_inbounds import fetch_inbounds_list
 
 
 class PanelCache:
@@ -43,7 +45,14 @@ class PanelCache:
                 and (now - self._ts) < self.ttl
             ):
                 return self._inbounds
-            inbounds = await api.inbound.get_list()
+            try:
+                inbounds = await fetch_inbounds_list(api)
+            except Exception as e:
+                logger.warning(
+                    "inbound.get_list недоступен на {}: {}",
+                    host or "panel", e,
+                )
+                inbounds = []
             self._inbounds = inbounds
             self._index = self.build_index(inbounds)
             self._ts = now
