@@ -4,6 +4,7 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
+from loguru import logger
 
 from config.settings import settings
 from db import database as db
@@ -15,7 +16,15 @@ from db import promo_codes as promo_db
 from db.plan_prices import set_plan_price
 from services.pricing import list_plans
 from config.plans import get_plan
-from .messages import admin_plans_text, admin_promos_text, admin_promo_detail_text
+from db import trial_grants as trial_db
+from .messages import (
+    admin_plans_text,
+    admin_promos_text,
+    admin_promo_detail_text,
+    admin_trial_menu_text,
+    admin_trial_reset_confirm_text,
+)
+from services.trial import admin_reset_trial
 from .states import AdminPricingStates, AdminStates
 from .refund_chat import format_refund_chat_history, store_and_deliver_refund_message
 from services.subscription_admin import admin_delete_subscription
@@ -32,6 +41,8 @@ from .admin_keyboards import (
     admin_refunds_kb,
     admin_refund_detail_kb,
     admin_refund_chat_kb,
+    admin_trial_kb,
+    admin_trial_reset_confirm_kb,
 )
 from .ui_helpers import safe_cb_answer, send_or_edit
 
@@ -182,7 +193,10 @@ async def msg_admin_user_search(message: Message, state: FSMContext):
             f"Клиент: <code>{u['client_email']}</code>\n"
             f"До: <b>{u['end_date'][:10]}</b>"
         )
-        await message.answer(text, reply_markup=admin_user_detail_kb(sub_id, from_search=True))
+        await message.answer(
+            text,
+            reply_markup=admin_user_detail_kb(sub_id, u["tg_id"], from_search=True),
+        )
         return
 
     lines = [
@@ -227,7 +241,11 @@ async def cb_admin_user_detail(cb: CallbackQuery, state: FSMContext):
         f"subId: <code>{sub.get('sub_id') or '—'}</code>"
     )
     await safe_cb_answer(cb)
-    await send_or_edit(cb, text, admin_user_detail_kb(sub_id, from_search=from_search))
+    await send_or_edit(
+        cb,
+        text,
+        admin_user_detail_kb(sub_id, sub["tg_id"], from_search=from_search),
+    )
 
 
 @router.callback_query(F.data.startswith("adm:del_sub:") & ~F.data.startswith("adm:del_sub:confirm:"))
@@ -750,3 +768,92 @@ async def cb_admin_promo_delete(cb: CallbackQuery):
     promos = await promo_db.list_promo_codes()
     await safe_cb_answer(cb, "Удалён")
     await send_or_edit(cb, admin_promos_text(promos), admin_promos_kb(promos))
+
+
+@router.callback_query(F.data == "adm:trial")
+async def cb_admin_trial_menu(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    await state.set_state(None)
+    grants = await trial_db.list_recent_trial_grants()
+    await safe_cb_answer(cb)
+    await send_or_edit(cb, admin_trial_menu_text(grants), admin_trial_kb(grants))
+
+
+@router.callback_query(F.data == "adm:trial:search")
+async def cb_admin_trial_search(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    await state.set_state(AdminStates.waiting_trial_reset)
+    await safe_cb_answer(cb)
+    await send_or_edit(
+        cb,
+        "🔍 <b>Сброс пробного периода</b>\n\n"
+        "Отправьте TG ID пользователя.\n"
+        "Для отмены: /admin",
+        admin_back_kb(),
+    )
+
+
+@router.message(AdminStates.waiting_trial_reset)
+async def msg_admin_trial_reset_search(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    raw = (message.text or "").strip()
+    if not raw.isdigit():
+        await message.answer("Введите числовой TG ID.")
+        return
+    tg_id = int(raw)
+    await state.set_state(None)
+    user = await db.get_or_create_user(tg_id)
+    label = _user_label(user.get("username"), user.get("first_name"), tg_id)
+    await message.answer(
+        admin_trial_reset_confirm_text(tg_id, label),
+        reply_markup=admin_trial_reset_confirm_kb(tg_id),
+    )
+
+
+@router.callback_query(F.data.startswith("adm:trial_reset:") & ~F.data.startswith("adm:trial_reset:confirm:"))
+async def cb_admin_trial_reset_confirm(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    tg_id = int(cb.data.split(":")[2])
+    user = await db.get_or_create_user(tg_id)
+    label = _user_label(user.get("username"), user.get("first_name"), tg_id)
+    await safe_cb_answer(cb)
+    await send_or_edit(
+        cb,
+        admin_trial_reset_confirm_text(tg_id, label),
+        admin_trial_reset_confirm_kb(tg_id),
+    )
+
+
+@router.callback_query(F.data.startswith("adm:trial_reset:confirm:"))
+async def cb_admin_trial_reset(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    tg_id = int(cb.data.split(":")[3])
+    await safe_cb_answer(cb, "Сбрасываем…")
+    await send_or_edit(cb, "⏳ Сброс пробного периода…")
+    try:
+        result = await admin_reset_trial(tg_id)
+    except Exception as e:
+        logger.exception("Trial reset error: {}", e)
+        await send_or_edit(
+            cb,
+            f"❌ Ошибка: <code>{str(e)[:120]}</code>",
+            admin_back_kb(),
+        )
+        return
+
+    removed = result.get("removed_trials") or []
+    removed_text = ", ".join(t["email"] for t in removed) if removed else "—"
+    text = (
+        "✅ <b>Пробный период сброшен</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        f"TG ID: <code>{tg_id}</code>\n"
+        f"Удалено записей о выдаче: <b>{result['grants_deleted']}</b>\n"
+        f"Снято с панели: {removed_text}\n\n"
+        "Пользователь может снова взять пробный период."
+    )
+    await send_or_edit(cb, text, admin_trial_kb(await trial_db.list_recent_trial_grants()))

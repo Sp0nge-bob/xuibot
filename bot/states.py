@@ -10,6 +10,7 @@ class AdminStates(StatesGroup):
     waiting_inbounds = State()
     waiting_user_search = State()
     waiting_refund_reply = State()
+    waiting_trial_reset = State()
 
 
 class AdminPricingStates(StatesGroup):

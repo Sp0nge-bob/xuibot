@@ -5,11 +5,18 @@ from config.settings import settings
 from services.pricing import PriceQuote
 
 
-def main_menu_kb(_has_subscription: bool) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
+def main_menu_kb(*, trial_available: bool = False) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if trial_available:
+        rows.append([InlineKeyboardButton(
+            text="🎁 Пробный период (3 дня)",
+            callback_data="trial_offer",
+        )])
+    rows += [
         [InlineKeyboardButton(text="📦 Тарифы", callback_data="tariffs")],
         [InlineKeyboardButton(text="⚙️ Управление подпиской", callback_data="manage_sub")],
-    ])
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def plans_kb(plans: list[Plan], *, extend: bool = False) -> InlineKeyboardMarkup:
@@ -131,17 +138,23 @@ def payment_kb(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def subscription_manage_kb(sub_id: int, *, refund_id: int | None = None) -> InlineKeyboardMarkup:
+def subscription_manage_kb(
+    sub_id: int,
+    *,
+    refund_id: int | None = None,
+    is_trial: bool = False,
+) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="🔗 Ссылка и QR", callback_data=f"sub_link:{sub_id}")],
-        [InlineKeyboardButton(text="🔄 Продлить подписку", callback_data="extend_menu")],
     ]
+    if not is_trial:
+        rows.append([InlineKeyboardButton(text="🔄 Продлить подписку", callback_data="extend_menu")])
     if refund_id:
         rows.append([InlineKeyboardButton(
             text="💬 Переписка по возврату",
             callback_data=f"refund_chat:{refund_id}",
         )])
-    else:
+    elif not is_trial:
         rows.append([InlineKeyboardButton(
             text="💸 Запросить возврат",
             callback_data=f"refund:{sub_id}",
@@ -171,6 +184,13 @@ def refund_confirm_kb(sub_id: int) -> InlineKeyboardMarkup:
 def no_subscription_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📦 Выбрать тариф", callback_data="tariffs")],
+        [InlineKeyboardButton(text="« Главное меню", callback_data="main_menu")],
+    ])
+
+
+def trial_confirm_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Активировать", callback_data="trial_confirm")],
         [InlineKeyboardButton(text="« Главное меню", callback_data="main_menu")],
     ])
 

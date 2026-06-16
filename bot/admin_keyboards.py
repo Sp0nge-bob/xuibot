@@ -9,6 +9,7 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="👥 Пользователи", callback_data="adm:users")],
         [InlineKeyboardButton(text="💸 Запросы на возврат", callback_data="adm:refunds")],
         [InlineKeyboardButton(text="📡 Инбаунды подписки", callback_data="adm:inbounds")],
+        [InlineKeyboardButton(text="🎁 Пробный период", callback_data="adm:trial")],
     ])
 
 
@@ -45,8 +46,17 @@ def admin_users_kb(users: list, *, from_search: bool = False) -> InlineKeyboardM
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def admin_user_detail_kb(subscription_id: int, *, from_search: bool = False) -> InlineKeyboardMarkup:
+def admin_user_detail_kb(
+    subscription_id: int,
+    tg_id: int,
+    *,
+    from_search: bool = False,
+) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="🔄 Сброс пробного",
+            callback_data=f"adm:trial_reset:{tg_id}",
+        )],
         [InlineKeyboardButton(
             text="🗑 Удалить подписку",
             callback_data=f"adm:del_sub:{subscription_id}",
@@ -137,6 +147,32 @@ def admin_refund_detail_kb(refund_id: int) -> InlineKeyboardMarkup:
         )],
         [InlineKeyboardButton(text="« К списку", callback_data="adm:refunds")],
         [InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")],
+    ])
+
+
+def admin_trial_kb(grants: list) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text="🔍 Сброс по TG ID", callback_data="adm:trial:search")],
+    ]
+    for g in grants[:8]:
+        label = g.get("username") or g.get("first_name") or str(g["tg_id"])
+        if len(label) > 16:
+            label = label[:13] + "..."
+        rows.append([InlineKeyboardButton(
+            text=f"🔄 {label}",
+            callback_data=f"adm:trial_reset:{g['tg_id']}",
+        )])
+    rows.append([InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_trial_reset_confirm_kb(tg_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="✅ Подтвердить сброс",
+            callback_data=f"adm:trial_reset:confirm:{tg_id}",
+        )],
+        [InlineKeyboardButton(text="« Отмена", callback_data="adm:trial")],
     ])
 
 

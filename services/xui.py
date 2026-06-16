@@ -25,7 +25,7 @@ from services.panel_cache import panel_cache
 
 _api: Optional[AsyncApi] = None
 _bot_group_ensured: bool = False
-_BOT_CLIENT_EMAIL = re.compile(r"^tg\d+$")
+_BOT_CLIENT_EMAIL = re.compile(r"^tg(?:free)?\d+$")
 
 
 def _assert_bot_client_email(email: str) -> None:
@@ -34,7 +34,11 @@ def _assert_bot_client_email(email: str) -> None:
 
 
 def _tg_id_from_email(email: str) -> int:
-    if _BOT_CLIENT_EMAIL.match(email or ""):
+    if not email:
+        return 0
+    if email.startswith("tgfree"):
+        return int(email[6:])
+    if email.startswith("tg"):
         return int(email[2:])
     return 0
 
@@ -600,10 +604,12 @@ async def provision_client(
     *,
     sub_id: Optional[str] = None,
     target_expiry_ms: Optional[int] = None,
+    client_email: Optional[str] = None,
 ) -> Tuple[str, str, Optional[str]]:
     """Новая подписка — только POST clients/add + inboundIds из настроек."""
     api = await get_api()
-    email = f"tg{tg_id}"
+    email = client_email or f"tg{tg_id}"
+    _assert_bot_client_email(email)
     inbound_ids = await get_subscription_inbound_ids()
     if not inbound_ids:
         raise ValueError("Нет инбаундов для создания подписки")

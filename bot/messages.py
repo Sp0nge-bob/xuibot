@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 
 from config.plans import Plan
 from config.settings import settings
+from config.trial import TRIAL_COOLDOWN_DAYS, TRIAL_DAYS, TRIAL_TRAFFIC_GB, is_trial_email
 from services.pricing import PriceQuote
 
 
@@ -40,8 +41,9 @@ def main_menu_text(
     if subscription:
         end = _format_date(subscription["end_date"])
         left = _days_left(subscription["end_date"])
+        kind = "🎁 Пробная" if is_trial_email(subscription.get("client_email")) else "✅ Активна"
         lines += [
-            "📊 <b>Подписка:</b> ✅ Активна",
+            f"📊 <b>Подписка:</b> {kind}",
             f"   └ До <b>{end}</b> · {left} дн.",
         ]
     else:
@@ -195,8 +197,9 @@ def subscription_manage_text(sub: Dict[str, Any], sub_link: Optional[str]) -> st
     end = _format_date(sub["end_date"])
     left = _days_left(sub["end_date"])
     traffic = "безлимит" if sub.get("traffic_limit_gb", 0) == 0 else f"{sub['traffic_limit_gb']} ГБ"
+    title = "🎁 Пробная подписка" if is_trial_email(sub.get("client_email")) else "⚙️ Управление подпиской"
     lines = [
-        "⚙️ <b>Управление подпиской</b>",
+        f"<b>{title}</b>",
         "━━━━━━━━━━━━━━━━",
         "",
         f"📅 Действует до: <b>{end}</b> ({left} дн.)",
@@ -214,7 +217,52 @@ def no_subscription_text() -> str:
         "⚙️ <b>Управление подпиской</b>\n"
         "━━━━━━━━━━━━━━━━\n\n"
         "У вас пока нет активной подписки.\n"
-        "Оформите тариф, чтобы получить доступ к VPN."
+        "Оформите тариф или возьмите пробный период в главном меню."
+    )
+
+
+def trial_offer_text() -> str:
+    return (
+        "🎁 <b>Пробный период</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        f"⏱ Срок: <b>{TRIAL_DAYS} дн.</b>\n"
+        f"📊 Трафик: <b>{TRIAL_TRAFFIC_GB} ГБ</b>\n"
+        f"👤 Клиент: <code>tgfree…</code>\n\n"
+        f"Доступен <b>1 раз в {TRIAL_COOLDOWN_DAYS} дн.</b> на аккаунт Telegram.\n"
+        "После окончания можно оформить платный тариф.\n\n"
+        "Активировать пробный период?"
+    )
+
+
+def admin_trial_menu_text(grants: list) -> str:
+    lines = [
+        "🎁 <b>Пробные подписки</b>",
+        "━━━━━━━━━━━━━━━━",
+        "",
+        "Сброс снимает лимит 90 дней и удаляет активную пробную подписку с панели.",
+        "",
+    ]
+    if not grants:
+        lines.append("Выдач пробного периода пока не было.")
+    else:
+        lines.append("<b>Последние выдачи:</b>")
+        for g in grants:
+            label = g.get("username") or g.get("first_name") or str(g["tg_id"])
+            date = str(g["granted_at"])[:10]
+            lines.append(f"• {label} (<code>{g['tg_id']}</code>) — {date}")
+    lines += ["", "Введите TG ID для сброса — кнопка ниже."]
+    return "\n".join(lines)
+
+
+def admin_trial_reset_confirm_text(tg_id: int, label: str) -> str:
+    return (
+        "🔄 <b>Сброс пробного периода</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        f"Пользователь: {label}\n"
+        f"TG ID: <code>{tg_id}</code>\n\n"
+        "Будет удалена запись о выдаче пробного периода.\n"
+        "Активная пробная подписка (tgfree) будет снята с панели.\n\n"
+        "Продолжить?"
     )
 
 

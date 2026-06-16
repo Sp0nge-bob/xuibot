@@ -8,6 +8,7 @@ from aiogram.types import BufferedInputFile
 from loguru import logger
 
 from config.plans import Plan, get_plan
+from config.trial import is_trial_email
 from db import database as db
 from services.xui import (
     provision_client,
@@ -33,6 +34,8 @@ async def fulfill_paid_order(order: dict) -> Tuple[str, Optional[BufferedInputFi
     order_type = order.get("order_type") or "new"
     is_test = order["platega_tx_id"].startswith("test-")
     existing_sub = await db.get_primary_subscription(tg_id)
+    if existing_sub and is_trial_email(existing_sub.get("client_email")):
+        existing_sub = None
 
     # Повторная покупка при активной подписке = продление
     if order_type == "extend" or existing_sub:

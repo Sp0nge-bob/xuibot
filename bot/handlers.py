@@ -7,7 +7,9 @@ from loguru import logger
 from config.payments import get_payment_method_by_key
 from config.plans import get_plan
 from config.settings import settings
+from config.trial import is_trial_email
 from db import database as db
+from db import trial_grants as trial_db
 from services import platega_simulator as platega_sim
 from services.platega_client import (
     build_create_request,
@@ -28,6 +30,7 @@ from services.payment_flow import (
 from services.payment_processor import handle_platega_status
 from services.pricing import get_plan_quote, list_plans, validate_promo
 from services.subscription_sync import get_primary_subscription_for_ui
+from services.trial import claim_trial, get_trial_button_visible
 from services.xui import build_sub_link
 from .ui_helpers import safe_cb_answer, send_or_edit
 from .keyboards import (
@@ -41,6 +44,7 @@ from .keyboards import (
     refund_chat_kb,
     no_subscription_kb,
     back_to_main_kb,
+    trial_confirm_kb,
 )
 from .messages import (
     main_menu_text,
@@ -57,6 +61,7 @@ from .messages import (
     pending_payment_text,
     promo_enter_text,
     promo_applied_text,
+    trial_offer_text,
 )
 from .states import UserStates
 from .refund_chat import format_refund_chat_history, store_and_deliver_refund_message
@@ -96,8 +101,9 @@ async def _show_main_menu(target: Message | CallbackQuery, *, edit: bool = False
 
     await db.get_or_create_user(user.id, user.username, user.first_name)
     sub = await get_primary_subscription_for_ui(user.id)
+    trial_available = await get_trial_button_visible(user.id)
     text = main_menu_text(user.first_name, user.username, sub)
-    kb = main_menu_kb(sub is not None)
+    kb = main_menu_kb(trial_available=trial_available)
 
     if isinstance(target, CallbackQuery):
         if edit:
@@ -128,6 +134,40 @@ async def cb_main_menu(cb: CallbackQuery, state: FSMContext):
     await _clear_promo_input_state(state)
     await state.update_data(promo_code=None)
     await _show_main_menu(cb, edit=True, state=state)
+
+
+@router.callback_query(F.data == "trial_offer")
+async def cb_trial_offer(cb: CallbackQuery):
+    ok, reason = await trial_db.can_claim_trial(cb.from_user.id)
+    if not ok:
+        await safe_cb_answer(cb, reason, show_alert=True)
+        return
+    await safe_cb_answer(cb)
+    await send_or_edit(cb, trial_offer_text(), trial_confirm_kb())
+
+
+@router.callback_query(F.data == "trial_confirm")
+async def cb_trial_confirm(cb: CallbackQuery):
+    await safe_cb_answer(cb, "Активируем пробный период…")
+    await send_or_edit(cb, "⏳ Создаём пробную подписку…")
+    try:
+        text, photo = await claim_trial(cb.from_user.id)
+    except ValueError as e:
+        await send_or_edit(cb, f"❌ {e}", back_to_main_kb())
+        return
+    except Exception as e:
+        logger.exception("Trial claim error: {}", e)
+        await send_or_edit(cb, "❌ Не удалось активировать пробный период. Попробуйте позже.", back_to_main_kb())
+        return
+
+    if photo:
+        try:
+            await cb.message.delete()
+        except Exception:
+            pass
+        await cb.message.answer_photo(photo, caption=text, reply_markup=back_to_main_kb())
+    else:
+        await send_or_edit(cb, text, back_to_main_kb())
 
 
 @router.callback_query(F.data == "tariffs")
@@ -693,6 +733,7 @@ async def cb_manage_sub(cb: CallbackQuery):
         subscription_manage_kb(
             sub["id"],
             refund_id=pending_refund["id"] if pending_refund else None,
+            is_trial=is_trial_email(sub.get("client_email")),
         ),
     )
 

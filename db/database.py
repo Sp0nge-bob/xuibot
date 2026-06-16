@@ -87,8 +87,10 @@ async def init_db():
 
     from db.bot_settings import init_bot_settings
     from db.promo_codes import init_promo_tables
+    from db.trial_grants import init_trial_tables
     await init_bot_settings()
     await init_promo_tables()
+    await init_trial_tables()
     logger.info("Database initialized at {}", DB_PATH)
 
 async def get_or_create_user(tg_id: int, username: Optional[str] = None, first_name: Optional[str] = None):
@@ -147,7 +149,7 @@ async def get_order_by_platega_tx(tx_id: str) -> Optional[Dict[str, Any]]:
 
 async def create_subscription(
     tg_id: int,
-    order_id: int,
+    order_id: Optional[int],
     inbound_id: int,
     client_email: str,
     client_uuid: str,
@@ -234,7 +236,10 @@ async def get_active_subscriptions(tg_id: int) -> List[Dict[str, Any]]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            "SELECT * FROM subscriptions WHERE tg_id = ? AND is_active = 1 ORDER BY end_date DESC",
+            """SELECT * FROM subscriptions
+               WHERE tg_id = ? AND is_active = 1
+               ORDER BY CASE WHEN client_email LIKE 'tgfree%' THEN 1 ELSE 0 END,
+                        end_date DESC""",
             (tg_id,)
         ) as cur:
             rows = await cur.fetchall()
@@ -302,9 +307,13 @@ async def search_connected_users(query: str, limit: int = 25) -> List[Dict[str, 
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         if q.isdigit():
+            from config.trial import trial_client_email
             tg_id = int(q)
-            sql = base_sql + " AND (u.tg_id = ? OR s.client_email = ?) ORDER BY s.end_date DESC LIMIT ?"
-            params: tuple = (tg_id, f"tg{tg_id}", limit)
+            sql = base_sql + (
+                " AND (u.tg_id = ? OR s.client_email = ? OR s.client_email = ?)"
+                " ORDER BY s.end_date DESC LIMIT ?"
+            )
+            params: tuple = (tg_id, f"tg{tg_id}", trial_client_email(tg_id), limit)
         else:
             pattern = f"%{q}%"
             sql = base_sql + """
