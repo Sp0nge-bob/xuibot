@@ -7,11 +7,15 @@ from aiogram.types import CallbackQuery, Message
 from loguru import logger
 
 from db import xui_nodes as nodes_db
-from db.bot_settings import set_subscription_inbound_ids
+from db.bot_settings import (
+    get_subscription_inbounds_display,
+    set_subscription_inbound_ids,
+)
 from services.node_health import check_all_nodes_health, check_node_health
 from services.node_sync import sync_all_secondary_nodes
 from services.xui import normalize_xui_host
 from .admin_auth import is_admin
+from .admin_keyboards import admin_inbounds_kb
 from .states import AdminStates
 from .ui_helpers import safe_cb_answer, send_or_edit
 
@@ -114,6 +118,14 @@ def nodes_list_kb(nodes: list) -> "InlineKeyboardMarkup":
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def node_wizard_cancel_kb() -> "InlineKeyboardMarkup":
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="« Отмена", callback_data="adm:node:cancel")],
+    ])
+
+
 def node_detail_kb(node: dict) -> "InlineKeyboardMarkup":
     from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -168,6 +180,39 @@ async def node_detail_text(node: dict) -> str:
         f"Ошибка: <code>{str(err)[:200]}</code>",
     ]
     return "\n".join(lines)
+
+
+async def inbounds_page_text() -> str:
+    current = await get_subscription_inbounds_display()
+    primary = await nodes_db.get_primary_node()
+    primary_name = (primary or {}).get("name") or "—"
+    lines = [
+        "📡 <b>Inbounds подписки</b>",
+        "━━━━━━━━━━━━━━━━",
+        "",
+        f"Текущие ID: <code>{current or '—'}</code>",
+        f"★ Основная нода: <b>{primary_name}</b>",
+        "",
+        "<i>Используются при создании новых клиентов на основной панели.</i>",
+        "<i>На вторичные ноды уходят через синхронизацию панели.</i>",
+        "",
+        "Изменение не перепривязывает уже созданных клиентов —",
+        "при необходимости запустите «Синхронизация нод».",
+    ]
+    if not primary or not (primary.get("id") or 0):
+        lines += [
+            "",
+            "⚠️ Основная нода не настроена в БД — сначала добавьте ★ основную.",
+        ]
+    return "\n".join(lines)
+
+
+async def _apply_subscription_inbounds(inbound_ids: list[int]) -> None:
+    await set_subscription_inbound_ids(inbound_ids)
+    primary = await nodes_db.get_primary_node()
+    node_id = int((primary or {}).get("id") or 0)
+    if node_id > 0:
+        await nodes_db.update_node(node_id, inbound_ids=inbound_ids)
 
 
 async def _node_will_be_primary(data: dict) -> bool:
@@ -241,6 +286,7 @@ async def _proceed_after_node_auth(message: Message, state: FSMContext) -> None:
             "(только ★ основная; на ноды уйдёт через панель):\n"
             "Пример: <code>1,16</code>",
             parse_mode="HTML",
+            reply_markup=node_wizard_cancel_kb(),
         )
         return
     await _save_node_from_draft(message, state, inbound_ids=[])
@@ -257,8 +303,85 @@ async def cb_nodes_list(cb: CallbackQuery, state: FSMContext):
 
 
 @router.callback_query(F.data == "adm:inbounds")
-async def cb_inbounds_redirect(cb: CallbackQuery, state: FSMContext):
-    await cb_nodes_list(cb, state)
+async def cb_inbounds_page(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    await state.clear()
+    await safe_cb_answer(cb)
+    await send_or_edit(cb, await inbounds_page_text(), admin_inbounds_kb())
+
+
+@router.callback_query(F.data == "adm:inbounds:edit")
+async def cb_inbounds_edit(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    primary = await nodes_db.get_primary_node()
+    if not primary or not int((primary.get("id") or 0)):
+        await safe_cb_answer(cb, "Сначала добавьте ★ основную ноду", show_alert=True)
+        return
+    current = await get_subscription_inbounds_display()
+    await state.set_state(AdminStates.waiting_inbounds)
+    await safe_cb_answer(cb)
+    await send_or_edit(
+        cb,
+        "✏️ <b>Inbounds подписки</b>\n\n"
+        f"Сейчас: <code>{current or '—'}</code>\n\n"
+        "Введите новые ID через запятую.\n"
+        "Пример: <code>1,16</code>",
+        node_wizard_cancel_kb(),
+    )
+
+
+@router.message(AdminStates.waiting_inbounds)
+async def msg_inbounds_edit(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    raw = (message.text or "").strip()
+    if not re.fullmatch(r"[\d,\s]+", raw):
+        await message.answer(
+            "Формат: 1,16",
+            reply_markup=node_wizard_cancel_kb(),
+        )
+        return
+    ids = nodes_db.parse_inbound_ids(raw)
+    if not ids:
+        await message.answer(
+            "Укажите хотя бы один inbound ID.",
+            reply_markup=node_wizard_cancel_kb(),
+        )
+        return
+    try:
+        await _apply_subscription_inbounds(ids)
+    except ValueError as e:
+        await message.answer(f"❌ {e}", reply_markup=node_wizard_cancel_kb())
+        return
+    await state.clear()
+    value = ", ".join(str(x) for x in ids)
+    await message.answer(
+        f"✅ Inbounds обновлены: <code>{value}</code>",
+        reply_markup=admin_inbounds_kb(),
+    )
+
+
+@router.callback_query(F.data == "adm:node:cancel")
+async def cb_node_wizard_cancel(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    data = await state.get_data()
+    edit_id = data.get("node_edit_id")
+    inbound_edit = await state.get_state() == AdminStates.waiting_inbounds.state
+    await state.clear()
+    await safe_cb_answer(cb, "Отменено")
+    if inbound_edit:
+        await send_or_edit(cb, await inbounds_page_text(), admin_inbounds_kb())
+        return
+    if edit_id:
+        node = await nodes_db.get_node(edit_id)
+        if node:
+            await send_or_edit(cb, await node_detail_text(node), node_detail_kb(node))
+            return
+    nodes = await nodes_db.list_nodes()
+    await send_or_edit(cb, await nodes_list_text(), nodes_list_kb(nodes))
 
 
 @router.callback_query(F.data.regexp(r"^adm:node:\d+$"))
@@ -287,6 +410,7 @@ async def cb_node_add(cb: CallbackQuery, state: FSMContext):
         "Первая нода станет ★ основной (с инбаундами подписки).\n"
         "Остальные — вторичные (только синк и удаление).\n\n"
         "Название (например NL, US):",
+        node_wizard_cancel_kb(),
     )
 
 
@@ -302,7 +426,11 @@ async def cb_node_edit(cb: CallbackQuery, state: FSMContext):
     await state.set_state(AdminStates.waiting_node_name)
     await state.update_data(node_edit_id=node_id, node_draft=dict(node))
     await safe_cb_answer(cb)
-    await send_or_edit(cb, f"✏️ Редактирование <b>{node['name']}</b>\n\nНовое название:")
+    await send_or_edit(
+        cb,
+        f"✏️ Редактирование <b>{node['name']}</b>\n\nНовое название:",
+        node_wizard_cancel_kb(),
+    )
 
 
 @router.message(AdminStates.waiting_node_name)
@@ -311,14 +439,17 @@ async def msg_node_name(message: Message, state: FSMContext):
         return
     name = (message.text or "").strip()
     if not name:
-        await message.answer("Введите название.")
+        await message.answer("Введите название.", reply_markup=node_wizard_cancel_kb())
         return
     data = await state.get_data()
     draft = data.get("node_draft") or {}
     draft["name"] = name
     await state.update_data(node_draft=draft)
     await state.set_state(AdminStates.waiting_node_host)
-    await message.answer(f"Host панели 3x-ui для <b>{name}</b>:\n(HTTPS URL без /panel)")
+    await message.answer(
+        f"Host панели 3x-ui для <b>{name}</b>:\n(HTTPS URL без /panel)",
+        reply_markup=node_wizard_cancel_kb(),
+    )
 
 
 @router.message(AdminStates.waiting_node_host)
@@ -327,7 +458,10 @@ async def msg_node_host(message: Message, state: FSMContext):
         return
     host = (message.text or "").strip()
     if not host.startswith("http"):
-        await message.answer("Укажите полный URL, например https://node.example.com/secret")
+        await message.answer(
+            "Укажите полный URL, например https://node.example.com/secret",
+            reply_markup=node_wizard_cancel_kb(),
+        )
         return
     draft = (await state.get_data()).get("node_draft") or {}
     draft["host"] = host
@@ -336,6 +470,7 @@ async def msg_node_host(message: Message, state: FSMContext):
     await message.answer(
         "API token (или <code>-</code> для login/password):",
         parse_mode="HTML",
+        reply_markup=node_wizard_cancel_kb(),
     )
 
 
@@ -349,7 +484,7 @@ async def msg_node_token(message: Message, state: FSMContext):
         draft["token"] = ""
         await state.update_data(node_draft=draft)
         await state.set_state(AdminStates.waiting_node_login)
-        await message.answer("Username панели:")
+        await message.answer("Username панели:", reply_markup=node_wizard_cancel_kb())
         return
     draft["token"] = raw
     draft["username"] = ""
@@ -366,7 +501,7 @@ async def msg_node_login(message: Message, state: FSMContext):
     draft["username"] = (message.text or "").strip()
     await state.update_data(node_draft=draft)
     await state.set_state(AdminStates.waiting_node_password)
-    await message.answer("Password:")
+    await message.answer("Password:", reply_markup=node_wizard_cancel_kb())
 
 
 @router.message(AdminStates.waiting_node_password)
@@ -385,11 +520,14 @@ async def msg_node_inbounds(message: Message, state: FSMContext):
         return
     raw = (message.text or "").strip()
     if not re.fullmatch(r"[\d,\s]+", raw):
-        await message.answer("Формат: 1,16")
+        await message.answer("Формат: 1,16", reply_markup=node_wizard_cancel_kb())
         return
     ids = nodes_db.parse_inbound_ids(raw)
     if not ids:
-        await message.answer("Укажите хотя бы один inbound ID.")
+        await message.answer(
+            "Укажите хотя бы один inbound ID.",
+            reply_markup=node_wizard_cancel_kb(),
+        )
         return
 
     await _save_node_from_draft(message, state, inbound_ids=ids)
