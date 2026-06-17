@@ -13,6 +13,9 @@ CATEGORY_OTHER = "other"
 STATUS_OPEN = "open"
 STATUS_CLOSED = "closed"
 
+REFUND_DECISION_APPROVED = "approved"
+REFUND_DECISION_REJECTED = "rejected"
+
 _CATEGORY_LABELS = {
     CATEGORY_REFUND: "Возврат",
     CATEGORY_SUPPORT: "Поддержка",
@@ -69,6 +72,15 @@ async def init_tickets_tables() -> None:
         )
         await db.commit()
         await _migrate_refund_tables(db)
+        await _migrate_refund_decision_column(db)
+
+
+async def _migrate_refund_decision_column(db: aiosqlite.Connection) -> None:
+    async with db.execute("PRAGMA table_info(tickets)") as cur:
+        columns = {row[1] for row in await cur.fetchall()}
+    if "refund_decision" not in columns:
+        await db.execute("ALTER TABLE tickets ADD COLUMN refund_decision TEXT")
+        await db.commit()
 
 
 async def _migrate_refund_tables(db: aiosqlite.Connection) -> None:
@@ -123,7 +135,7 @@ async def _migrate_refund_tables(db: aiosqlite.Connection) -> None:
 def _ticket_select_sql() -> str:
     return """
         SELECT t.id, t.tg_id, t.category, t.subscription_id, t.order_id,
-               t.status, t.created_at, t.closed_at, t.last_message_at, t.admin_last_read_at,
+               t.status, t.refund_decision, t.created_at, t.closed_at, t.last_message_at, t.admin_last_read_at,
                u.username, u.first_name,
                s.client_email, s.end_date AS sub_end_date,
                o.plan_name, o.amount AS order_amount, o.platega_tx_id
@@ -270,6 +282,34 @@ async def close_ticket(ticket_id: int) -> bool:
         )
         await db.commit()
         return cursor.rowcount > 0
+
+
+async def close_refund_ticket(ticket_id: int, decision: str) -> bool:
+    if decision not in (REFUND_DECISION_APPROVED, REFUND_DECISION_REJECTED):
+        raise ValueError(f"invalid refund decision: {decision}")
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """UPDATE tickets SET status = ?, refund_decision = ?,
+                      closed_at = CURRENT_TIMESTAMP
+               WHERE id = ? AND status = ? AND category = ?""",
+            (STATUS_CLOSED, decision, ticket_id, STATUS_OPEN, CATEGORY_REFUND),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+async def get_refund_ticket_for_order(order_id: int) -> Optional[Dict[str, Any]]:
+    """Последний refund-тикет по заказу (для уведомления при chargeback)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            _ticket_select_sql()
+            + """ WHERE t.order_id = ? AND t.category = ?
+                ORDER BY t.id DESC LIMIT 1""",
+            (order_id, CATEGORY_REFUND),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
 
 
 async def cancel_tickets_for_subscription(subscription_id: int) -> None:

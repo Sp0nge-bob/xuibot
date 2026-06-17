@@ -228,19 +228,34 @@ def admin_tickets_kb(tickets: list, *, filter_key: str = "all") -> InlineKeyboar
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def admin_ticket_detail_kb(ticket_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
+def admin_ticket_detail_kb(ticket_id: int, *, category: str | None = None) -> InlineKeyboardMarkup:
+    rows = [
         [InlineKeyboardButton(
             text="💬 Начать переписку по тикету",
             callback_data=f"adm:ticket:session:{ticket_id}",
         )],
-        [InlineKeyboardButton(
+    ]
+    if category == "refund":
+        rows += [
+            [InlineKeyboardButton(
+                text="✅ Одобрить возврат",
+                callback_data=f"adm:ticket:refund_approve:{ticket_id}",
+            )],
+            [InlineKeyboardButton(
+                text="❌ Отклонить",
+                callback_data=f"adm:ticket:refund_reject:{ticket_id}",
+            )],
+        ]
+    else:
+        rows.append([InlineKeyboardButton(
             text="✅ Закрыть тикет",
             callback_data=f"adm:ticket:close:{ticket_id}",
-        )],
+        )])
+    rows += [
         [InlineKeyboardButton(text="« К списку", callback_data="adm:tickets:all")],
         [InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")],
-    ])
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def admin_ticket_session_kb(ticket_id: int) -> InlineKeyboardMarkup:

@@ -6,8 +6,9 @@ from aiogram.types import BufferedInputFile, FSInputFile
 from loguru import logger
 
 from db import database as db
+from db import tickets as tickets_db
 from services.fulfillment import fulfill_paid_order
-from services.payment_text import payment_failed_user_text
+from services.payment_text import payment_failed_user_text, refund_chargeback_user_text
 
 
 @dataclass
@@ -45,6 +46,12 @@ def _callback_amount_acceptable(
     # Комиссия сверху: callback >= order и не больше разумного потолка.
     max_allowed = order * (1 + _MAX_COMMISSION_RATE) + tolerance
     return order - tolerance <= callback <= max_allowed
+
+
+async def _chargeback_user_message(order: Dict[str, Any]) -> str:
+    ticket = await tickets_db.get_refund_ticket_for_order(order["id"])
+    ticket_id = ticket["id"] if ticket else None
+    return refund_chargeback_user_text(order, ticket_id=ticket_id)
 
 
 async def handle_platega_status(
@@ -104,7 +111,11 @@ async def handle_platega_status(
     if order["status"] == "paid":
         if status == "CONFIRMED":
             return PaymentProcessResult(handled=True, already_paid=True)
-        if status in ("CANCELED", "CHARGEBACKED", "FAILED"):
+        if status == "CHARGEBACKED":
+            await db.update_order_status(tx_id, "failed")
+            msg = await _chargeback_user_message(order) if notify else None
+            return PaymentProcessResult(handled=True, user_message=msg)
+        if status in ("CANCELED", "FAILED"):
             await db.update_order_status(tx_id, "failed")
             msg = payment_failed_user_text(order, status=status) if notify else None
             return PaymentProcessResult(handled=True, user_message=msg)
@@ -133,7 +144,12 @@ async def handle_platega_status(
             )
             return PaymentProcessResult(handled=True, user_message=msg)
 
-    if status in ("CANCELED", "CHARGEBACKED", "FAILED"):
+    if status == "CHARGEBACKED":
+        await db.update_order_status(tx_id, "failed")
+        msg = await _chargeback_user_message(order) if notify else None
+        return PaymentProcessResult(handled=True, user_message=msg)
+
+    if status in ("CANCELED", "FAILED"):
         await db.update_order_status(tx_id, "failed")
         msg = payment_failed_user_text(order, status=status) if notify else None
         return PaymentProcessResult(handled=True, user_message=msg)

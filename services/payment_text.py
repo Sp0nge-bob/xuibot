@@ -53,3 +53,35 @@ def payment_failed_user_text(
         "Создайте новый заказ в разделе «Тарифы», если хотите оплатить снова.",
     ]
     return "\n".join(lines)
+
+
+def refund_chargeback_user_text(
+    order: Dict[str, Any],
+    *,
+    ticket_id: Optional[int] = None,
+) -> str:
+    """Уведомление клиенту: Platega подтвердила возврат средств (CHARGEBACKED)."""
+    plan_name = order.get("plan_name") or "—"
+    amount = int(order.get("amount") or 0)
+    order_id = order.get("id") or "—"
+    tx_id = order.get("platega_tx_id") or "—"
+
+    lines = [
+        "✅ <b>Средства возвращены</b>",
+        "━━━━━━━━━━━━━━━━",
+        "",
+        "Платёжная система подтвердила возврат по оплате:",
+        "",
+        f"📦 Тариф: <b>{plan_name}</b>",
+        f"💰 Сумма: <b>{amount} ₽</b>",
+        f"🧾 Заказ: <code>#{order_id}</code>",
+        f"🆔 TX Platega: <code>{tx_id}</code>",
+    ]
+    if ticket_id:
+        lines.append(f"🎫 Тикет: <code>#{ticket_id}</code>")
+    lines += [
+        "",
+        "Средства поступят на счёт, с которого была оплата.",
+        "Срок зачисления зависит от банка (обычно 1–14 дней).",
+    ]
+    return "\n".join(lines)

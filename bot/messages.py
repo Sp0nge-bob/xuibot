@@ -533,6 +533,47 @@ def ticket_created_text(ticket_id: int) -> str:
     return f"✅ Тикет <code>#{ticket_id}</code> создан."
 
 
+def refund_ticket_approved_user_text(ticket: Dict[str, Any]) -> str:
+    ticket_id = ticket["id"]
+    lines = [
+        "✅ <b>Запрос на возврат одобрен</b>",
+        "━━━━━━━━━━━━━━━━",
+        "",
+        f"Тикет <code>#{ticket_id}</code> закрыт.",
+        "",
+        "Возврат средств выполняется вручную через платёжную систему.",
+        "Когда возврат будет подтверждён, вы получите отдельное уведомление.",
+    ]
+    if ticket.get("order_id"):
+        lines += [
+            "",
+            f"🧾 Заказ: <code>#{ticket['order_id']}</code>",
+            f"📦 Тариф: <b>{ticket.get('plan_name') or '—'}</b>",
+            f"💰 Сумма: <b>{ticket.get('order_amount') or '—'} ₽</b>",
+        ]
+    return "\n".join(lines)
+
+
+def refund_ticket_rejected_user_text(ticket: Dict[str, Any]) -> str:
+    ticket_id = ticket["id"]
+    lines = [
+        "❌ <b>Запрос на возврат отклонён</b>",
+        "━━━━━━━━━━━━━━━━",
+        "",
+        f"Тикет <code>#{ticket_id}</code> закрыт.",
+        "",
+        "Если остались вопросы — напишите в поддержку.",
+    ]
+    if ticket.get("order_id"):
+        lines += [
+            "",
+            f"🧾 Заказ: <code>#{ticket['order_id']}</code>",
+            f"📦 Тариф: <b>{ticket.get('plan_name') or '—'}</b>",
+            f"💰 Сумма: <b>{ticket.get('order_amount') or '—'} ₽</b>",
+        ]
+    return "\n".join(lines)
+
+
 def refund_admin_text(
     tg_id: int,
     username: Optional[str],

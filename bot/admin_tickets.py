@@ -18,6 +18,7 @@ from .ticket_chat import (
     set_active_session,
     get_active_session,
 )
+from .messages import refund_ticket_approved_user_text, refund_ticket_rejected_user_text
 from .ui_helpers import safe_cb_answer, send_or_edit
 
 router = Router()
@@ -138,7 +139,86 @@ async def cb_admin_ticket_detail(cb: CallbackQuery, state: FSMContext):
     if unread:
         lines.append(f"🔴 Непрочитанных: <b>{unread}</b>")
     await safe_cb_answer(cb)
-    await send_or_edit(cb, "\n".join(lines), admin_ticket_detail_kb(ticket_id))
+    await send_or_edit(
+        cb,
+        "\n".join(lines),
+        admin_ticket_detail_kb(ticket_id, category=row.get("category")),
+    )
+
+
+async def _close_refund_ticket_and_notify(
+    ticket_id: int,
+    decision: str,
+    *,
+    cb: CallbackQuery | None = None,
+    state: FSMContext | None = None,
+    admin_tg_id: int | None = None,
+) -> bool:
+    closed = await tickets_db.close_refund_ticket(ticket_id, decision)
+    if not closed:
+        return False
+
+    if admin_tg_id is not None:
+        clear_active_session(admin_tg_id, ticket_id=ticket_id)
+    if state is not None:
+        await state.set_state(None)
+
+    row = await tickets_db.get_ticket_by_id(ticket_id)
+    if row:
+        text = (
+            refund_ticket_approved_user_text(row)
+            if decision == tickets_db.REFUND_DECISION_APPROVED
+            else refund_ticket_rejected_user_text(row)
+        )
+        try:
+            from bot import bot as tg_bot
+            await tg_bot.send_message(row["tg_id"], text)
+        except Exception:
+            pass
+
+    if cb is not None:
+        label = "одобрен" if decision == tickets_db.REFUND_DECISION_APPROVED else "отклонён"
+        await safe_cb_answer(cb, f"Возврат {label}")
+        await send_or_edit(
+            cb,
+            "🎫 <b>Тикеты</b>\n\nВыберите категорию:",
+            admin_tickets_filter_kb(),
+        )
+    return True
+
+
+@router.callback_query(F.data.regexp(r"^adm:ticket:refund_approve:\d+$"))
+async def cb_admin_refund_approve(cb: CallbackQuery, state: FSMContext):
+    from bot.admin import is_admin
+    if not is_admin(cb.from_user.id):
+        return
+    ticket_id = int(cb.data.split(":")[3])
+    ok = await _close_refund_ticket_and_notify(
+        ticket_id,
+        tickets_db.REFUND_DECISION_APPROVED,
+        cb=cb,
+        state=state,
+        admin_tg_id=cb.from_user.id,
+    )
+    if not ok:
+        await safe_cb_answer(cb, "Тикет не найден или уже закрыт", show_alert=True)
+
+
+@router.callback_query(F.data.regexp(r"^adm:ticket:refund_reject:\d+$"))
+async def cb_admin_refund_reject(cb: CallbackQuery, state: FSMContext):
+    from bot.admin import is_admin
+    if not is_admin(cb.from_user.id):
+        return
+    ticket_id = int(cb.data.split(":")[3])
+    ok = await _close_refund_ticket_and_notify(
+        ticket_id,
+        tickets_db.REFUND_DECISION_REJECTED,
+        cb=cb,
+        state=state,
+        admin_tg_id=cb.from_user.id,
+    )
+    if not ok:
+        await safe_cb_answer(cb, "Тикет не найден или уже закрыт", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("adm:ticket:session:"))
@@ -183,7 +263,7 @@ async def cb_admin_ticket_session_end(cb: CallbackQuery, state: FSMContext):
     if row:
         await cb.message.answer(
             f"Тикет #{ticket_id} — сессия завершена.",
-            reply_markup=admin_ticket_detail_kb(ticket_id),
+            reply_markup=admin_ticket_detail_kb(ticket_id, category=row.get("category")),
         )
 
 
@@ -193,6 +273,14 @@ async def cb_admin_ticket_close(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
         return
     ticket_id = int(cb.data.split(":")[3])
+    row = await tickets_db.get_ticket_by_id(ticket_id)
+    if row and row.get("category") == tickets_db.CATEGORY_REFUND:
+        await safe_cb_answer(
+            cb,
+            "Для возврата используйте «Одобрить» или «Отклонить»",
+            show_alert=True,
+        )
+        return
     closed = await tickets_db.close_ticket(ticket_id)
     if not closed:
         await safe_cb_answer(cb, "Тикет не найден или уже закрыт", show_alert=True)
