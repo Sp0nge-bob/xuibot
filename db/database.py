@@ -89,6 +89,8 @@ async def init_db():
             await db.execute("ALTER TABLE orders ADD COLUMN original_amount INTEGER")
         if "discount_amount" not in cols:
             await db.execute("ALTER TABLE orders ADD COLUMN discount_amount INTEGER DEFAULT 0")
+        if "payment_redirect" not in cols:
+            await db.execute("ALTER TABLE orders ADD COLUMN payment_redirect TEXT")
         await db.execute("""
             CREATE TABLE IF NOT EXISTS subscriptions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -144,15 +146,16 @@ async def create_order(
     promo_code: Optional[str] = None,
     original_amount: Optional[int] = None,
     discount_amount: int = 0,
+    payment_redirect: Optional[str] = None,
 ) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             """INSERT INTO orders
                (tg_id, plan_id, plan_name, amount, platega_tx_id, payment_method, order_type,
-                promo_code, original_amount, discount_amount, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')""",
+                promo_code, original_amount, discount_amount, payment_redirect, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')""",
             (tg_id, plan_id, plan_name, amount, platega_tx_id, payment_method, order_type,
-             promo_code, original_amount or amount, discount_amount)
+             promo_code, original_amount or amount, discount_amount, payment_redirect)
         )
         await db.commit()
         return cursor.lastrowid

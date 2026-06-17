@@ -11,15 +11,18 @@ from config.trial import is_trial_email
 from db import database as db
 from db import trial_grants as trial_db
 from services import platega_simulator as platega_sim
+from services.payment_pending import (
+    expires_in_from_order_created,
+    fetch_pending_expires_in,
+    is_payment_window_expired,
+)
 from services.platega_client import (
     build_create_request,
     create_transaction,
     format_create_error_message,
     format_request_preview,
     get_return_urls,
-    get_transaction_status,
     parse_create_response,
-    parse_status_response,
     PlategaAPIError,
 )
 from services.payment_flow import (
@@ -346,14 +349,20 @@ async def _start_payment(
         promo_code=quote.promo_code,
         original_amount=quote.base_price,
         discount_amount=quote.discount_amount,
+        payment_redirect=redirect,
     )
+    order = await db.get_order_by_platega_tx(tx_id) or {
+        "created_at": None,
+        "payment_redirect": redirect,
+    }
+    expires_in = parsed.get("expires_in") or expires_in_from_order_created(order.get("created_at"))
 
     await send_or_edit(
         cb,
         pending_payment_text(
             plan, method["name"],
             extend=extend, has_active_sub=has_active_sub, quote=quote,
-            expires_in=parsed.get("expires_in"),
+            expires_in=expires_in,
         ),
         payment_kb(redirect, tx_id),
     )
@@ -466,6 +475,7 @@ async def _apply_test_scenario(
         promo_code=quote.promo_code,
         original_amount=quote.base_price,
         discount_amount=quote.discount_amount,
+        payment_redirect=redirect or "",
     )
 
     if scenario == platega_sim.SCENARIO_PENDING:
@@ -524,10 +534,16 @@ async def _apply_test_scenario(
     await send_or_edit(cb, text, back_to_main_kb())
 
 
-PENDING_NOT_PAID_NOTE = "Оплата ещё не прошла"
+PENDING_RECHECK_NOTE = "Оплата ещё не поступила — можно проверить снова или перейти к оплате"
 
 
-async def _pending_payment_view(order: dict, tx_id: str, *, status_note: str | None = None):
+async def _pending_payment_view(
+    order: dict,
+    tx_id: str,
+    *,
+    status_note: str | None = None,
+    rechecked: bool = False,
+):
     plan = get_plan(order["plan_id"])
     if not plan:
         return None, None
@@ -543,15 +559,14 @@ async def _pending_payment_view(order: dict, tx_id: str, *, status_note: str | N
     )
     extend = (order.get("order_type") or "new") == "extend"
     existing_sub = await db.get_primary_subscription(order["tg_id"])
-    expires_in = None
-    redirect = f"https://pay.platega.test/sim/{tx_id}"
-    if settings.TEST_MODE and tx_id.startswith("test-"):
-        try:
-            sim_status = platega_sim.simulate_get_status(tx_id)
-            expires_in = sim_status.get("expiresIn")
-        except KeyError:
-            pass
+    expires_in = await fetch_pending_expires_in(tx_id, order)
+    redirect = (order.get("payment_redirect") or "").strip()
+    if not redirect and settings.TEST_MODE and tx_id.startswith("test-"):
+        redirect = f"https://pay.platega.test/sim/{tx_id}"
     is_test = settings.TEST_MODE and tx_id.startswith("test-")
+    note = status_note
+    if rechecked and not note and not is_payment_window_expired(expires_in):
+        note = PENDING_RECHECK_NOTE
     text = pending_payment_text(
         plan,
         method["name"] if method else "—",
@@ -560,7 +575,7 @@ async def _pending_payment_view(order: dict, tx_id: str, *, status_note: str | N
         quote=quote,
         expires_in=expires_in,
         test_mode=is_test,
-        status_note=status_note,
+        status_note=note,
     )
     kb = payment_kb(redirect, tx_id, test_mode=is_test)
     return text, kb
@@ -600,14 +615,16 @@ async def _respond_payment_flow(cb: CallbackQuery, order: dict, tx_id: str, flow
             reply_markup=back_to_main_kb(),
         )
         return
+    if status == "PENDING":
+        pending_text, pending_kb = await _pending_payment_view(
+            order,
+            tx_id,
+            rechecked=bool(result.user_message),
+        )
+        if pending_text and pending_kb:
+            await send_or_edit(cb, pending_text, pending_kb)
+            return
     if result.user_message:
-        if status == "PENDING" and settings.TEST_MODE and tx_id.startswith("test-"):
-            pending_text, pending_kb = await _pending_payment_view(
-                order, tx_id, status_note=PENDING_NOT_PAID_NOTE,
-            )
-            if pending_text and pending_kb:
-                await send_or_edit(cb, pending_text, pending_kb)
-                return
         await cb.message.answer(result.user_message, reply_markup=back_to_main_kb())
         return
     await cb.message.answer("Не удалось обработать статус. Попробуйте позже.")

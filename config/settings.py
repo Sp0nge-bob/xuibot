@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     XUI_REQUEST_DELAY_MS: int = 20
     XUI_SECONDARY_SYNC_WORKERS: int = 3
 
-    # Полная синхронизация нод — отдельный процесс run_sync.py
+    # Полная синхронизация нод (как кнопка в админке) — bot/scheduler.py
     FULL_SYNC_INTERVAL_HOURS: int = 24
 
     # Пока бот настроен на одну ноду.

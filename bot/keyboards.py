@@ -98,9 +98,9 @@ def payment_kb(
     *,
     test_mode: bool = False,
 ) -> InlineKeyboardMarkup:
-    rows: list[list[InlineKeyboardButton]] = [
-        [InlineKeyboardButton(text="💳 Перейти к оплате", url=payment_url)],
-    ]
+    rows: list[list[InlineKeyboardButton]] = []
+    if payment_url:
+        rows.append([InlineKeyboardButton(text="💳 Перейти к оплате", url=payment_url)])
     if test_mode:
         rows += [
             [InlineKeyboardButton(

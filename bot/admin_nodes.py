@@ -12,11 +12,7 @@ from db.bot_settings import (
     set_subscription_inbound_ids,
 )
 from services.node_health import check_all_nodes_health, check_node_health
-from services.sync_store import (
-    format_sync_report_text,
-    get_sync_report,
-    request_manual_sync,
-)
+from services.node_sync import sync_all_secondary_nodes
 from services.xui import invalidate_api_cache, normalize_xui_host
 from .admin_auth import is_admin
 from .admin_keyboards import admin_inbounds_kb
@@ -81,9 +77,6 @@ async def nodes_list_text() -> str:
             )
         if len(nodes) > 15:
             lines.append(f"… и ещё <b>{len(nodes) - 15}</b> записей в БД")
-    lines += ["", "━━━━━━━━━━━━━━━━", ""]
-    report = await get_sync_report()
-    lines.append(format_sync_report_text(report))
     return "\n".join(lines)
 
 
@@ -118,7 +111,7 @@ def nodes_list_kb(nodes: list) -> "InlineKeyboardMarkup":
             callback_data="adm:nodes:dedupe",
         )])
     rows += [
-        [InlineKeyboardButton(text="🔄 Синхронизация нод", callback_data="adm:nodes:sync")],
+        [InlineKeyboardButton(text="🔄 Синхронизировать вторичные", callback_data="adm:nodes:sync")],
         [InlineKeyboardButton(text="🩺 Проверить все ноды", callback_data="adm:nodes:health")],
         [InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")],
     ]
@@ -591,21 +584,20 @@ async def cb_nodes_health_all(cb: CallbackQuery):
 async def cb_nodes_sync(cb: CallbackQuery):
     if not is_admin(cb.from_user.id):
         return
-    report = await get_sync_report()
-    if report.get("status") == "running":
-        await safe_cb_answer(cb, "Синхронизация уже выполняется", show_alert=True)
-        nodes = await nodes_db.list_nodes()
-        await send_or_edit(cb, await nodes_list_text(), nodes_list_kb(nodes))
-        return
-
-    await request_manual_sync()
-    await safe_cb_answer(cb, "Запрос отправлен в фон")
-    text = (
-        "📋 <b>Синхронизация поставлена в очередь</b>\n\n"
-        "Тяжёлая синхронизация выполняется отдельным процессом "
-        "<code>run_sync.py</code> и не блокирует бота.\n\n"
-        "Обновите список нод через минуту — появится результат последнего прогона."
-    )
+    await safe_cb_answer(cb, "Синхронизация…")
+    await send_or_edit(cb, "⏳ Синхронизация вторичных нод…")
+    try:
+        stats = await sync_all_secondary_nodes()
+        text = (
+            "✅ <b>Синхронизация завершена</b>\n\n"
+            f"Подписок: {stats['subs']}\n"
+            f"Нод: {stats['nodes']}\n"
+            f"Успешно: {stats['ok']}\n"
+            f"Ошибок: {stats['failed']}"
+        )
+    except Exception as e:
+        logger.exception("Manual sync failed: {}", e)
+        text = f"❌ Ошибка синхронизации: <code>{str(e)[:120]}</code>"
     nodes = await nodes_db.list_nodes()
     await send_or_edit(cb, text, nodes_list_kb(nodes))
 

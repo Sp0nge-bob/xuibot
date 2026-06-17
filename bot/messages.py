@@ -373,7 +373,12 @@ def pending_payment_text(
         f"💳 Способ: <b>{method_name}</b>",
     ]
     if expires_in:
-        lines.append(f"⏱ Истекает через: <b>{expires_in}</b>")
+        if expires_in == "00:00:00":
+            lines.append("⏱ <b>Время оплаты истекло</b> — создайте новый заказ")
+        else:
+            lines.append(f"⏱ Истекает через: <b>{expires_in}</b>")
+    else:
+        lines.append("⏱ Окно оплаты: <b>30 минут</b> с момента создания счёта")
     if quote and quote.has_discount:
         lines.append(f"🎟 Промокод: <code>{quote.promo_code}</code>")
     note = _renewal_note(extend=extend, has_active_sub=has_active_sub)
