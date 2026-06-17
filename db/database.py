@@ -147,7 +147,6 @@ async def _init_db_impl():
     _INIT_MARKER.parent.mkdir(parents=True, exist_ok=True)
     _INIT_MARKER.write_text(datetime.utcnow().isoformat(), encoding="utf-8")
     logger.info("Database initialized at {}", DB_PATH)
-    await asyncio.to_thread(logger.complete)
 
 
 def is_db_init_complete() -> bool:

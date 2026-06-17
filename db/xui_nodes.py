@@ -201,11 +201,21 @@ async def _migrate_primary_from_env_with_retry() -> None:
             raise
 
 
+async def _host_exists_in_nodes(host: str) -> bool:
+    key = normalize_node_host(host)
+    if not key:
+        return False
+    async with get_db() as db:
+        async with db.execute("SELECT host FROM xui_nodes") as cur:
+            rows = await cur.fetchall()
+    return any(normalize_node_host(r[0] or "") == key for r in rows)
+
+
 async def _migrate_primary_from_env() -> None:
     from db.bot_settings import get_subscription_inbound_ids_from_settings
 
     host = (settings.XUI_HOST or "").strip()
-    if host and await get_node_by_host(host):
+    if host and await _host_exists_in_nodes(host):
         return
 
     inbound_ids = await get_subscription_inbound_ids_from_settings()
@@ -308,6 +318,7 @@ async def create_node(
         raise ValueError("Для основной ноды укажите inbound IDs подписки")
     if await get_node_by_host(host):
         raise ValueError("Нода с таким host уже зарегистрирована")
+    sort_order = await _count_nodes()
     async with get_db() as db:
         if is_primary:
             await db.execute("UPDATE xui_nodes SET is_primary = 0")
@@ -325,7 +336,7 @@ async def create_node(
                 format_inbound_ids(ids),
                 int(is_primary),
                 int(is_enabled),
-                await _count_nodes(),
+                sort_order,
             ),
         )
         await db.commit()
