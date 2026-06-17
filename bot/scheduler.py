@@ -1,5 +1,5 @@
 """
-Планировщик: health нод, истечение подписок, полная синхронизация нод раз в сутки.
+Планировщик: health нод, истечение подписок, синхронизация нод, ежедневный бэкап.
 """
 import asyncio
 
@@ -11,6 +11,7 @@ from db import database as db
 from services.xui import disable_client
 from services.node_sync import sync_all_secondary_nodes
 from services.node_health import check_all_nodes_health
+from services.backup import run_scheduled_backup
 
 scheduler = AsyncIOScheduler()
 
@@ -86,10 +87,19 @@ def start_scheduler():
     )
     scheduler.add_job(check_expired_subscriptions, "interval", hours=1, id="check_expired")
     scheduler.add_job(expire_stale_pending_orders_job, "interval", hours=6, id="expire_stale_pending")
+    if settings.BACKUP_ENABLED:
+        scheduler.add_job(
+            run_scheduled_backup,
+            "cron",
+            hour=settings.BACKUP_HOUR_UTC,
+            minute=0,
+            id="daily_backup",
+        )
     scheduler.start()
     logger.info(
-        "Scheduler started (sync {}h, expiry 1h, stale pending 6h)",
+        "Scheduler started (sync {}h, expiry 1h, stale pending 6h, backup {}:00 UTC)",
         settings.FULL_SYNC_INTERVAL_HOURS,
+        settings.BACKUP_HOUR_UTC if settings.BACKUP_ENABLED else "off",
     )
 
 

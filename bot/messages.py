@@ -442,6 +442,38 @@ def admin_payment_methods_text(enabled: dict[str, bool]) -> str:
     return "\n".join(lines)
 
 
+def admin_backup_menu_text(
+    *,
+    backup_enabled: bool,
+    hour_utc: int,
+    local_retain: int,
+    env_disabled: bool = False,
+    admin_disabled: bool = False,
+) -> str:
+    if env_disabled:
+        status = "⛔ <b>Отключён в .env</b> (<code>BACKUP_ENABLED=false</code>)"
+    elif admin_disabled:
+        status = "⏸ <b>Ежедневный бэкап выключен</b> (вручную в админке)"
+    elif backup_enabled:
+        status = f"✅ <b>Ежедневный бэкап включён</b> — {hour_utc:02d}:00 UTC"
+    else:
+        status = "⏸ <b>Ежедневный бэкап выключен</b>"
+
+    return (
+        "💾 <b>Бэкап</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        f"{status}\n\n"
+        "Архив содержит:\n"
+        "• <code>bot.db</code> — снимок SQLite\n"
+        "• <code>manifest.json</code> — статистика\n"
+        "• <code>restore.txt</code> — как восстановить\n"
+        "• последние логи (если есть)\n\n"
+        f"Локальные копии: <code>data/backups/</code> (хранится <b>{local_retain}</b>)\n"
+        "Получатели: все ID из <code>BOT_ADMINS</code>.\n\n"
+        "Выберите действие:"
+    )
+
+
 def admin_debug_menu_text(
     *,
     trial_count: int,

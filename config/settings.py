@@ -81,6 +81,11 @@ class Settings(BaseSettings):
     LOG_DIR: str = "data/logs"
     LOG_SESSION_RETAIN: int = 5
 
+    # Ежедневный бэкап БД в ЛС админам (run_bot.py + планировщик)
+    BACKUP_ENABLED: bool = True
+    BACKUP_HOUR_UTC: int = 3
+    BACKUP_LOCAL_RETAIN: int = 5
+
     # Защита от наложения нажатий (двойная оплата, параллельные callback)
     BOT_ACTION_LOCK_ENABLED: bool = True
     BOT_ACTION_DEBOUNCE_SEC: float = 0.5

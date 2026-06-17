@@ -40,6 +40,9 @@
 | `START_BOT_IN_WEBAPP` | `false` | `false` или `true` (один процесс) |
 | `ALLOW_DEBUG_ADMIN` | `false` | `true` (сброс БД в админке) |
 | `LOG_LEVEL` | `INFO` | `DEBUG` при отладке |
+| `BACKUP_ENABLED` | `true` | `false` — без ежедневного бэкапа |
+| `BACKUP_HOUR_UTC` | `3` | Час отправки бэкапа (UTC) |
+| `BACKUP_LOCAL_RETAIN` | `5` | Сколько zip хранить в `data/backups/` |
 
 **Запуск** (не переменные `.env`, а команды):
 

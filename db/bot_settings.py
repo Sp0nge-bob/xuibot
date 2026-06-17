@@ -9,6 +9,7 @@ SETTING_SUBSCRIPTION_INBOUNDS = "subscription_inbounds"
 SETTING_START_ANNOUNCEMENT = "start_announcement"
 SETTING_START_GREETING = "start_greeting"
 SETTING_SYNC_DISABLED = "sync_disabled"
+SETTING_BACKUP_DISABLED = "backup_disabled"
 
 _SYNC_DISABLED_TRUTHY = frozenset({"1", "true", "yes", "on"})
 
@@ -133,3 +134,13 @@ async def is_sync_disabled() -> bool:
 
 async def set_sync_disabled(disabled: bool) -> None:
     await set_setting(SETTING_SYNC_DISABLED, "1" if disabled else "0")
+
+
+async def is_backup_disabled() -> bool:
+    """Админка: отключить ежедневную отправку бэкапа в ЛС."""
+    raw = await get_setting(SETTING_BACKUP_DISABLED)
+    return (raw or "").strip().lower() in _SYNC_DISABLED_TRUTHY
+
+
+async def set_backup_disabled(disabled: bool) -> None:
+    await set_setting(SETTING_BACKUP_DISABLED, "1" if disabled else "0")

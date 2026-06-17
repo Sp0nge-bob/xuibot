@@ -16,6 +16,7 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📡 Inbounds подписки", callback_data="adm:inbounds")],
         [InlineKeyboardButton(text="🎁 Пробный период", callback_data="adm:trial")],
         [InlineKeyboardButton(text="📢 Экран /start", callback_data="adm:start_text")],
+        [InlineKeyboardButton(text="💾 Бэкап", callback_data="adm:backup")],
     ]
     if settings.ALLOW_DEBUG_ADMIN:
         rows.append([InlineKeyboardButton(text="🧪 Отладка", callback_data="adm:debug")])
@@ -59,6 +60,25 @@ def admin_start_text_clear_confirm_kb() -> InlineKeyboardMarkup:
         )],
         [InlineKeyboardButton(text="« Отмена", callback_data="adm:start_text")],
     ])
+
+
+def admin_backup_kb(
+    *,
+    backup_enabled: bool = True,
+    env_disabled: bool = False,
+) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text="📤 Отправить бэкап сейчас", callback_data="adm:backup:now")],
+    ]
+    if not env_disabled:
+        toggle_label = (
+            "⏸ Выключить ежедневный бэкап"
+            if backup_enabled
+            else "▶️ Включить ежедневный бэкап"
+        )
+        rows.append([InlineKeyboardButton(text=toggle_label, callback_data="adm:backup:toggle")])
+    rows.append([InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def admin_debug_entry_confirm_kb() -> InlineKeyboardMarkup:
