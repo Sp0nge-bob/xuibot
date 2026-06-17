@@ -11,12 +11,14 @@ Ctrl+C останавливает оба.
 from __future__ import annotations
 
 import signal
+import sqlite3
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent
+_DB_PATH = _ROOT / "data" / "bot.db"
 _PROCS: list[tuple[str, subprocess.Popen[bytes]]] = []
 _SHUTTING_DOWN = False
 
@@ -29,29 +31,47 @@ def _start(script: str) -> subprocess.Popen[bytes]:
     )
 
 
-def _wait_for_db_ready(timeout_sec: float = 90) -> bool:
-    """Ждём, пока run_bot.py запишет Database initialized в лог."""
+def _db_is_ready() -> bool:
+    """Проверка SQLite надёжнее, чем строка в логе (loguru enqueue)."""
+    if not _DB_PATH.is_file():
+        return False
+    try:
+        conn = sqlite3.connect(f"file:{_DB_PATH}?mode=ro", uri=True, timeout=3)
+        try:
+            rows = conn.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name IN ('users', 'xui_nodes', 'bot_settings')"
+            ).fetchall()
+            return len(rows) >= 3
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return False
+
+
+def _log_has_db_marker() -> bool:
     log_dir = _ROOT / "data" / "logs"
-    marker = "Database initialized"
+    if not log_dir.is_dir():
+        return False
+    logs = sorted(log_dir.glob("bot_*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not logs:
+        return False
+    try:
+        return "Database initialized" in logs[0].read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return False
+
+
+def _wait_for_db_ready(timeout_sec: float = 120) -> bool:
     deadline = time.time() + timeout_sec
     print(f"Waiting for DB init (up to {int(timeout_sec)}s)...")
     while time.time() < deadline:
-        if log_dir.is_dir():
-            logs = sorted(
-                log_dir.glob("bot_*.log"),
-                key=lambda p: p.stat().st_mtime,
-                reverse=True,
-            )
-            if logs:
-                try:
-                    if marker in logs[0].read_text(encoding="utf-8", errors="ignore"):
-                        time.sleep(1)
-                        print("DB ready.")
-                        return True
-                except OSError:
-                    pass
+        if _db_is_ready() or _log_has_db_marker():
+            time.sleep(1)
+            print("DB ready.")
+            return True
         time.sleep(1)
-    print("Warning: DB init marker not found — starting app.py anyway.")
+    print("Warning: DB not ready in time — starting app.py anyway.")
     return False
 
 

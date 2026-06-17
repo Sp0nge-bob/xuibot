@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from loguru import logger
@@ -119,9 +120,11 @@ async def init_db():
     await init_promo_tables()
     await init_promo_pending_tables()
     await init_trial_tables()
+    logger.info("Initializing xui_nodes...")
     await init_xui_nodes()
     await init_tickets_tables()
     logger.info("Database initialized at {}", DB_PATH)
+    await asyncio.to_thread(logger.complete)
 
 async def get_or_create_user(tg_id: int, username: Optional[str] = None, first_name: Optional[str] = None):
     async with get_db() as db:

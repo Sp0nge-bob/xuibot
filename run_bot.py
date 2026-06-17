@@ -12,7 +12,6 @@
 """
 import asyncio
 
-from bot import start_bot
 from bot.shutdown import graceful_shutdown, install_shutdown_handlers
 from db.database import init_db
 
@@ -20,6 +19,8 @@ from db.database import init_db
 async def _main() -> None:
     install_shutdown_handlers()
     await init_db()
+    from bot import start_bot
+
     try:
         await start_bot()
     finally:
