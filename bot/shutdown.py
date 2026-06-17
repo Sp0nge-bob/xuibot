@@ -162,6 +162,13 @@ async def graceful_shutdown(*, reason: str = "shutdown") -> None:
         except Exception as e:
             logger.debug("close_connection: {}", e)
 
+        try:
+            from bot.polling_lock import release_polling_lock
+
+            release_polling_lock()
+        except Exception as e:
+            logger.debug("release_polling_lock: {}", e)
+
         _shutdown_done = True
         logger.info("Бот остановлен ({})", reason)
 

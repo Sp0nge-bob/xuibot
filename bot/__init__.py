@@ -48,6 +48,9 @@ async def start_bot():
     """Запуск бота с проверкой токена и polling."""
     import asyncio
 
+    from bot.polling_lock import acquire_polling_lock
+
+    acquire_polling_lock()
     logger.info("Бот запускается…")
     register_bot_task(asyncio.current_task())
 
@@ -84,11 +87,19 @@ async def start_bot():
     asyncio.create_task(_startup_sync(), name="startup_nodes_sync")
 
     try:
+        await bot.delete_webhook(drop_pending_updates=False)
+    except Exception as e:
+        logger.warning("delete_webhook: {}", e)
+
+    try:
         me = await bot.get_me()
         logger.info("Подключён @{} ({})", me.username, me.id)
     except Exception as e:
         logger.error("Ошибка get_me(): {}: {}", type(e).__name__, e)
         logger.error("Проверь BOT_TOKEN в .env и перезапусти бота.")
+        from bot.polling_lock import release_polling_lock
+
+        release_polling_lock()
         return
 
     if settings.LOG_LEVEL.upper() == "DEBUG":

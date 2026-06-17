@@ -23,6 +23,9 @@ async def _main() -> None:
 
     try:
         await start_bot()
+    except RuntimeError as e:
+        print(f"\n{e}")
+        return
     except asyncio.CancelledError:
         pass
     finally:
@@ -35,3 +38,5 @@ if __name__ == "__main__":
         asyncio.run(_main())
     except (KeyboardInterrupt, asyncio.CancelledError):
         print("\nBot stopped.")
+    except RuntimeError as e:
+        print(f"\n{e}")

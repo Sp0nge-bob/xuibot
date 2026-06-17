@@ -16,6 +16,7 @@ import sys
 import time
 from pathlib import Path
 
+from config.settings import settings
 from db.database import clear_init_marker
 
 _ROOT = Path(__file__).resolve().parent
@@ -76,10 +77,20 @@ def _shutdown(*_args: object) -> None:
     sys.exit(0)
 
 
+def _preflight() -> None:
+    if settings.START_BOT_IN_WEBAPP:
+        print(
+            "Ошибка: START_BOT_IN_WEBAPP=true несовместим с run_all.py.\n"
+            "Поставьте START_BOT_IN_WEBAPP=false в .env или запустите только python app.py."
+        )
+        sys.exit(1)
+
+
 def main() -> None:
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
+    _preflight()
     clear_init_marker()
     global _BOT_STARTED_AT
     _BOT_STARTED_AT = time.time()
