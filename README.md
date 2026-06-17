@@ -56,6 +56,7 @@ python run_bot.py   # Telegram polling + планировщик
 | [Установка](docs/installation.md) | Python, venv, systemd |
 | [Конфигурация](docs/configuration.md) | Переменные `.env` |
 | [Деплой](docs/deployment.md) | Чеклист прода, nginx |
+| [Системные требования](docs/requirements.md) | VPS по нагрузке (500–5000+ подписок) |
 | [3x-ui](docs/xui.md) | Панель, подписка, утилиты |
 | [Platega](docs/platega.md) | Платежи и webhook |
 | [Админка](docs/admin.md) | Команда `/admin` |
