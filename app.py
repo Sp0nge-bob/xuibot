@@ -34,11 +34,14 @@ async def lifespan(app: FastAPI):
 
     logger.info("Shutting down...")
     await stop_bot()
-    bot_task.cancel()
+    if not bot_task.done():
+        bot_task.cancel()
     try:
-        await asyncio.wait_for(bot_task, timeout=5.0)
+        await asyncio.wait_for(bot_task, timeout=8.0)
     except (asyncio.CancelledError, asyncio.TimeoutError):
         pass
+    except Exception as e:
+        logger.debug("bot_task join: {}", e)
     logger.info("Shutdown complete")
 
 app = FastAPI(title="VPN Platega Bot", lifespan=lifespan)

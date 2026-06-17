@@ -7,7 +7,7 @@ from aiogram.client.default import DefaultBotProperties
 from loguru import logger
 
 from config.settings import settings
-from services.node_sync import start_secondary_sync_workers
+from services.node_sync import start_secondary_sync_workers, stop_secondary_sync_workers
 from services.xui import ensure_bot_group, log_inbound_port_conflicts
 from .handlers import router as main_router
 from .admin import router as admin_router
@@ -80,12 +80,14 @@ async def start_bot():
 
 
 async def stop_bot():
-    """Корректная остановка: polling → scheduler → HTTP-сессия."""
+    """Корректная остановка: workers → polling → scheduler → HTTP-сессия."""
     import asyncio
 
     logger.info("Бот останавливается…")
+    await stop_secondary_sync_workers()
+
     try:
-        await asyncio.wait_for(dp.stop_polling(), timeout=3.0)
+        await asyncio.wait_for(dp.stop_polling(), timeout=5.0)
     except asyncio.TimeoutError:
         logger.warning("stop_polling timeout — принудительное завершение")
     except Exception as e:

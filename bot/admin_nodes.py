@@ -590,9 +590,12 @@ async def cb_nodes_sync(cb: CallbackQuery):
         stats = await sync_all_secondary_nodes()
         text = (
             "✅ <b>Синхронизация завершена</b>\n\n"
-            f"Подписок: {stats['subs']}\n"
-            f"Нод: {stats['nodes']}\n"
-            f"Успешно: {stats['ok']}\n"
+            f"Подписок в БД: {stats['subs']}\n"
+            f"Основная: создано {stats.get('primary_created', 0)}, "
+            f"обновлено {stats.get('primary_updated', 0)}, "
+            f"лишних удалено {stats.get('primary_orphans_purged', 0)}\n"
+            f"Вторичные: нод {stats['nodes']}, expiry обновлено {stats['ok']}, "
+            f"призраков {stats.get('purged', 0)}\n"
             f"Ошибок: {stats['failed']}"
         )
     except Exception as e:
