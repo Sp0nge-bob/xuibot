@@ -7,12 +7,17 @@ from aiogram.types import CallbackQuery, Message
 from loguru import logger
 
 from db import xui_nodes as nodes_db
+from db import bot_settings as bot_settings_db
 from db.bot_settings import (
     get_subscription_inbounds_display,
     set_subscription_inbound_ids,
 )
 from services.node_health import check_all_nodes_health, check_node_health
-from services.node_sync import sync_all_secondary_nodes
+from services.node_sync import (
+    start_secondary_sync_workers,
+    stop_secondary_sync_workers,
+    sync_all_secondary_nodes,
+)
 from services.xui import invalidate_api_cache, normalize_xui_host
 from .admin_auth import is_admin
 from .admin_keyboards import admin_inbounds_kb
@@ -42,12 +47,32 @@ async def _uptime_str(node_id: int) -> str:
     return f"{int(pct * 100)}%"
 
 
-async def nodes_list_text() -> str:
+def _autosync_status_line(*, sync_disabled: bool) -> str:
+    if sync_disabled:
+        return (
+            "⏸ <b>Автосинк: выключен</b>\n"
+            "<i>Нет планового sync и очереди после оплаты. Выдача и продление на главной — как обычно.</i>"
+        )
+    return "🔄 <b>Автосинк: включён</b> <i>(раз в сутки + после оплаты на вторичные)</i>"
+
+
+async def _nodes_list_bundle() -> tuple[str, list, bool]:
+    nodes = await nodes_db.list_nodes()
+    sync_disabled = await bot_settings_db.is_sync_disabled()
+    text = await nodes_list_text(sync_disabled=sync_disabled)
+    return text, nodes, sync_disabled
+
+
+async def nodes_list_text(*, sync_disabled: bool | None = None) -> str:
+    if sync_disabled is None:
+        sync_disabled = await bot_settings_db.is_sync_disabled()
     nodes = await nodes_db.list_nodes()
     summary = await nodes_db.nodes_summary()
     lines = [
         "🖧 <b>Ноды 3x-ui</b>",
         "━━━━━━━━━━━━━━━━",
+        "",
+        _autosync_status_line(sync_disabled=sync_disabled),
         "",
         f"Всего: <b>{summary['total']}</b> · healthy: <b>{summary['healthy']}</b>"
         f" / привязано: <b>{summary['enabled']}</b>",
@@ -83,10 +108,18 @@ async def nodes_list_text() -> str:
 _NODES_KB_LIMIT = 12
 
 
-def nodes_list_kb(nodes: list) -> "InlineKeyboardMarkup":
+def nodes_list_kb(nodes: list, *, sync_disabled: bool = False) -> "InlineKeyboardMarkup":
     from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-    rows = [[InlineKeyboardButton(text="➕ Добавить ноду", callback_data="adm:node:add")]]
+    sync_label = (
+        "▶️ Включить автосинк"
+        if sync_disabled
+        else "⏸ Выключить автосинк"
+    )
+    rows = [
+        [InlineKeyboardButton(text=sync_label, callback_data="adm:nodes:sync_toggle")],
+        [InlineKeyboardButton(text="➕ Добавить ноду", callback_data="adm:node:add")],
+    ]
     shown = 0
     seen_hosts: set[str] = set()
     for n in nodes:
@@ -309,9 +342,32 @@ async def cb_nodes_list(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
         return
     await state.clear()
-    nodes = await nodes_db.list_nodes()
+    text, nodes, sync_disabled = await _nodes_list_bundle()
     await safe_cb_answer(cb)
-    await send_or_edit(cb, await nodes_list_text(), nodes_list_kb(nodes))
+    await send_or_edit(cb, text, nodes_list_kb(nodes, sync_disabled=sync_disabled))
+
+
+@router.callback_query(F.data == "adm:nodes:sync_toggle")
+async def cb_nodes_sync_toggle(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+
+    was_disabled = await bot_settings_db.is_sync_disabled()
+    await bot_settings_db.set_sync_disabled(not was_disabled)
+
+    if was_disabled:
+        await start_secondary_sync_workers()
+        await safe_cb_answer(cb, "Автосинк включён")
+    else:
+        await stop_secondary_sync_workers()
+        await safe_cb_answer(
+            cb,
+            "Автосинк выключен. Выдача и продление на главной без изменений.",
+            show_alert=True,
+        )
+
+    text, nodes, sync_disabled = await _nodes_list_bundle()
+    await send_or_edit(cb, text, nodes_list_kb(nodes, sync_disabled=sync_disabled))
 
 
 @router.callback_query(F.data == "adm:inbounds")
@@ -392,8 +448,8 @@ async def cb_node_wizard_cancel(cb: CallbackQuery, state: FSMContext):
         if node:
             await send_or_edit(cb, await node_detail_text(node), node_detail_kb(node))
             return
-    nodes = await nodes_db.list_nodes()
-    await send_or_edit(cb, await nodes_list_text(), nodes_list_kb(nodes))
+    text, nodes, sync_disabled = await _nodes_list_bundle()
+    await send_or_edit(cb, text, nodes_list_kb(nodes, sync_disabled=sync_disabled))
 
 
 @router.callback_query(F.data.regexp(r"^adm:node:\d+$"))
@@ -578,7 +634,8 @@ async def cb_nodes_dedupe(cb: CallbackQuery):
         f"Удалено: <b>{stats['removed']}</b>\n"
         f"Осталось: <b>{stats['after']}</b>"
     )
-    await send_or_edit(cb, text, nodes_list_kb(nodes))
+    sync_disabled = await bot_settings_db.is_sync_disabled()
+    await send_or_edit(cb, text, nodes_list_kb(nodes, sync_disabled=sync_disabled))
 
 
 @router.callback_query(F.data == "adm:nodes:health")
@@ -587,8 +644,8 @@ async def cb_nodes_health_all(cb: CallbackQuery):
         return
     await safe_cb_answer(cb, "Проверяем все ноды…")
     await check_all_nodes_health()
-    nodes = await nodes_db.list_nodes()
-    await send_or_edit(cb, await nodes_list_text(), nodes_list_kb(nodes))
+    text, nodes, sync_disabled = await _nodes_list_bundle()
+    await send_or_edit(cb, text, nodes_list_kb(nodes, sync_disabled=sync_disabled))
 
 
 @router.callback_query(F.data == "adm:nodes:sync")
@@ -602,9 +659,9 @@ async def cb_nodes_sync(cb: CallbackQuery):
         if stats.get("skipped"):
             text = (
                 "⏸ <b>Автосинк отключён</b>\n\n"
-                "Плановая синхронизация выключена в отладке.\n"
-                "Удаление клиентов по-прежнему снимает его со всех нод.\n\n"
-                "Включить автосинк: /admin → Отладка."
+                "Плановая синхронизация выключена.\n"
+                "Выдача и продление на главной панели работают как обычно.\n\n"
+                "Включить: /admin → Ноды → «Включить автосинк»."
             )
         else:
             text = (
@@ -620,8 +677,9 @@ async def cb_nodes_sync(cb: CallbackQuery):
     except Exception as e:
         logger.exception("Manual sync failed: {}", e)
         text = f"❌ Ошибка синхронизации: <code>{str(e)[:120]}</code>"
+    sync_disabled = await bot_settings_db.is_sync_disabled()
     nodes = await nodes_db.list_nodes()
-    await send_or_edit(cb, text, nodes_list_kb(nodes))
+    await send_or_edit(cb, text, nodes_list_kb(nodes, sync_disabled=sync_disabled))
 
 
 @router.callback_query(F.data.startswith("adm:node:bind:"))
@@ -651,8 +709,8 @@ async def cb_node_set_primary(cb: CallbackQuery):
     node_id = int(cb.data.split(":")[3])
     ok, msg = await nodes_db.set_primary_node(node_id)
     await safe_cb_answer(cb, "Основная нода обновлена" if ok else msg, show_alert=not ok)
-    nodes = await nodes_db.list_nodes()
-    await send_or_edit(cb, await nodes_list_text(), nodes_list_kb(nodes))
+    text, nodes, sync_disabled = await _nodes_list_bundle()
+    await send_or_edit(cb, text, nodes_list_kb(nodes, sync_disabled=sync_disabled))
 
 
 @router.callback_query(F.data.startswith("adm:node:del:"))
@@ -665,5 +723,5 @@ async def cb_node_delete(cb: CallbackQuery):
         await safe_cb_answer(cb, msg, show_alert=True)
         return
     await safe_cb_answer(cb, "Удалено")
-    nodes = await nodes_db.list_nodes()
-    await send_or_edit(cb, await nodes_list_text(), nodes_list_kb(nodes))
+    text, nodes, sync_disabled = await _nodes_list_bundle()
+    await send_or_edit(cb, text, nodes_list_kb(nodes, sync_disabled=sync_disabled))

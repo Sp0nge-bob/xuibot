@@ -349,7 +349,7 @@ async def sync_all_secondary_nodes() -> dict[str, int]:
     from db import bot_settings as bot_settings_db
 
     if await bot_settings_db.is_sync_disabled():
-        logger.info("Full nodes sync skipped — disabled in debug")
+        logger.info("Full nodes sync skipped — disabled in admin")
         return _sync_skipped_stats()
 
     result = await run_full_nodes_sync()
@@ -431,7 +431,7 @@ async def start_secondary_sync_workers() -> None:
     from db import bot_settings as bot_settings_db
 
     if await bot_settings_db.is_sync_disabled():
-        logger.info("Secondary sync workers not started — sync disabled in debug")
+        logger.info("Secondary sync workers not started — sync disabled in admin")
         return
     if _secondary_workers_started:
         return

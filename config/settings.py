@@ -80,7 +80,6 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     LOG_DIR: str = "data/logs"
     LOG_SESSION_RETAIN: int = 5
-    USE_POLLING: bool = False
 
     # Защита от наложения нажатий (двойная оплата, параллельные callback)
     BOT_ACTION_LOCK_ENABLED: bool = True
@@ -90,15 +89,14 @@ class Settings(BaseSettings):
     STALE_PENDING_ORDER_HOURS: int = 48
 
     # Тестовый режим (без реальной Platega)
-    # Когда True — оплата симулируется, ключи выдаются сразу.
-    # Идеально для тестирования и показа менеджеру Platega до подключения.
     TEST_MODE: bool = False
 
-    # Запускать ли Telegram-бота внутри веб-приложения (через lifespan).
-    # По умолчанию True для простоты (бот стартует вместе с uvicorn).
-    # Для максимальной стабильности polling-бота рекомендуется запускать его отдельно
-    # через `python run_bot.py` (и поставить здесь False).
-    START_BOT_IN_WEBAPP: bool = True
+    # Опасные операции в /admin → «Отладка» (сброс БД и т.п.).
+    ALLOW_DEBUG_ADMIN: bool = False
+
+    # Запускать polling внутри app.py (lifespan).
+    # Продакшен: false — отдельно `python run_bot.py` + `python app.py`.
+    START_BOT_IN_WEBAPP: bool = False
 
     model_config = {
         "env_file": ".env",

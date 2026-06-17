@@ -1,10 +1,11 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+from config.settings import settings
 from config.trial import is_trial_email
 
 
 def admin_menu_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
+    rows = [
         [InlineKeyboardButton(text="📊 Статистика", callback_data="adm:stats")],
         [InlineKeyboardButton(text="💰 Цены тарифов", callback_data="adm:plans")],
         [InlineKeyboardButton(text="💳 Способы оплаты", callback_data="adm:payments")],
@@ -15,8 +16,10 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📡 Inbounds подписки", callback_data="adm:inbounds")],
         [InlineKeyboardButton(text="🎁 Пробный период", callback_data="adm:trial")],
         [InlineKeyboardButton(text="📢 Экран /start", callback_data="adm:start_text")],
-        [InlineKeyboardButton(text="🧪 Отладка", callback_data="adm:debug")],
-    ])
+    ]
+    if settings.ALLOW_DEBUG_ADMIN:
+        rows.append([InlineKeyboardButton(text="🧪 Отладка", callback_data="adm:debug")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def admin_start_text_kb(
@@ -68,17 +71,8 @@ def admin_debug_entry_confirm_kb() -> InlineKeyboardMarkup:
     ])
 
 
-def admin_debug_kb(*, sync_disabled: bool = False) -> InlineKeyboardMarkup:
-    sync_label = (
-        "▶️ Включить автосинк нод"
-        if sync_disabled
-        else "⏸ Отключить автосинк нод"
-    )
+def admin_debug_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text=sync_label,
-            callback_data="adm:debug:sync_toggle",
-        )],
         [InlineKeyboardButton(
             text="🗑 Сбросить все пробные",
             callback_data="adm:trial:reset_all",

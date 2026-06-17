@@ -3,12 +3,11 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery
 from loguru import logger
 
-from db import bot_settings as settings_db
 from db import database as db
 from db import promo_codes as promo_db
 from db import promo_pending as pending_db
 from db import tickets as tickets_db
-from services.node_sync import start_secondary_sync_workers, stop_secondary_sync_workers
+from config.settings import settings
 from .admin_auth import is_admin
 from .admin_keyboards import (
     admin_back_kb,
@@ -32,8 +31,8 @@ from .ui_helpers import safe_cb_answer, send_or_edit
 router = Router()
 
 
-async def _debug_kb():
-    return admin_debug_kb(sync_disabled=await settings_db.is_sync_disabled())
+def _debug_allowed(user_id: int) -> bool:
+    return is_admin(user_id) and settings.ALLOW_DEBUG_ADMIN
 
 
 async def _show_debug_menu(cb: CallbackQuery) -> None:
@@ -44,7 +43,6 @@ async def _show_debug_menu(cb: CallbackQuery) -> None:
     tickets_count = await tickets_db.count_tickets()
     ticket_messages_count = await tickets_db.count_ticket_messages()
     users_count = await db.count_users()
-    sync_disabled = await settings_db.is_sync_disabled()
     await send_or_edit(
         cb,
         admin_debug_menu_text(
@@ -55,37 +53,14 @@ async def _show_debug_menu(cb: CallbackQuery) -> None:
             tickets_count=tickets_count,
             ticket_messages_count=ticket_messages_count,
             users_count=users_count,
-            sync_disabled=sync_disabled,
         ),
-        await _debug_kb(),
+        admin_debug_kb(),
     )
-
-
-@router.callback_query(F.data == "adm:debug:sync_toggle")
-async def cb_admin_debug_sync_toggle(cb: CallbackQuery):
-    if not is_admin(cb.from_user.id):
-        return
-
-    was_disabled = await settings_db.is_sync_disabled()
-    await settings_db.set_sync_disabled(not was_disabled)
-
-    if was_disabled:
-        await start_secondary_sync_workers()
-        await safe_cb_answer(cb, "Автосинк включён")
-    else:
-        await stop_secondary_sync_workers()
-        await safe_cb_answer(
-            cb,
-            "Автосинк отключён. Удаление и выдача ключей без изменений.",
-            show_alert=True,
-        )
-
-    await _show_debug_menu(cb)
 
 
 @router.callback_query(F.data == "adm:debug")
 async def cb_admin_debug_entry(cb: CallbackQuery):
-    if not is_admin(cb.from_user.id):
+    if not _debug_allowed(cb.from_user.id):
         return
     await safe_cb_answer(cb)
     await send_or_edit(cb, admin_debug_entry_confirm_text(), admin_debug_entry_confirm_kb())
@@ -93,7 +68,7 @@ async def cb_admin_debug_entry(cb: CallbackQuery):
 
 @router.callback_query(F.data == "adm:debug:enter")
 async def cb_admin_debug_menu(cb: CallbackQuery):
-    if not is_admin(cb.from_user.id):
+    if not _debug_allowed(cb.from_user.id):
         return
     await safe_cb_answer(cb)
     await _show_debug_menu(cb)
@@ -101,7 +76,7 @@ async def cb_admin_debug_menu(cb: CallbackQuery):
 
 @router.callback_query(F.data == "adm:debug:promos_reset")
 async def cb_admin_debug_promos_reset_confirm(cb: CallbackQuery):
-    if not is_admin(cb.from_user.id):
+    if not _debug_allowed(cb.from_user.id):
         return
 
     uses_count = await promo_db.count_promo_uses()
@@ -119,7 +94,7 @@ async def cb_admin_debug_promos_reset_confirm(cb: CallbackQuery):
 
 @router.callback_query(F.data == "adm:debug:promos_reset:confirm")
 async def cb_admin_debug_promos_reset(cb: CallbackQuery):
-    if not is_admin(cb.from_user.id):
+    if not _debug_allowed(cb.from_user.id):
         return
 
     await safe_cb_answer(cb, "Очищаем…")
@@ -140,12 +115,12 @@ async def cb_admin_debug_promos_reset(cb: CallbackQuery):
         f"Удалено pending: <b>{result['pending_deleted']}</b>\n"
         "Счётчики <code>used_count</code> обнулены."
     )
-    await send_or_edit(cb, text, await _debug_kb())
+    await send_or_edit(cb, text, admin_debug_kb())
 
 
 @router.callback_query(F.data == "adm:debug:orders_reset")
 async def cb_admin_debug_orders_reset_confirm(cb: CallbackQuery):
-    if not is_admin(cb.from_user.id):
+    if not _debug_allowed(cb.from_user.id):
         return
 
     orders_count = await db.count_orders()
@@ -159,7 +134,7 @@ async def cb_admin_debug_orders_reset_confirm(cb: CallbackQuery):
 
 @router.callback_query(F.data == "adm:debug:orders_reset:confirm")
 async def cb_admin_debug_orders_reset(cb: CallbackQuery):
-    if not is_admin(cb.from_user.id):
+    if not _debug_allowed(cb.from_user.id):
         return
 
     await safe_cb_answer(cb, "Удаляем…")
@@ -179,12 +154,12 @@ async def cb_admin_debug_orders_reset(cb: CallbackQuery):
         f"Удалено заказов: <b>{result['orders_deleted']}</b>\n"
         f"Тикетов отвязано от заказов: <b>{result['tickets_unlinked']}</b>"
     )
-    await send_or_edit(cb, text, await _debug_kb())
+    await send_or_edit(cb, text, admin_debug_kb())
 
 
 @router.callback_query(F.data == "adm:debug:tickets_reset")
 async def cb_admin_debug_tickets_reset_confirm(cb: CallbackQuery):
-    if not is_admin(cb.from_user.id):
+    if not _debug_allowed(cb.from_user.id):
         return
 
     tickets_count = await tickets_db.count_tickets()
@@ -202,7 +177,7 @@ async def cb_admin_debug_tickets_reset_confirm(cb: CallbackQuery):
 
 @router.callback_query(F.data == "adm:debug:tickets_reset:confirm")
 async def cb_admin_debug_tickets_reset(cb: CallbackQuery):
-    if not is_admin(cb.from_user.id):
+    if not _debug_allowed(cb.from_user.id):
         return
 
     await safe_cb_answer(cb, "Удаляем…")
@@ -222,12 +197,12 @@ async def cb_admin_debug_tickets_reset(cb: CallbackQuery):
         f"Удалено тикетов: <b>{result['tickets_deleted']}</b>\n"
         f"Удалено сообщений: <b>{result['messages_deleted']}</b>"
     )
-    await send_or_edit(cb, text, await _debug_kb())
+    await send_or_edit(cb, text, admin_debug_kb())
 
 
 @router.callback_query(F.data == "adm:debug:users_reset")
 async def cb_admin_debug_users_reset_confirm(cb: CallbackQuery):
-    if not is_admin(cb.from_user.id):
+    if not _debug_allowed(cb.from_user.id):
         return
 
     users_count = await db.count_users()
@@ -241,7 +216,7 @@ async def cb_admin_debug_users_reset_confirm(cb: CallbackQuery):
 
 @router.callback_query(F.data == "adm:debug:users_reset:confirm")
 async def cb_admin_debug_users_reset(cb: CallbackQuery):
-    if not is_admin(cb.from_user.id):
+    if not _debug_allowed(cb.from_user.id):
         return
 
     await safe_cb_answer(cb, "Удаляем…")
@@ -260,4 +235,4 @@ async def cb_admin_debug_users_reset(cb: CallbackQuery):
         "✅ <b>Учёт пользователей очищен</b>\n\n"
         f"Удалено записей: <b>{result['users_deleted']}</b>"
     )
-    await send_or_edit(cb, text, await _debug_kb())
+    await send_or_edit(cb, text, admin_debug_kb())

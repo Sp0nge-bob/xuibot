@@ -50,7 +50,7 @@ async def run_full_nodes_sync(*, source: str) -> None:
     from db import bot_settings as bot_settings_db
 
     if await bot_settings_db.is_sync_disabled():
-        logger.info("Full nodes sync skipped ({}) — disabled in debug", source)
+        logger.info("Full nodes sync skipped ({}) — disabled in admin", source)
         return
 
     logger.info("Full nodes sync ({})", source)
@@ -88,7 +88,7 @@ def start_scheduler():
     scheduler.add_job(expire_stale_pending_orders_job, "interval", hours=6, id="expire_stale_pending")
     scheduler.start()
     logger.info(
-        "Scheduler started (health 5m, full nodes sync {}h, expiry 1h, stale pending 6h)",
+        "Scheduler started (sync {}h, expiry 1h, stale pending 6h)",
         settings.FULL_SYNC_INTERVAL_HOURS,
     )
 
