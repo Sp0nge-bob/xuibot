@@ -20,4 +20,6 @@ report/
 .vscode/
 
 data/
+*.dbdata/bot.db
 *.db
+data/*.db
