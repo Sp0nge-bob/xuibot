@@ -22,4 +22,8 @@ report/
 data/
 *.dbdata/bot.db
 *.db
+<<<<<<< HEAD
 data/*.db
+=======
+data/*.db
+>>>>>>> be8af9fae2bf8ef3f90a93e35219b4c4dc51da6e
