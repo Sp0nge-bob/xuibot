@@ -6,6 +6,7 @@ from typing import List, Optional
 from config.plans import Plan, get_plan
 from db.plan_prices import get_all_effective_plans, get_effective_plan
 from db import promo_codes as promo_db
+from db import promo_pending as pending_db
 from db.promo_codes import is_grant_promo
 
 
@@ -46,41 +47,12 @@ def quote_from_order(order: dict, plan: Plan) -> PriceQuote:
     )
 
 
-async def get_plan_quote(
-    plan_id: str,
-    *,
-    promo_code: Optional[str] = None,
-    tg_id: Optional[int] = None,
-) -> Optional[PriceQuote]:
-    plan = await get_effective_plan(plan_id)
-    if not plan:
-        return None
-
-    base_price = plan["price"]
-    final_price = base_price
-    discount_amount = 0
-    promo_id = None
-    applied_code = None
-
-    if promo_code and tg_id is not None:
-        promo, err = await validate_promo(promo_code, plan_id=plan_id, tg_id=tg_id)
-        if promo:
-            discount_amount = calc_discount(
-                base_price, promo["discount_type"], promo["discount_value"],
-            )
-            final_price = max(0, base_price - discount_amount)
-            promo_id = promo["id"]
-            applied_code = promo["code"]
-
-    plan_out = {**plan, "price": final_price}
-    return PriceQuote(
-        plan=plan_out,
-        base_price=base_price,
-        final_price=final_price,
-        discount_amount=discount_amount,
-        promo_code=applied_code,
-        promo_id=promo_id,
-    )
+def _promo_plan_allowed(promo: dict, plan_id: str) -> bool:
+    allowed_raw = (promo.get("plan_ids") or "").strip()
+    if not allowed_raw:
+        return True
+    allowed = {x.strip() for x in allowed_raw.split(",") if x.strip()}
+    return plan_id in allowed
 
 
 async def _validate_promo_common(
@@ -114,6 +86,64 @@ async def _validate_promo_common(
     return None
 
 
+async def get_plan_quote(
+    plan_id: str,
+    *,
+    promo_code: Optional[str] = None,
+    tg_id: Optional[int] = None,
+) -> Optional[PriceQuote]:
+    plan = await get_effective_plan(plan_id)
+    if not plan:
+        return None
+
+    base_price = plan["price"]
+    final_price = base_price
+    discount_amount = 0
+    promo_id = None
+    applied_code = None
+
+    effective_code = promo_code
+    from_pending = False
+    if not effective_code and tg_id is not None:
+        pending = await pending_db.get_active_pending_discount(tg_id)
+        if pending:
+            effective_code = pending["promo_code"]
+            from_pending = True
+
+    if effective_code and tg_id is not None:
+        promo = await promo_db.get_promo_by_code(effective_code)
+        if promo and not is_grant_promo(promo):
+            if from_pending:
+                if _promo_plan_allowed(promo, plan_id):
+                    discount_amount = calc_discount(
+                        base_price, promo["discount_type"], promo["discount_value"],
+                    )
+                    final_price = max(0, base_price - discount_amount)
+                    promo_id = promo["id"]
+                    applied_code = promo["code"]
+            else:
+                promo_valid, err = await validate_promo(
+                    effective_code, plan_id=plan_id, tg_id=tg_id,
+                )
+                if promo_valid:
+                    discount_amount = calc_discount(
+                        base_price, promo_valid["discount_type"], promo_valid["discount_value"],
+                    )
+                    final_price = max(0, base_price - discount_amount)
+                    promo_id = promo_valid["id"]
+                    applied_code = promo_valid["code"]
+
+    plan_out = {**plan, "price": final_price}
+    return PriceQuote(
+        plan=plan_out,
+        base_price=base_price,
+        final_price=final_price,
+        discount_amount=discount_amount,
+        promo_code=applied_code,
+        promo_id=promo_id,
+    )
+
+
 async def validate_promo(
     code: str,
     *,
@@ -124,20 +154,14 @@ async def validate_promo(
     if not promo:
         return None, "Промокод не найден"
     if is_grant_promo(promo):
-        return None, (
-            "Этот промокод выдаёт тариф бесплатно.\n"
-            "Активируйте его в главном меню → «Промокод»."
-        )
+        return None, "Этот промокод выдаёт тариф бесплатно — активируйте его в главном меню → «Промокоды»."
 
     err = await _validate_promo_common(promo, tg_id=tg_id)
     if err:
         return None, err
 
-    allowed_raw = (promo.get("plan_ids") or "").strip()
-    if allowed_raw:
-        allowed = {x.strip() for x in allowed_raw.split(",") if x.strip()}
-        if plan_id not in allowed:
-            return None, "Промокод не действует на этот тариф"
+    if not _promo_plan_allowed(promo, plan_id):
+        return None, "Промокод не действует на этот тариф"
 
     return promo, None
 
@@ -151,7 +175,7 @@ async def validate_grant_promo(
     if not promo:
         return None, "Промокод не найден"
     if not is_grant_promo(promo):
-        return None, "Этот промокод даёт скидку при оплате — примените его при выборе тарифа"
+        return None, "Этот промокод даёт скидку — активируйте его в главном меню → «Промокоды»"
 
     err = await _validate_promo_common(promo, tg_id=tg_id)
     if err:
@@ -172,9 +196,6 @@ async def apply_promo_on_paid_order(order: dict) -> None:
     promo_code = order.get("promo_code")
     if not promo_code or not order.get("id"):
         return
-    if await promo_db.has_order_promo_use(order["id"]):
-        return
-    promo = await promo_db.get_promo_by_code(promo_code)
-    if not promo or is_grant_promo(promo):
-        return
-    await promo_db.record_promo_use(promo["id"], order["tg_id"], order["id"])
+    await pending_db.consume_pending_discount(
+        order["tg_id"], order["id"], promo_code,
+    )

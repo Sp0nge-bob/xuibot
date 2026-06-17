@@ -15,7 +15,7 @@ def main_menu_kb(*, trial_available: bool = False) -> InlineKeyboardMarkup:
         )])
     rows += [
         [InlineKeyboardButton(text="📦 Тарифы", callback_data="tariffs")],
-        [InlineKeyboardButton(text="🎟 Промокод", callback_data="grant_promo_enter")],
+        [InlineKeyboardButton(text="🎟 Промокоды", callback_data="promo_enter")],
         [InlineKeyboardButton(text="⚙️ Управление подпиской", callback_data="manage_sub")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -51,17 +51,6 @@ def payment_methods_kb(
         )]
         for m in methods
     ]
-    ext_flag = "1" if extend else "0"
-    promo_label = "🎟 Промокод ✓" if quote and quote.has_discount else "🎟 Промокод"
-    rows.append([InlineKeyboardButton(
-        text=promo_label,
-        callback_data=f"promo_enter:{plan_id}:{ext_flag}",
-    )])
-    if quote and quote.has_discount:
-        rows.append([InlineKeyboardButton(
-            text="✖ Убрать промокод",
-            callback_data=f"promo_clear:{plan_id}:{ext_flag}",
-        )])
     back_data = "extend_menu" if extend else "tariffs"
     rows.append([InlineKeyboardButton(text="« Назад", callback_data=back_data)])
     rows.append([InlineKeyboardButton(text="« Главное меню", callback_data="main_menu")])

@@ -31,13 +31,13 @@ from services.payment_flow import (
     check_payment_status,
 )
 from services.payment_processor import handle_platega_status
-from services.pricing import get_plan_quote, list_plans, quote_from_order, validate_promo
+from services.pricing import get_plan_quote, list_plans, quote_from_order
 from services.subscription_sync import (
     get_active_subscriptions_for_ui,
     get_primary_paid_subscription_for_ui,
     get_primary_subscription_for_ui,
 )
-from services.grant_promo import redeem_grant_promo
+from services.promo_redeem import redeem_promo_code
 from services.trial import claim_trial, get_trial_button_visible
 from services.xui import build_sub_link
 from .fulfillment_delivery import deliver_fulfillment
@@ -71,8 +71,6 @@ from .messages import (
     refund_admin_text,
     pending_payment_text,
     promo_enter_text,
-    promo_applied_text,
-    grant_promo_enter_text,
     trial_offer_text,
 )
 from .states import UserStates
@@ -86,17 +84,10 @@ async def _checkout_quote(
     plan_id: str,
     tg_id: int,
 ) -> "PriceQuote | None":
-    data = await state.get_data()
-    promo = data.get("promo_code")
-    return await get_plan_quote(plan_id, promo_code=promo, tg_id=tg_id)
+    return await get_plan_quote(plan_id, tg_id=tg_id)
 
 
 async def _clear_promo_input_state(state: FSMContext) -> None:
-    await state.set_state(None)
-    await state.update_data(promo_plan_id=None, promo_extend=None)
-
-
-async def _clear_grant_promo_state(state: FSMContext) -> None:
     await state.set_state(None)
 
 
@@ -111,9 +102,6 @@ async def _show_main_menu(target: Message | CallbackQuery, *, edit: bool = False
     user = target.from_user
     if isinstance(target, CallbackQuery):
         await safe_cb_answer(target)
-
-    if state:
-        await state.update_data(promo_code=None)
 
     await db.get_or_create_user(user.id, user.username, user.first_name)
     subs = await get_active_subscriptions_for_ui(user.id)
@@ -145,19 +133,17 @@ async def cmd_start(message: Message, state: FSMContext):
     await _show_main_menu(message, state=state)
 
 
-@router.callback_query(F.data == "grant_promo_enter")
-async def cb_grant_promo_enter(cb: CallbackQuery, state: FSMContext):
-    await _clear_grant_promo_state(state)
-    await state.set_state(UserStates.waiting_grant_promo_code)
+@router.callback_query(F.data == "promo_enter")
+async def cb_promo_enter(cb: CallbackQuery, state: FSMContext):
+    await _clear_promo_input_state(state)
+    await state.set_state(UserStates.waiting_promo_code)
     await safe_cb_answer(cb)
-    await send_or_edit(cb, grant_promo_enter_text(), back_to_main_kb())
+    await send_or_edit(cb, promo_enter_text(), back_to_main_kb())
 
 
 @router.callback_query(F.data == "main_menu")
 async def cb_main_menu(cb: CallbackQuery, state: FSMContext):
     await _clear_promo_input_state(state)
-    await _clear_grant_promo_state(state)
-    await state.update_data(promo_code=None)
     await _show_main_menu(cb, edit=True, state=state)
 
 
@@ -203,7 +189,6 @@ async def cb_trial_confirm(cb: CallbackQuery):
 @router.callback_query(F.data == "tariffs")
 async def cb_tariffs(cb: CallbackQuery, state: FSMContext):
     await _clear_promo_input_state(state)
-    await state.update_data(promo_code=None)
     sub = await get_primary_subscription_for_ui(cb.from_user.id)
     plans = await list_plans()
     await safe_cb_answer(cb)
@@ -829,45 +814,9 @@ async def cb_extend_menu(cb: CallbackQuery, state: FSMContext):
     )
 
 
-@router.callback_query(F.data.startswith("promo_enter:"))
-async def cb_promo_enter(cb: CallbackQuery, state: FSMContext):
-    _, plan_id, ext_flag = cb.data.split(":", 2)
-    quote = await get_plan_quote(plan_id, tg_id=cb.from_user.id)
-    if not quote:
-        await safe_cb_answer(cb, "Тариф не найден", show_alert=True)
-        return
-    await state.set_state(UserStates.waiting_promo_code)
-    await state.update_data(promo_plan_id=plan_id, promo_extend=ext_flag == "1")
-    await safe_cb_answer(cb)
-    await send_or_edit(cb, promo_enter_text(quote.plan["name"]), back_to_main_kb())
-
-
-@router.callback_query(F.data.startswith("promo_clear:"))
-async def cb_promo_clear(cb: CallbackQuery, state: FSMContext):
-    _, plan_id, ext_flag = cb.data.split(":", 2)
-    await state.update_data(promo_code=None)
-    quote = await get_plan_quote(plan_id, tg_id=cb.from_user.id)
-    if not quote:
-        await safe_cb_answer(cb, "Тариф не найден", show_alert=True)
-        return
-    extend = ext_flag == "1"
-    sub = await get_primary_subscription_for_ui(cb.from_user.id)
-    await safe_cb_answer(cb, "Промокод убран")
-    await send_or_edit(
-        cb,
-        plan_card_text(
-            quote.plan,
-            extend=extend,
-            has_active_sub=sub is not None and not extend,
-            quote=quote,
-        ),
-        payment_methods_kb(plan_id, extend=extend, quote=quote),
-    )
-
-
-@router.message(UserStates.waiting_grant_promo_code)
-async def msg_grant_promo_code(message: Message, state: FSMContext):
-    await _clear_grant_promo_state(state)
+@router.message(UserStates.waiting_promo_code)
+async def msg_promo_code(message: Message, state: FSMContext):
+    await _clear_promo_input_state(state)
 
     cmd = _message_command(message.text or "")
     if cmd == "/admin":
@@ -885,92 +834,39 @@ async def msg_grant_promo_code(message: Message, state: FSMContext):
     code = (message.text or "").strip()
     if not code:
         await message.answer(
-            "Промокод не введён. Нажмите «Промокод» в главном меню и попробуйте снова.",
+            "Промокод не введён. Нажмите «Промокоды» в главном меню и попробуйте снова.",
             reply_markup=back_to_main_kb(),
         )
         return
 
     await message.answer("⏳ Проверяем промокод…")
     try:
-        result = await redeem_grant_promo(message.from_user.id, code)
+        result = await redeem_promo_code(message.from_user.id, code)
     except ValueError as e:
         await message.answer(f"❌ {e}", reply_markup=back_to_main_kb())
         return
     except Exception as e:
-        logger.exception("Grant promo error: {}", e)
+        logger.exception("Promo redeem error: {}", e)
         await message.answer(
             "❌ Не удалось активировать промокод. Попробуйте позже.",
             reply_markup=back_to_main_kb(),
         )
         return
 
-    await deliver_fulfillment(
-        message.bot,
-        message.chat.id,
-        text=result.text,
-        photo=result.photo,
-        setup_text=result.setup_text,
-        setup_photos=result.setup_photos or None,
-        reply_markup=back_to_main_kb(),
-    )
-
-
-@router.message(UserStates.waiting_promo_code)
-async def msg_promo_code(message: Message, state: FSMContext):
-    data = await state.get_data()
-    plan_id = data.get("promo_plan_id")
-    extend = data.get("promo_extend", False)
-
-    # Одноразовый ввод: любое следующее сообщение снимает режим ожидания.
-    await _clear_promo_input_state(state)
-
-    cmd = _message_command(message.text or "")
-    if cmd == "/admin":
-        from bot.admin import cmd_admin
-        await cmd_admin(message, state)
-        return
-    if cmd == "/start":
-        await state.clear()
-        await _show_main_menu(message, state=state)
-        return
-    if cmd:
-        await message.answer("Ввод промокода отменён.")
-        return
-
-    if not plan_id:
-        await message.answer("Сессия истекла. Выберите тариф заново.", reply_markup=back_to_main_kb())
-        return
-
-    code = (message.text or "").strip()
-    if not code:
-        await message.answer("Промокод не введён. Выберите тариф и нажмите «Промокод» снова.")
-        return
-
-    promo, err = await validate_promo(code, plan_id=plan_id, tg_id=message.from_user.id)
-    if err:
-        await message.answer(
-            f"❌ {err}\n\nВыберите тариф и нажмите «Промокод», чтобы попробовать снова.",
+    if result.kind == "grant" and result.fulfillment:
+        await deliver_fulfillment(
+            message.bot,
+            message.chat.id,
+            text=result.fulfillment.text,
+            photo=result.fulfillment.photo,
+            setup_text=result.fulfillment.setup_text,
+            setup_photos=result.fulfillment.setup_photos or None,
+            reply_markup=back_to_main_kb(),
         )
         return
 
-    quote = await get_plan_quote(plan_id, promo_code=code, tg_id=message.from_user.id)
-    if not quote:
-        await message.answer("Тариф не найден.")
-        return
-
-    await state.update_data(promo_code=code.upper())
-
-    sub = await get_primary_subscription_for_ui(message.from_user.id)
-    await message.answer(promo_applied_text(code.upper(), quote.discount_amount, quote.final_price))
-    await message.answer(
-        plan_card_text(
-            quote.plan,
-            extend=extend,
-            has_active_sub=sub is not None and not extend,
-            quote=quote,
-        ),
-        reply_markup=payment_methods_kb(plan_id, extend=extend, quote=quote),
-    )
+    if result.message:
+        await message.answer(result.message, reply_markup=back_to_main_kb())
 
 
 @router.callback_query(F.data.startswith("sub_link:"))

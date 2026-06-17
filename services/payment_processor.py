@@ -7,6 +7,7 @@ from loguru import logger
 
 from db import database as db
 from services.fulfillment import fulfill_paid_order
+from services.payment_text import payment_failed_user_text
 
 
 @dataclass
@@ -75,7 +76,13 @@ async def handle_platega_status(
             return PaymentProcessResult(
                 handled=False,
                 amount_mismatch=True,
-                user_message="⚠️ Сумма в callback не совпадает с заказом. Обратитесь в поддержку.",
+                user_message=payment_failed_user_text(
+                    order,
+                    title=(
+                        "⚠️ <b>Оплата не подтверждена</b>\n"
+                        "<i>Сумма в callback не совпадает с заказом. Обратитесь в поддержку.</i>"
+                    ),
+                ),
             )
         if cb_amount is not None:
             try:
@@ -99,7 +106,7 @@ async def handle_platega_status(
             return PaymentProcessResult(handled=True, already_paid=True)
         if status in ("CANCELED", "CHARGEBACKED", "FAILED"):
             await db.update_order_status(tx_id, "failed")
-            msg = "❌ Платёж отменён или возвращён." if notify else None
+            msg = payment_failed_user_text(order, status=status) if notify else None
             return PaymentProcessResult(handled=True, user_message=msg)
         return PaymentProcessResult(handled=True, already_paid=True)
 
@@ -128,7 +135,7 @@ async def handle_platega_status(
 
     if status in ("CANCELED", "CHARGEBACKED", "FAILED"):
         await db.update_order_status(tx_id, "failed")
-        msg = "❌ Платёж отменён или не прошёл." if notify else None
+        msg = payment_failed_user_text(order, status=status) if notify else None
         return PaymentProcessResult(handled=True, user_message=msg)
 
     if status == "PENDING":

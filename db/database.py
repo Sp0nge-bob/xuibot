@@ -112,10 +112,12 @@ async def init_db():
 
     from db.bot_settings import init_bot_settings
     from db.promo_codes import init_promo_tables
+    from db.promo_pending import init_promo_pending_tables
     from db.trial_grants import init_trial_tables
     from db.xui_nodes import init_xui_nodes
     await init_bot_settings()
     await init_promo_tables()
+    await init_promo_pending_tables()
     await init_trial_tables()
     await init_xui_nodes()
     logger.info("Database initialized at {}", DB_PATH)

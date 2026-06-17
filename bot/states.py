@@ -3,7 +3,6 @@ from aiogram.fsm.state import State, StatesGroup
 
 class UserStates(StatesGroup):
     waiting_promo_code = State()
-    waiting_grant_promo_code = State()
     waiting_refund_reply = State()
 
 

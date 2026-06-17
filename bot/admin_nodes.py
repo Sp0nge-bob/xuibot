@@ -50,7 +50,7 @@ async def nodes_list_text() -> str:
         "━━━━━━━━━━━━━━━━",
         "",
         f"Всего: <b>{summary['total']}</b> · healthy: <b>{summary['healthy']}</b>"
-        f" / <b>{summary['enabled']}</b>",
+        f" / привязано: <b>{summary['enabled']}</b>",
         f"Уникальных панелей: <b>{summary.get('unique_hosts', summary['total'])}</b>",
         "",
     ]
@@ -139,6 +139,16 @@ def node_detail_kb(node: dict) -> "InlineKeyboardMarkup":
             text="★ Сделать основной",
             callback_data=f"adm:node:primary:{nid}",
         )])
+    if node.get("is_enabled"):
+        rows.append([InlineKeyboardButton(
+            text="⭕ Отвязать бота от панели",
+            callback_data=f"adm:node:bind:0:{nid}",
+        )])
+    else:
+        rows.append([InlineKeyboardButton(
+            text="🔗 Привязать бота к панели",
+            callback_data=f"adm:node:bind:1:{nid}",
+        )])
     rows.append([InlineKeyboardButton(
         text="🗑 Удалить",
         callback_data=f"adm:node:del:{nid}",
@@ -171,7 +181,8 @@ async def node_detail_text(node: dict) -> str:
     if is_primary:
         lines.append(f"Inbounds подписки: <code>{node.get('inbound_ids') or '—'}</code>")
     lines += [
-        f"Enabled: {'да' if node.get('is_enabled') else 'нет'}",
+        f"Привязка бота: {'✅ активна' if node.get('is_enabled') else '⭕ отвязана'}",
+        "<i>Отвязка не выключает панель 3x-ui — бот просто не синхронизирует её.</i>",
         "",
         f"Uptime 24h: <b>{uptime}</b>",
         f"Latency: <b>{node.get('health_latency_ms') or '—'}</b> ms",
@@ -603,6 +614,26 @@ async def cb_nodes_sync(cb: CallbackQuery):
         text = f"❌ Ошибка синхронизации: <code>{str(e)[:120]}</code>"
     nodes = await nodes_db.list_nodes()
     await send_or_edit(cb, text, nodes_list_kb(nodes))
+
+
+@router.callback_query(F.data.startswith("adm:node:bind:"))
+async def cb_node_bind_toggle(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    parts = cb.data.split(":")
+    bound_flag = parts[3] == "1"
+    node_id = int(parts[4])
+    ok, msg = await nodes_db.set_node_bot_bound(node_id, bound=bound_flag)
+    if not ok:
+        await safe_cb_answer(cb, msg, show_alert=True)
+        node = await nodes_db.get_node(node_id)
+        if node:
+            await send_or_edit(cb, await node_detail_text(node), node_detail_kb(node))
+        return
+    await safe_cb_answer(cb, "Привязка обновлена")
+    node = await nodes_db.get_node(node_id)
+    if node:
+        await send_or_edit(cb, await node_detail_text(node), node_detail_kb(node))
 
 
 @router.callback_query(F.data.startswith("adm:node:primary:"))

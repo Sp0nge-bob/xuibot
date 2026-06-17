@@ -336,6 +336,25 @@ async def update_node(node_id: int, **fields: Any) -> bool:
         return True
 
 
+async def set_node_bot_bound(node_id: int, *, bound: bool) -> tuple[bool, str]:
+    """Привязка бота к панели (is_enabled). Не отключает саму панель 3x-ui."""
+    node = await get_node(node_id)
+    if not node:
+        return False, "Нода не найдена"
+    if node.get("is_primary") and not bound:
+        return False, (
+            "Нельзя отвязать бота от ★ основной ноды.\n"
+            "Сначала назначьте другую ноду основной."
+        )
+    await update_node(node_id, is_enabled=int(bound))
+    try:
+        from services.xui import invalidate_api_cache
+        invalidate_api_cache(node_id)
+    except Exception:
+        pass
+    return True, ""
+
+
 async def set_primary_node(node_id: int) -> tuple[bool, str]:
     await _ensure_init()
     node = await get_node(node_id)
