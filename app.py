@@ -20,6 +20,7 @@ from services.platega_client import verify_callback_headers
 from services.payment_processor import handle_platega_status
 from db import database as db
 from bot import start_bot, stop_bot, bot as tg_bot, send_message
+from bot.fulfillment_delivery import deliver_fulfillment
 from bot.keyboards import back_to_main_kb
 from bot.shutdown import bind_event_loop, install_uvicorn_shutdown_hook, register_bot_task
 
@@ -94,10 +95,13 @@ async def platega_webhook(
         if order:
             try:
                 if result.photo:
-                    await tg_bot.send_photo(
+                    await deliver_fulfillment(
+                        tg_bot,
                         order["tg_id"],
-                        result.photo,
-                        caption=result.user_message,
+                        text=result.user_message,
+                        photo=result.photo,
+                        setup_text=result.setup_text,
+                        setup_photos=result.setup_photos or None,
                         reply_markup=back_to_main_kb(),
                     )
                 else:

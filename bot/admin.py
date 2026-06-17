@@ -361,14 +361,12 @@ async def cb_admin_delete_sub(cb: CallbackQuery, state: FSMContext):
         )
         return
 
-    removed = result["removed_inbounds"]
-    removed_text = ", ".join(str(x) for x in removed) if removed else "—"
     text = (
         "✅ <b>Подписка удалена</b>\n"
         "━━━━━━━━━━━━━━━━\n\n"
         f"Клиент: <code>{result['email']}</code>\n"
-        f"TG ID: <code>{result['tg_id']}</code>\n"
-        f"Удалено из инбаундов: <code>{removed_text}</code>"
+        f"TG ID: <code>{result['tg_id']}</code>\n\n"
+        "Клиент полностью удалён с панелей."
     )
     await send_or_edit(cb, text, admin_back_kb())
 

@@ -1,15 +1,19 @@
 """Общая логика выдачи и продления подписки (тест, webhook, ручная проверка)."""
 import io
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Optional, Tuple
+from pathlib import Path
+from typing import List, Optional
 
 import qrcode
-from aiogram.types import BufferedInputFile
+from aiogram.types import BufferedInputFile, FSInputFile
 from loguru import logger
 
+from services.fulfillment_text import happ_setup_text, panel_sync_notice_text
 from config.plans import Plan, get_plan
 from config.trial import is_trial_email
 from db import database as db
+from db.bot_settings import get_subscription_inbound_count
 from services.xui import (
     provision_client,
     extend_client,
@@ -20,11 +24,21 @@ from services.xui import (
 from services.pricing import apply_promo_on_paid_order
 from services.node_sync import schedule_secondary_sync
 
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_SETUP_ASSETS_DIR = _PROJECT_ROOT / "assets" / "setup"
 
-async def fulfill_paid_order(order: dict) -> Tuple[str, Optional[BufferedInputFile]]:
+
+@dataclass
+class FulfillmentResult:
+    text: str
+    photo: Optional[BufferedInputFile] = None
+    setup_text: Optional[str] = None
+    setup_photos: List[FSInputFile] = field(default_factory=list)
+
+
+async def fulfill_paid_order(order: dict) -> FulfillmentResult:
     """
     Обрабатывает оплаченный заказ: создаёт или продлевает подписку.
-    Возвращает (текст сообщения, QR-фото или None).
     """
     await apply_promo_on_paid_order(order)
     plan = get_plan(order["plan_id"])
@@ -95,6 +109,7 @@ async def fulfill_paid_order(order: dict) -> Tuple[str, Optional[BufferedInputFi
             schedule_secondary_sync(sub_db_id)
             title = "Подписка продлена!"
 
+        inbound_count = await get_subscription_inbound_count()
         text = _success_text(
             title=title,
             plan=plan,
@@ -102,10 +117,11 @@ async def fulfill_paid_order(order: dict) -> Tuple[str, Optional[BufferedInputFi
             sub_link=sub_link,
             client_email=email,
             is_test=is_test,
+            inbound_count=inbound_count,
         )
         photo = make_qr_photo(sub_link or email, "vpn_extend.png")
         logger.success("Order {} extended for tg_id={}", order["id"], tg_id)
-        return text, photo
+        return FulfillmentResult(text=text, photo=photo)
 
     email, sub_id, sub_link = await provision_client(
         tg_id=tg_id,
@@ -125,6 +141,7 @@ async def fulfill_paid_order(order: dict) -> Tuple[str, Optional[BufferedInputFi
         traffic_gb=plan["traffic_gb"],
     )
     schedule_secondary_sync(sub_db_id)
+    inbound_count = await get_subscription_inbound_count()
     text = _success_text(
         title="Оплата прошла успешно!",
         plan=plan,
@@ -132,10 +149,18 @@ async def fulfill_paid_order(order: dict) -> Tuple[str, Optional[BufferedInputFi
         sub_link=sub_link,
         client_email=email,
         is_test=is_test,
+        inbound_count=inbound_count,
     )
     photo = make_qr_photo(sub_link or email, "vpn.png")
+    setup_photos = load_happ_setup_photos()
+    setup_text = happ_setup_text()
     logger.success("Order {} fulfilled for tg_id={}", order["id"], tg_id)
-    return text, photo
+    return FulfillmentResult(
+        text=text,
+        photo=photo,
+        setup_text=setup_text,
+        setup_photos=setup_photos,
+    )
 
 
 def _success_text(
@@ -146,6 +171,7 @@ def _success_text(
     sub_link: Optional[str],
     client_email: str,
     is_test: bool,
+    inbound_count: int,
 ) -> str:
     traffic = "безлимит" if plan["traffic_gb"] == 0 else f"{plan['traffic_gb']} ГБ"
     lines = [
@@ -161,15 +187,27 @@ def _success_text(
     lines.append(f"👤 Клиент: <code>{client_email}</code>")
     if is_test:
         lines += ["", "⚠️ <i>Тестовый режим — оплата симулирована</i>"]
-    else:
-        lines += [
-            "",
-            "Скопируйте ссылку или отсканируйте QR-код ниже.",
-            "",
-            "⏳ <i>Спустя 1–2 минуты после покупки панель может не сразу синхронизироваться. "
-            "Пожалуйста, обновите подписку в клиенте через 2 минуты после покупки.</i>",
-        ]
+    lines += [
+        "",
+        "Скопируйте ссылку или отсканируйте QR-код ниже.",
+        "",
+        panel_sync_notice_text(inbound_count),
+    ]
     return "\n".join(lines)
+
+
+def load_happ_setup_photos() -> List[FSInputFile]:
+    """Скриншоты Happ из assets/setup/import_* и happ*."""
+    if not _SETUP_ASSETS_DIR.is_dir():
+        return []
+    paths: list[Path] = []
+    for pattern in (
+        "import_*.png", "import_*.jpg", "import_*.jpeg", "import_*.webp",
+        "happ*.png", "happ*.jpg", "happ*.jpeg", "happ*.webp",
+    ):
+        paths.extend(_SETUP_ASSETS_DIR.glob(pattern))
+    paths = sorted({p.resolve() for p in paths if p.is_file()})
+    return [FSInputFile(path) for path in paths]
 
 
 def make_qr_photo(qr_text: str, filename: str) -> BufferedInputFile:

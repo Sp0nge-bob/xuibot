@@ -1,8 +1,8 @@
 """Единая обработка статусов Platega (webhook, check_pay, симулятор)."""
-from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
 
-from aiogram.types import BufferedInputFile
+from aiogram.types import BufferedInputFile, FSInputFile
 from loguru import logger
 
 from db import database as db
@@ -14,6 +14,8 @@ class PaymentProcessResult:
     handled: bool
     user_message: Optional[str] = None
     photo: Optional[BufferedInputFile] = None
+    setup_text: Optional[str] = None
+    setup_photos: List[FSInputFile] = field(default_factory=list)
     already_paid: bool = False
     amount_mismatch: bool = False
 
@@ -78,9 +80,15 @@ async def handle_platega_status(
             return PaymentProcessResult(handled=True, already_paid=True)
         try:
             fresh_order = await db.get_order_by_platega_tx(tx_id) or order
-            text, photo = await fulfill_paid_order(fresh_order)
+            fulfillment = await fulfill_paid_order(fresh_order)
             if notify:
-                return PaymentProcessResult(handled=True, user_message=text, photo=photo)
+                return PaymentProcessResult(
+                    handled=True,
+                    user_message=fulfillment.text,
+                    photo=fulfillment.photo,
+                    setup_text=fulfillment.setup_text,
+                    setup_photos=fulfillment.setup_photos,
+                )
             return PaymentProcessResult(handled=True)
         except Exception as e:
             logger.exception("Fulfillment failed [{}] tx={}: {}", source, tx_id, e)

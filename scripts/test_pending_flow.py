@@ -18,9 +18,10 @@ from services.platega_client import create_transaction
 from services.platega import parse_create_response
 from services.payment_flow import PendingTestOutcome, apply_pending_test_outcome, check_payment_status
 from services.payment_processor import handle_platega_status
+from services.fulfillment import FulfillmentResult
 
 TEST_TG = 888777666
-MOCK_FULFILL = ("OK: ключ выдан", None)
+MOCK_FULFILL = FulfillmentResult(text="OK: ключ выдан")
 
 
 async def _create_pending_order() -> str:

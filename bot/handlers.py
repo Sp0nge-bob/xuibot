@@ -39,6 +39,7 @@ from services.subscription_sync import (
 )
 from services.trial import claim_trial, get_trial_button_visible
 from services.xui import build_sub_link
+from .fulfillment_delivery import deliver_fulfillment
 from .ui_helpers import safe_cb_answer, send_or_edit
 from .keyboards import (
     main_menu_kb,
@@ -523,9 +524,13 @@ async def _apply_test_scenario(
 
     if result.photo and result.user_message:
         await cb.message.delete()
-        await cb.message.answer_photo(
-            result.photo,
-            caption=result.user_message,
+        await deliver_fulfillment(
+            cb.message.bot,
+            cb.message.chat.id,
+            text=result.user_message,
+            photo=result.photo,
+            setup_text=result.setup_text,
+            setup_photos=result.setup_photos or None,
             reply_markup=back_to_main_kb(),
         )
         return
@@ -605,9 +610,13 @@ async def _respond_payment_flow(cb: CallbackQuery, order: dict, tx_id: str, flow
         await cb.message.answer(result.user_message, reply_markup=back_to_main_kb())
         return
     if result.photo and result.user_message:
-        await cb.message.answer_photo(
-            result.photo,
-            caption=result.user_message,
+        await deliver_fulfillment(
+            cb.message.bot,
+            cb.message.chat.id,
+            text=result.user_message,
+            photo=result.photo,
+            setup_text=result.setup_text,
+            setup_photos=result.setup_photos or None,
             reply_markup=back_to_main_kb(),
         )
         return

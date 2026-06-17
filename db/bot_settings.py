@@ -77,3 +77,7 @@ async def set_subscription_inbound_ids(inbound_ids: List[int]) -> str:
 async def get_subscription_inbounds_display() -> str:
     ids = await get_subscription_inbound_ids()
     return ", ".join(str(x) for x in ids)
+
+
+async def get_subscription_inbound_count() -> int:
+    return len(await get_subscription_inbound_ids())
