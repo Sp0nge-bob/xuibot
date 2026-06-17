@@ -148,7 +148,7 @@ async def _init_xui_nodes_impl() -> None:
 
     count = await _count_nodes()
     if count == 0:
-        await _migrate_primary_from_env()
+        await _migrate_primary_from_env_with_retry()
     else:
         stats = await dedupe_nodes()
         if stats["removed"]:
@@ -174,8 +174,39 @@ async def _count_nodes() -> int:
     return await count_nodes()
 
 
+async def _migrate_primary_from_env_with_retry() -> None:
+    import asyncio
+
+    from loguru import logger
+
+    for attempt in range(1, 9):
+        try:
+            await _migrate_primary_from_env()
+            return
+        except Exception as e:
+            msg = str(e).lower()
+            if await _count_nodes() > 0:
+                return
+            if "уже зарегистрирована" in str(e):
+                return
+            if "locked" in msg and attempt < 8:
+                delay = min(2.0 * attempt, 10.0)
+                logger.warning(
+                    "Primary node migrate locked, retry {}/8 in {:.0f}s",
+                    attempt,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+                continue
+            raise
+
+
 async def _migrate_primary_from_env() -> None:
     from db.bot_settings import get_subscription_inbound_ids_from_settings
+
+    host = (settings.XUI_HOST or "").strip()
+    if host and await get_node_by_host(host):
+        return
 
     inbound_ids = await get_subscription_inbound_ids_from_settings()
     await create_node(

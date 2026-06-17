@@ -1,12 +1,14 @@
 [Unit]
 Description=VPN Bot Webhook (Platega + fulfillment queue)
-After=network.target
+After=network.target vpn-bot-telegram.service
+Wants=vpn-bot-telegram.service
 
 [Service]
 Type=simple
 User=vpnbot
 WorkingDirectory=/opt/vpn-bot
 Environment=PATH=/opt/vpn-bot/.venv/bin
+ExecStartPre=/bin/sleep 8
 ExecStart=/opt/vpn-bot/.venv/bin/python app.py
 Restart=always
 RestartSec=5

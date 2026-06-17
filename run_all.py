@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent
-_PROCS: list[subprocess.Popen[bytes]] = []
+_PROCS: list[tuple[str, subprocess.Popen[bytes]]] = []
 _SHUTTING_DOWN = False
 
 
@@ -29,16 +29,42 @@ def _start(script: str) -> subprocess.Popen[bytes]:
     )
 
 
+def _wait_for_db_ready(timeout_sec: float = 90) -> bool:
+    """Ждём, пока run_bot.py запишет Database initialized в лог."""
+    log_dir = _ROOT / "data" / "logs"
+    marker = "Database initialized"
+    deadline = time.time() + timeout_sec
+    print(f"Waiting for DB init (up to {int(timeout_sec)}s)...")
+    while time.time() < deadline:
+        if log_dir.is_dir():
+            logs = sorted(
+                log_dir.glob("bot_*.log"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+            if logs:
+                try:
+                    if marker in logs[0].read_text(encoding="utf-8", errors="ignore"):
+                        time.sleep(1)
+                        print("DB ready.")
+                        return True
+                except OSError:
+                    pass
+        time.sleep(1)
+    print("Warning: DB init marker not found — starting app.py anyway.")
+    return False
+
+
 def _shutdown(*_args: object) -> None:
     global _SHUTTING_DOWN
     if _SHUTTING_DOWN:
         return
     _SHUTTING_DOWN = True
     print("\nStopping...")
-    for proc in _PROCS:
+    for _name, proc in _PROCS:
         if proc.poll() is None:
             proc.terminate()
-    for proc in _PROCS:
+    for _name, proc in _PROCS:
         try:
             proc.wait(timeout=12)
         except subprocess.TimeoutExpired:
@@ -51,19 +77,18 @@ def main() -> None:
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
-    # Сначала run_bot — он инициализирует SQLite. Одновременный старт даёт database is locked.
-    _PROCS.append(_start("run_bot.py"))
-    print("Waiting for DB init (5s)...")
-    time.sleep(5)
-    _PROCS.append(_start("app.py"))
+    bot_proc = _start("run_bot.py")
+    _PROCS.append(("run_bot.py", bot_proc))
+    _wait_for_db_ready()
+    web_proc = _start("app.py")
+    _PROCS.append(("app.py", web_proc))
     print("Both processes started. Press Ctrl+C to stop.")
 
     try:
         while True:
-            for proc in _PROCS:
+            for name, proc in _PROCS:
                 code = proc.poll()
                 if code is not None:
-                    name = "app.py" if proc is _PROCS[0] else "run_bot.py"
                     print(f"{name} exited with code {code}")
                     _shutdown()
             time.sleep(0.5)
