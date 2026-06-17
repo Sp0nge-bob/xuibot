@@ -202,6 +202,28 @@ async def get_order_by_id(order_id: int) -> Optional[Dict[str, Any]]:
             return dict(row) if row else None
 
 
+async def count_users() -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await _apply_pragmas(db)
+        async with db.execute("SELECT COUNT(*) FROM users") as cur:
+            return int((await cur.fetchone())[0])
+
+
+async def reset_all_users() -> dict[str, int]:
+    """Удалить все записи из users (для отладки). Подписки и заказы не трогаются."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await _apply_pragmas(db)
+        async with db.execute("SELECT COUNT(*) FROM users") as cur:
+            users_count = int((await cur.fetchone())[0])
+        cur = await db.execute("DELETE FROM users")
+        users_deleted = cur.rowcount
+        await db.commit()
+    return {
+        "users_deleted": users_deleted,
+        "users_count": users_count,
+    }
+
+
 async def count_orders() -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         await _apply_pragmas(db)

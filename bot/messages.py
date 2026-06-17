@@ -388,7 +388,8 @@ def admin_debug_entry_confirm_text() -> str:
         "• массовый сброс пробных подписок\n"
         "• очистка всех применений промокодов\n"
         "• сброс истории всех заказов\n"
-        "• сброс учёта всех тикетов\n\n"
+        "• сброс учёта всех тикетов\n"
+        "• сброс учёта пользователей\n\n"
         "Используйте только для отладки и тестирования.\n\n"
         "Войти в раздел?"
     )
@@ -402,6 +403,7 @@ def admin_debug_menu_text(
     orders_count: int = 0,
     tickets_count: int = 0,
     ticket_messages_count: int = 0,
+    users_count: int = 0,
 ) -> str:
     return (
         "🧪 <b>Отладка</b>\n"
@@ -410,8 +412,22 @@ def admin_debug_menu_text(
         f"🎟 Применений промокодов (promo_uses): <b>{promo_uses}</b>\n"
         f"⏳ Ожидающих скидок (pending): <b>{promo_pending}</b>\n"
         f"🧾 Заказов в истории: <b>{orders_count}</b>\n"
-        f"🎫 Тикетов: <b>{tickets_count}</b> · сообщений: <b>{ticket_messages_count}</b>\n\n"
+        f"🎫 Тикетов: <b>{tickets_count}</b> · сообщений: <b>{ticket_messages_count}</b>\n"
+        f"👥 Пользователей в БД: <b>{users_count}</b>\n\n"
         "Выберите действие:"
+    )
+
+
+def admin_debug_users_reset_confirm_text(*, users_count: int) -> str:
+    return (
+        "👥 <b>Сброс учёта пользователей</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        f"Записей в <code>users</code>: <b>{users_count}</b>\n\n"
+        "Будет выполнено:\n"
+        "• удаление всех записей из таблицы <code>users</code>\n\n"
+        "Подписки, заказы, тикеты и клиенты на панели останутся.\n"
+        "При следующем /start пользователи будут зарегистрированы заново.\n\n"
+        "Продолжить?"
     )
 
 

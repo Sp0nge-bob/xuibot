@@ -15,6 +15,7 @@ from .admin_keyboards import (
     admin_debug_orders_reset_confirm_kb,
     admin_debug_promo_reset_confirm_kb,
     admin_debug_tickets_reset_confirm_kb,
+    admin_debug_users_reset_confirm_kb,
 )
 from .messages import (
     admin_debug_entry_confirm_text,
@@ -22,6 +23,7 @@ from .messages import (
     admin_debug_orders_reset_confirm_text,
     admin_debug_promo_reset_confirm_text,
     admin_debug_tickets_reset_confirm_text,
+    admin_debug_users_reset_confirm_text,
 )
 from .ui_helpers import safe_cb_answer, send_or_edit
 
@@ -35,6 +37,7 @@ async def _show_debug_menu(cb: CallbackQuery) -> None:
     orders_count = await db.count_orders()
     tickets_count = await tickets_db.count_tickets()
     ticket_messages_count = await tickets_db.count_ticket_messages()
+    users_count = await db.count_users()
     await send_or_edit(
         cb,
         admin_debug_menu_text(
@@ -44,6 +47,7 @@ async def _show_debug_menu(cb: CallbackQuery) -> None:
             orders_count=orders_count,
             tickets_count=tickets_count,
             ticket_messages_count=ticket_messages_count,
+            users_count=users_count,
         ),
         admin_debug_kb(),
     )
@@ -187,5 +191,43 @@ async def cb_admin_debug_tickets_reset(cb: CallbackQuery):
         "✅ <b>Учёт тикетов очищен</b>\n\n"
         f"Удалено тикетов: <b>{result['tickets_deleted']}</b>\n"
         f"Удалено сообщений: <b>{result['messages_deleted']}</b>"
+    )
+    await send_or_edit(cb, text, admin_debug_kb())
+
+
+@router.callback_query(F.data == "adm:debug:users_reset")
+async def cb_admin_debug_users_reset_confirm(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+
+    users_count = await db.count_users()
+    await safe_cb_answer(cb)
+    await send_or_edit(
+        cb,
+        admin_debug_users_reset_confirm_text(users_count=users_count),
+        admin_debug_users_reset_confirm_kb(),
+    )
+
+
+@router.callback_query(F.data == "adm:debug:users_reset:confirm")
+async def cb_admin_debug_users_reset(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+
+    await safe_cb_answer(cb, "Удаляем…")
+    try:
+        result = await db.reset_all_users()
+    except Exception as e:
+        logger.exception("Users reset error: {}", e)
+        await send_or_edit(
+            cb,
+            f"❌ Ошибка: <code>{str(e)[:120]}</code>",
+            admin_back_kb(),
+        )
+        return
+
+    text = (
+        "✅ <b>Учёт пользователей очищен</b>\n\n"
+        f"Удалено записей: <b>{result['users_deleted']}</b>"
     )
     await send_or_edit(cb, text, admin_debug_kb())

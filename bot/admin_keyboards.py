@@ -69,7 +69,21 @@ def admin_debug_kb() -> InlineKeyboardMarkup:
             text="🎫 Сбросить учёт тикетов",
             callback_data="adm:debug:tickets_reset",
         )],
+        [InlineKeyboardButton(
+            text="👥 Сбросить учёт пользователей",
+            callback_data="adm:debug:users_reset",
+        )],
         [InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")],
+    ])
+
+
+def admin_debug_users_reset_confirm_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="⚠️ Подтвердить удаление",
+            callback_data="adm:debug:users_reset:confirm",
+        )],
+        [InlineKeyboardButton(text="« Отмена", callback_data="adm:debug:enter")],
     ])
 
 
