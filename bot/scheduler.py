@@ -43,24 +43,29 @@ async def check_nodes_health_job():
     await check_all_nodes_health()
 
 
-async def scheduled_full_nodes_sync():
+async def run_full_nodes_sync(*, source: str) -> None:
     """Тот же прогон, что кнопка «Синхронизировать вторичные» в админке."""
-    logger.info("Scheduled full nodes sync (every {}h)", settings.FULL_SYNC_INTERVAL_HOURS)
+    logger.info("Full nodes sync ({})", source)
     try:
         stats = await sync_all_secondary_nodes()
         logger.info(
-            "Scheduled sync done: subs={} nodes={} ok={} failed={} "
-            "primary_created={} primary_updated={} purged={}",
-            stats.get("subs", 0),
-            stats.get("nodes", 0),
-            stats.get("ok", 0),
-            stats.get("failed", 0),
-            stats.get("primary_created", 0),
-            stats.get("primary_updated", 0),
-            stats.get("purged", 0),
+            "Full nodes sync done ({source}): subs={subs} nodes={nodes} ok={ok} failed={failed} "
+            "primary_created={primary_created} primary_updated={primary_updated} purged={purged}",
+            source=source,
+            subs=stats.get("subs", 0),
+            nodes=stats.get("nodes", 0),
+            ok=stats.get("ok", 0),
+            failed=stats.get("failed", 0),
+            primary_created=stats.get("primary_created", 0),
+            primary_updated=stats.get("primary_updated", 0),
+            purged=stats.get("purged", 0),
         )
     except Exception as e:
-        logger.exception("Scheduled full nodes sync failed: {}", e)
+        logger.exception("Full nodes sync failed ({source}): {}", source, e)
+
+
+async def scheduled_full_nodes_sync():
+    await run_full_nodes_sync(source=f"every {settings.FULL_SYNC_INTERVAL_HOURS}h")
 
 
 def start_scheduler():

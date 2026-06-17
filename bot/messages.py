@@ -361,6 +361,8 @@ def pending_payment_text(
     action = "Продление" if is_renewal else "Тариф"
     if quote and quote.has_discount:
         price_part = f"<s>{quote.base_price}</s> <b>{quote.final_price} ₽</b>"
+    elif quote:
+        price_part = f"<b>{quote.final_price} ₽</b>"
     else:
         price_part = f"<b>{plan['price']} ₽</b>"
     title = "⏳ <b>Ожидаем оплату</b> (тест)" if test_mode else "⏳ <b>Ожидаем оплату</b>"

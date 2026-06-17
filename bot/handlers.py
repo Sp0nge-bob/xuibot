@@ -31,7 +31,7 @@ from services.payment_flow import (
     check_payment_status,
 )
 from services.payment_processor import handle_platega_status
-from services.pricing import get_plan_quote, list_plans, validate_promo
+from services.pricing import get_plan_quote, list_plans, quote_from_order, validate_promo
 from services.subscription_sync import (
     get_active_subscriptions_for_ui,
     get_primary_paid_subscription_for_ui,
@@ -552,11 +552,7 @@ async def _pending_payment_view(
         settings.PLATEGA_SBP_METHOD,
         settings.PLATEGA_CRYPTO_METHOD,
     )
-    quote = await get_plan_quote(
-        order["plan_id"],
-        promo_code=order.get("promo_code"),
-        tg_id=order["tg_id"],
-    )
+    quote = quote_from_order(order, plan)
     extend = (order.get("order_type") or "new") == "extend"
     existing_sub = await db.get_primary_subscription(order["tg_id"])
     expires_in = await fetch_pending_expires_in(tx_id, order)

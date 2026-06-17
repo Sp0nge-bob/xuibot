@@ -28,6 +28,23 @@ def calc_discount(base_price: int, discount_type: str, discount_value: int) -> i
     return min(base_price, discount_value)
 
 
+def quote_from_order(order: dict, plan: Plan) -> PriceQuote:
+    """Цена из сохранённого заказа (сумма счёта Platega), не из текущих настроек."""
+    final_price = int(order.get("amount") or plan["price"])
+    base_price = int(order.get("original_amount") or final_price)
+    discount_amount = int(order.get("discount_amount") or 0)
+    if discount_amount <= 0 and base_price > final_price:
+        discount_amount = base_price - final_price
+    promo_code = order.get("promo_code") or None
+    return PriceQuote(
+        plan={**plan, "price": final_price},
+        base_price=base_price,
+        final_price=final_price,
+        discount_amount=discount_amount,
+        promo_code=promo_code,
+    )
+
+
 async def get_plan_quote(
     plan_id: str,
     *,

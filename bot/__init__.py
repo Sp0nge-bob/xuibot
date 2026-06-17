@@ -13,8 +13,9 @@ from .handlers import router as main_router
 from .admin import router as admin_router
 from .admin_nodes import router as admin_nodes_router
 from .middlewares import ActionLockMiddleware
-from .scheduler import start_scheduler, stop_scheduler
+from .scheduler import run_full_nodes_sync, start_scheduler
 from .sender import send_message
+from .shutdown import graceful_shutdown, register_bot_task
 
 bot = Bot(
     token=settings.BOT_TOKEN,
@@ -36,6 +37,7 @@ async def start_bot():
     import asyncio
 
     logger.info("Бот запускается…")
+    register_bot_task(asyncio.current_task())
 
     start_scheduler()
     await start_secondary_sync_workers()
@@ -59,6 +61,12 @@ async def start_bot():
         logger.warning("log_inbound_port_conflicts: {}", e)
 
     try:
+        await run_full_nodes_sync(source="startup")
+    except asyncio.CancelledError:
+        logger.info("Стартовая синхронизация прервана")
+        raise
+
+    try:
         me = await bot.get_me()
         logger.info("Подключён @{} ({})", me.username, me.id)
     except Exception as e:
@@ -80,24 +88,5 @@ async def start_bot():
 
 
 async def stop_bot():
-    """Корректная остановка: workers → polling → scheduler → HTTP-сессия."""
-    import asyncio
-
-    logger.info("Бот останавливается…")
-    await stop_secondary_sync_workers()
-
-    try:
-        await asyncio.wait_for(dp.stop_polling(), timeout=5.0)
-    except asyncio.TimeoutError:
-        logger.warning("stop_polling timeout — принудительное завершение")
-    except Exception as e:
-        logger.debug("stop_polling: {}", e)
-
-    stop_scheduler()
-
-    try:
-        await bot.session.close()
-    except Exception as e:
-        logger.debug("bot.session.close: {}", e)
-
-    logger.info("Бот остановлен")
+    """Корректная остановка (lifespan uvicorn)."""
+    await graceful_shutdown(reason="lifespan")

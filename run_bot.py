@@ -17,15 +17,22 @@
 import asyncio
 
 from bot import start_bot
+from bot.shutdown import graceful_shutdown, install_shutdown_handlers
 from db.database import init_db
+
+
+async def _main() -> None:
+    install_shutdown_handlers()
+    await init_db()
+    try:
+        await start_bot()
+    finally:
+        await graceful_shutdown(reason="run_bot")
+
 
 if __name__ == "__main__":
     print("Starting Telegram bot (polling mode)...")
     try:
-        async def _main():
-            await init_db()
-            await start_bot()
-
         asyncio.run(_main())
     except KeyboardInterrupt:
-        print("\nBot stopped by user.")
+        print("\nBot stopped.")

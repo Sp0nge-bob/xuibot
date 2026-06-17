@@ -368,8 +368,12 @@ async def _secondary_sync_worker() -> None:
             sub_id = await asyncio.wait_for(q.get(), timeout=1.0)
         except asyncio.TimeoutError:
             continue
+        except asyncio.CancelledError:
+            break
         try:
             await sync_subscription_to_secondaries(sub_id)
+        except asyncio.CancelledError:
+            break
         except Exception as e:
             logger.error("Secondary sync worker failed for #{}: {}", sub_id, e)
         finally:

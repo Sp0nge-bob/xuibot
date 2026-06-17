@@ -8,8 +8,8 @@ if sys.platform.startswith("win"):
 Основной файл приложения.
 Запускает FastAPI (для webhook Platega) + lifespan с aiogram ботом.
 """
-import asyncio
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request, HTTPException, Header
 from fastapi.responses import JSONResponse
 from loguru import logger
@@ -21,14 +21,17 @@ from services.payment_processor import handle_platega_status
 from db import database as db
 from bot import start_bot, stop_bot, bot as tg_bot, send_message
 from bot.keyboards import back_to_main_kb
+from bot.shutdown import register_bot_task
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
     logger.info("Database ready")
 
-    logger.info("🚀 Creating bot background task (polling will start in background)...")
-    bot_task = asyncio.create_task(start_bot())
+    logger.info("Creating bot background task (polling will start in background)...")
+    bot_task = asyncio.create_task(start_bot(), name="telegram_bot")
+    register_bot_task(bot_task)
 
     yield
 
@@ -37,18 +40,21 @@ async def lifespan(app: FastAPI):
     if not bot_task.done():
         bot_task.cancel()
     try:
-        await asyncio.wait_for(bot_task, timeout=8.0)
+        await asyncio.wait_for(bot_task, timeout=2.0)
     except (asyncio.CancelledError, asyncio.TimeoutError):
         pass
     except Exception as e:
         logger.debug("bot_task join: {}", e)
     logger.info("Shutdown complete")
 
+
 app = FastAPI(title="VPN Platega Bot", lifespan=lifespan)
+
 
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
 
 @app.post(settings.WEBHOOK_PATH)
 async def platega_webhook(
@@ -107,11 +113,31 @@ async def platega_webhook(
     return JSONResponse({"ok": True})
 
 
-if __name__ == "__main__":
+async def _run_server() -> None:
     import uvicorn
-    uvicorn.run(
-        "app:app",
+
+    config = uvicorn.Config(
+        app,
         host=settings.WEBHOOK_HOST,
         port=settings.WEBHOOK_PORT,
         reload=False,
+        lifespan="on",
+        timeout_graceful_shutdown=5,
     )
+    server = uvicorn.Server(config)
+
+    original_handle_exit = server.handle_exit
+
+    def handle_exit(sig, frame):
+        logger.info("Uvicorn SIGINT/SIGTERM — запускаем остановку бота")
+        from bot.shutdown import request_shutdown
+
+        request_shutdown(f"uvicorn-{sig}")
+        original_handle_exit(sig, frame)
+
+    server.handle_exit = handle_exit
+    await server.serve()
+
+
+if __name__ == "__main__":
+    asyncio.run(_run_server())
