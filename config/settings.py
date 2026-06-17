@@ -1,11 +1,15 @@
-from pydantic_settings import BaseSettings
+import json
+from typing import Annotated, List
+
 from pydantic import field_validator
-from typing import List
+from pydantic_settings import BaseSettings, NoDecode
+
 
 class Settings(BaseSettings):
     # Telegram
     BOT_TOKEN: str
-    BOT_ADMINS: List[int] = []
+    # NoDecode: иначе pydantic-settings парсит List как JSON и падает на "id1,id2"
+    BOT_ADMINS: Annotated[List[int], NoDecode] = []
 
     # Platega
     PLATEGA_MERCHANT_ID: str
@@ -99,14 +103,21 @@ class Settings(BaseSettings):
     @classmethod
     def parse_bot_admins(cls, v):
         if isinstance(v, str):
-            v = v.strip()
-            if not v:
+            raw = v.strip()
+            if not raw:
                 return []
-            return [int(x.strip()) for x in v.split(",") if x.strip()]
+            if raw.startswith("["):
+                try:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, list):
+                        return [int(x) for x in parsed]
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    pass
+            return [int(x.strip()) for x in raw.split(",") if x.strip()]
         if isinstance(v, int):
             return [v]
         if isinstance(v, list):
-            return v
+            return [int(x) for x in v]
         return []
 
 settings = Settings()
