@@ -1,0 +1,15 @@
+[Unit]
+Description=VPN Bot Webhook (Platega + fulfillment queue)
+After=network.target
+
+[Service]
+Type=simple
+User=vpnbot
+WorkingDirectory=/opt/vpn-bot
+Environment=PATH=/opt/vpn-bot/.venv/bin
+ExecStart=/opt/vpn-bot/.venv/bin/python app.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

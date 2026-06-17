@@ -12,6 +12,12 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Build / packaging
+*.egg-info/
+dist/
+build/
+*.egg
+
 # Logs
 *.log
 report/
@@ -23,8 +29,24 @@ report/
 # IDE
 .idea/
 .vscode/
+.cursor/
+mcps/
+grokerrorreports/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Test / coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
 
 # Runtime data
 data/
 *.db
+*.sqlite3
 data/*.db
