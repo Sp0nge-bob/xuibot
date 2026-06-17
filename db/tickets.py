@@ -156,6 +156,8 @@ async def create_ticket(
     if category == CATEGORY_REFUND:
         if not subscription_id or not order_id:
             raise ValueError("subscription_id and order_id required for refund")
+        if await has_approved_refund_for_order(subscription_id, order_id):
+            raise ValueError("refund already approved for this order")
         existing = await get_open_refund_ticket_for_order(subscription_id, order_id)
         if existing:
             return existing["id"]
@@ -216,6 +218,46 @@ async def get_open_refund_tickets_for_subscription(
 async def get_open_refund_order_ids_for_subscription(subscription_id: int) -> set[int]:
     tickets = await get_open_refund_tickets_for_subscription(subscription_id)
     return {t["order_id"] for t in tickets if t.get("order_id")}
+
+
+async def get_refund_blocked_order_ids_for_subscription(subscription_id: int) -> set[int]:
+    """Заказы с открытым тикетом возврата или уже одобренным возвратом."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            """SELECT DISTINCT order_id FROM tickets
+               WHERE subscription_id = ? AND category = ? AND order_id IS NOT NULL
+                 AND (
+                   status = ?
+                   OR (status = ? AND refund_decision = ?)
+                 )""",
+            (
+                subscription_id,
+                CATEGORY_REFUND,
+                STATUS_OPEN,
+                STATUS_CLOSED,
+                REFUND_DECISION_APPROVED,
+            ),
+        ) as cur:
+            rows = await cur.fetchall()
+    return {int(row[0]) for row in rows if row[0] is not None}
+
+
+async def has_approved_refund_for_order(subscription_id: int, order_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            """SELECT 1 FROM tickets
+               WHERE subscription_id = ? AND order_id = ? AND category = ?
+                 AND status = ? AND refund_decision = ?
+               LIMIT 1""",
+            (
+                subscription_id,
+                order_id,
+                CATEGORY_REFUND,
+                STATUS_CLOSED,
+                REFUND_DECISION_APPROVED,
+            ),
+        ) as cur:
+            return await cur.fetchone() is not None
 
 
 async def get_open_refund_tickets_by_subscription_for_user(
@@ -399,6 +441,38 @@ async def get_ticket_messages(ticket_id: int, limit: int = 50) -> List[Dict[str,
         ) as cur:
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
+
+
+async def count_tickets() -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT COUNT(*) FROM tickets") as cur:
+            return int((await cur.fetchone())[0])
+
+
+async def count_ticket_messages() -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT COUNT(*) FROM ticket_messages") as cur:
+            return int((await cur.fetchone())[0])
+
+
+async def reset_all_tickets() -> dict[str, int]:
+    """Удалить все тикеты и переписку (для отладки)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT COUNT(*) FROM tickets") as cur:
+            tickets_count = int((await cur.fetchone())[0])
+        async with db.execute("SELECT COUNT(*) FROM ticket_messages") as cur:
+            messages_count = int((await cur.fetchone())[0])
+        cur = await db.execute("DELETE FROM ticket_messages")
+        messages_deleted = cur.rowcount
+        cur = await db.execute("DELETE FROM tickets")
+        tickets_deleted = cur.rowcount
+        await db.commit()
+    return {
+        "tickets_deleted": tickets_deleted,
+        "messages_deleted": messages_deleted,
+        "tickets_count": tickets_count,
+        "messages_count": messages_count,
+    }
 
 
 async def get_ticket_stats() -> Dict[str, int]:

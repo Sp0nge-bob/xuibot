@@ -6,6 +6,7 @@ from loguru import logger
 from db import database as db
 from db import promo_codes as promo_db
 from db import promo_pending as pending_db
+from db import tickets as tickets_db
 from .admin_auth import is_admin
 from .admin_keyboards import (
     admin_back_kb,
@@ -13,12 +14,14 @@ from .admin_keyboards import (
     admin_debug_kb,
     admin_debug_orders_reset_confirm_kb,
     admin_debug_promo_reset_confirm_kb,
+    admin_debug_tickets_reset_confirm_kb,
 )
 from .messages import (
     admin_debug_entry_confirm_text,
     admin_debug_menu_text,
     admin_debug_orders_reset_confirm_text,
     admin_debug_promo_reset_confirm_text,
+    admin_debug_tickets_reset_confirm_text,
 )
 from .ui_helpers import safe_cb_answer, send_or_edit
 
@@ -30,6 +33,8 @@ async def _show_debug_menu(cb: CallbackQuery) -> None:
     promo_uses = await promo_db.count_promo_uses()
     promo_pending = await pending_db.count_pending_discounts()
     orders_count = await db.count_orders()
+    tickets_count = await tickets_db.count_tickets()
+    ticket_messages_count = await tickets_db.count_ticket_messages()
     await send_or_edit(
         cb,
         admin_debug_menu_text(
@@ -37,6 +42,8 @@ async def _show_debug_menu(cb: CallbackQuery) -> None:
             promo_uses=promo_uses,
             promo_pending=promo_pending,
             orders_count=orders_count,
+            tickets_count=tickets_count,
+            ticket_messages_count=ticket_messages_count,
         ),
         admin_debug_kb(),
     )
@@ -137,5 +144,48 @@ async def cb_admin_debug_orders_reset(cb: CallbackQuery):
         "✅ <b>История заказов очищена</b>\n\n"
         f"Удалено заказов: <b>{result['orders_deleted']}</b>\n"
         f"Тикетов отвязано от заказов: <b>{result['tickets_unlinked']}</b>"
+    )
+    await send_or_edit(cb, text, admin_debug_kb())
+
+
+@router.callback_query(F.data == "adm:debug:tickets_reset")
+async def cb_admin_debug_tickets_reset_confirm(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+
+    tickets_count = await tickets_db.count_tickets()
+    messages_count = await tickets_db.count_ticket_messages()
+    await safe_cb_answer(cb)
+    await send_or_edit(
+        cb,
+        admin_debug_tickets_reset_confirm_text(
+            tickets_count=tickets_count,
+            messages_count=messages_count,
+        ),
+        admin_debug_tickets_reset_confirm_kb(),
+    )
+
+
+@router.callback_query(F.data == "adm:debug:tickets_reset:confirm")
+async def cb_admin_debug_tickets_reset(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+
+    await safe_cb_answer(cb, "Удаляем…")
+    try:
+        result = await tickets_db.reset_all_tickets()
+    except Exception as e:
+        logger.exception("Tickets reset error: {}", e)
+        await send_or_edit(
+            cb,
+            f"❌ Ошибка: <code>{str(e)[:120]}</code>",
+            admin_back_kb(),
+        )
+        return
+
+    text = (
+        "✅ <b>Учёт тикетов очищен</b>\n\n"
+        f"Удалено тикетов: <b>{result['tickets_deleted']}</b>\n"
+        f"Удалено сообщений: <b>{result['messages_deleted']}</b>"
     )
     await send_or_edit(cb, text, admin_debug_kb())

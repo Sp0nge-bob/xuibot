@@ -63,14 +63,14 @@ async def _refund_ui_state(tg_id: int, sub_id: int) -> tuple[list[dict], bool]:
     open_tickets = (
         await tickets_db.get_open_refund_tickets_by_subscription_for_user(tg_id)
     ).get(sub_id, [])
-    blocked_orders = await tickets_db.get_open_refund_order_ids_for_subscription(sub_id)
+    blocked_orders = await tickets_db.get_refund_blocked_order_ids_for_subscription(sub_id)
     paid_orders = await db.get_paid_orders_for_user(tg_id)
     eligible = [o for o in paid_orders if o["id"] not in blocked_orders]
     return open_tickets, bool(eligible)
 
 
 async def _eligible_refund_orders(tg_id: int, sub_id: int) -> list[dict]:
-    blocked = await tickets_db.get_open_refund_order_ids_for_subscription(sub_id)
+    blocked = await tickets_db.get_refund_blocked_order_ids_for_subscription(sub_id)
     paid = await db.get_paid_orders_for_user(tg_id)
     return [o for o in paid if o["id"] not in blocked]
 
@@ -303,6 +303,12 @@ async def cb_refund_confirm(cb: CallbackQuery, state: FSMContext):
     order = await db.get_order_by_id(order_id)
     if not order or order["tg_id"] != cb.from_user.id or order.get("status") != "paid":
         await safe_cb_answer(cb, "Оплата не найдена", show_alert=True)
+        return
+    if await tickets_db.has_approved_refund_for_order(sub_id, order_id):
+        await safe_cb_answer(cb, "Возврат по этому заказу уже одобрен", show_alert=True)
+        return
+    if order_id in await tickets_db.get_refund_blocked_order_ids_for_subscription(sub_id):
+        await safe_cb_answer(cb, "Запрос на возврат уже отправлен", show_alert=True)
         return
 
     ticket_id = await tickets_db.create_ticket(

@@ -55,10 +55,25 @@ def payment_failed_user_text(
     return "\n".join(lines)
 
 
+def _refund_access_line(reversal: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not reversal:
+        return None
+    action = reversal.get("action")
+    if action == "revoked":
+        return "🔒 <b>Доступ к VPN отключён</b> по этой оплате."
+    if action == "shortened":
+        end_date = reversal.get("end_date") or "—"
+        return f"📅 <b>Срок подписки сокращён</b> — действует до <b>{end_date}</b>."
+    if action == "disabled":
+        return "🔒 <b>Доступ к VPN отключён</b> — оплаченный период аннулирован."
+    return None
+
+
 def refund_chargeback_user_text(
     order: Dict[str, Any],
     *,
     ticket_id: Optional[int] = None,
+    reversal: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Уведомление клиенту: Platega подтвердила возврат средств (CHARGEBACKED)."""
     plan_name = order.get("plan_name") or "—"
@@ -79,6 +94,9 @@ def refund_chargeback_user_text(
     ]
     if ticket_id:
         lines.append(f"🎫 Тикет: <code>#{ticket_id}</code>")
+    access_line = _refund_access_line(reversal)
+    if access_line:
+        lines += ["", access_line]
     lines += [
         "",
         "Средства поступят на счёт, с которого была оплата.",

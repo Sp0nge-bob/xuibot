@@ -9,6 +9,7 @@ from db import database as db
 from db import tickets as tickets_db
 from services.fulfillment import fulfill_paid_order
 from services.payment_text import payment_failed_user_text, refund_chargeback_user_text
+from services.refund_reversal import apply_refund_reversal
 
 
 @dataclass
@@ -48,10 +49,22 @@ def _callback_amount_acceptable(
     return order - tolerance <= callback <= max_allowed
 
 
-async def _chargeback_user_message(order: Dict[str, Any]) -> str:
+async def _try_refund_reversal(order: Dict[str, Any]) -> dict | None:
+    try:
+        return await apply_refund_reversal(order)
+    except Exception as e:
+        logger.exception("Refund reversal failed for order {}: {}", order.get("id"), e)
+        return None
+
+
+async def _chargeback_user_message(
+    order: Dict[str, Any],
+    *,
+    reversal: dict | None = None,
+) -> str:
     ticket = await tickets_db.get_refund_ticket_for_order(order["id"])
     ticket_id = ticket["id"] if ticket else None
-    return refund_chargeback_user_text(order, ticket_id=ticket_id)
+    return refund_chargeback_user_text(order, ticket_id=ticket_id, reversal=reversal)
 
 
 async def handle_platega_status(
@@ -112,8 +125,10 @@ async def handle_platega_status(
         if status == "CONFIRMED":
             return PaymentProcessResult(handled=True, already_paid=True)
         if status == "CHARGEBACKED":
+            was_paid = order["status"] == "paid"
+            reversal = await _try_refund_reversal(order) if was_paid else None
             await db.update_order_status(tx_id, "failed")
-            msg = await _chargeback_user_message(order) if notify else None
+            msg = await _chargeback_user_message(order, reversal=reversal) if notify else None
             return PaymentProcessResult(handled=True, user_message=msg)
         if status in ("CANCELED", "FAILED"):
             await db.update_order_status(tx_id, "failed")
@@ -145,8 +160,10 @@ async def handle_platega_status(
             return PaymentProcessResult(handled=True, user_message=msg)
 
     if status == "CHARGEBACKED":
+        was_paid = order["status"] == "paid"
+        reversal = await _try_refund_reversal(order) if was_paid else None
         await db.update_order_status(tx_id, "failed")
-        msg = await _chargeback_user_message(order) if notify else None
+        msg = await _chargeback_user_message(order, reversal=reversal) if notify else None
         return PaymentProcessResult(handled=True, user_message=msg)
 
     if status in ("CANCELED", "FAILED"):

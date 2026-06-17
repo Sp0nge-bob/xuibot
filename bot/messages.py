@@ -387,7 +387,8 @@ def admin_debug_entry_confirm_text() -> str:
         "⚠️ Здесь доступны опасные операции:\n"
         "• массовый сброс пробных подписок\n"
         "• очистка всех применений промокодов\n"
-        "• сброс истории всех заказов\n\n"
+        "• сброс истории всех заказов\n"
+        "• сброс учёта всех тикетов\n\n"
         "Используйте только для отладки и тестирования.\n\n"
         "Войти в раздел?"
     )
@@ -399,6 +400,8 @@ def admin_debug_menu_text(
     promo_uses: int,
     promo_pending: int,
     orders_count: int = 0,
+    tickets_count: int = 0,
+    ticket_messages_count: int = 0,
 ) -> str:
     return (
         "🧪 <b>Отладка</b>\n"
@@ -406,8 +409,28 @@ def admin_debug_menu_text(
         f"🎁 Активных пробных подписок: <b>{trial_count}</b>\n"
         f"🎟 Применений промокодов (promo_uses): <b>{promo_uses}</b>\n"
         f"⏳ Ожидающих скидок (pending): <b>{promo_pending}</b>\n"
-        f"🧾 Заказов в истории: <b>{orders_count}</b>\n\n"
+        f"🧾 Заказов в истории: <b>{orders_count}</b>\n"
+        f"🎫 Тикетов: <b>{tickets_count}</b> · сообщений: <b>{ticket_messages_count}</b>\n\n"
         "Выберите действие:"
+    )
+
+
+def admin_debug_tickets_reset_confirm_text(
+    *,
+    tickets_count: int,
+    messages_count: int,
+) -> str:
+    return (
+        "🎫 <b>Сброс учёта тикетов</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        f"Тикетов в БД: <b>{tickets_count}</b>\n"
+        f"Сообщений в переписках: <b>{messages_count}</b>\n\n"
+        "Будет выполнено:\n"
+        "• удаление всех записей из <code>ticket_messages</code>\n"
+        "• удаление всех записей из <code>tickets</code>\n\n"
+        "Открытые и закрытые тикеты (возвраты, поддержка) будут удалены.\n"
+        "Пользователи и подписки останутся.\n\n"
+        "Продолжить?"
     )
 
 
@@ -568,6 +591,7 @@ def refund_ticket_approved_user_text(ticket: Dict[str, Any]) -> str:
         f"Тикет <code>#{ticket_id}</code> закрыт.",
         "",
         "Возврат средств выполняется вручную через платёжную систему.",
+        "После подтверждения возврата доступ к VPN будет скорректирован автоматически.",
         "Когда возврат будет подтверждён, вы получите отдельное уведомление.",
     ]
     if ticket.get("order_id"):

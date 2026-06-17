@@ -317,6 +317,17 @@ async def get_subscription_by_id(sub_id: int) -> Optional[Dict[str, Any]]:
             return dict(row) if row else None
 
 
+async def get_subscription_by_order_id(order_id: int) -> Optional[Dict[str, Any]]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM subscriptions WHERE order_id = ? LIMIT 1",
+            (order_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
 async def extend_subscription_record(subscription_id: int, additional_days: int) -> str:
     sub = await get_subscription_by_id(subscription_id)
     if not sub:
@@ -332,6 +343,23 @@ async def extend_subscription_record(subscription_id: int, additional_days: int)
         )
         await db.commit()
     return new_end.isoformat()
+
+
+async def shrink_subscription_record(subscription_id: int, days: int) -> tuple[str, bool]:
+    """Сократить подписку на days. Возвращает (end_date ISO, is_active)."""
+    sub = await get_subscription_by_id(subscription_id)
+    if not sub:
+        raise ValueError("Подписка не найдена")
+    current_end = datetime.fromisoformat(str(sub["end_date"]).replace("Z", ""))
+    new_end = current_end - timedelta(days=days)
+    still_active = new_end > datetime.utcnow()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE subscriptions SET end_date = ?, is_active = ? WHERE id = ?",
+            (new_end.isoformat(), int(still_active), subscription_id),
+        )
+        await db.commit()
+    return new_end.isoformat(), still_active
 
 
 async def get_pending_order(tg_id: int) -> Optional[Dict[str, Any]]:
