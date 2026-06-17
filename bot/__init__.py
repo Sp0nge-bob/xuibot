@@ -81,12 +81,25 @@ async def start_bot():
 
     logger.info("Polling started")
     try:
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        await dp.start_polling(
+            bot,
+            allowed_updates=dp.resolve_used_update_types(),
+            handle_signals=False,
+            polling_timeout=2,
+        )
     except asyncio.CancelledError:
         logger.info("Polling cancelled")
         raise
 
 
 async def stop_bot():
-    """Корректная остановка (lifespan uvicorn)."""
+    """Корректная остановка (lifespan uvicorn). Ждёт shutdown по SIGINT, если уже запущен."""
+    from .shutdown import _shutdown_task
+
+    if _shutdown_task is not None and not _shutdown_task.done():
+        try:
+            await _shutdown_task
+            return
+        except Exception as e:
+            logger.debug("await _shutdown_task: {}", e)
     await graceful_shutdown(reason="lifespan")

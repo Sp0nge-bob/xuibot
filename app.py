@@ -21,11 +21,14 @@ from services.payment_processor import handle_platega_status
 from db import database as db
 from bot import start_bot, stop_bot, bot as tg_bot, send_message
 from bot.keyboards import back_to_main_kb
-from bot.shutdown import register_bot_task
+from bot.shutdown import bind_event_loop, install_uvicorn_shutdown_hook, register_bot_task
+
+install_uvicorn_shutdown_hook()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    bind_event_loop(asyncio.get_running_loop())
     await init_db()
     logger.info("Database ready")
 
@@ -37,14 +40,6 @@ async def lifespan(app: FastAPI):
 
     logger.info("Shutting down...")
     await stop_bot()
-    if not bot_task.done():
-        bot_task.cancel()
-    try:
-        await asyncio.wait_for(bot_task, timeout=2.0)
-    except (asyncio.CancelledError, asyncio.TimeoutError):
-        pass
-    except Exception as e:
-        logger.debug("bot_task join: {}", e)
     logger.info("Shutdown complete")
 
 
@@ -116,26 +111,16 @@ async def platega_webhook(
 async def _run_server() -> None:
     import uvicorn
 
+    bind_event_loop(asyncio.get_running_loop())
     config = uvicorn.Config(
         app,
         host=settings.WEBHOOK_HOST,
         port=settings.WEBHOOK_PORT,
         reload=False,
         lifespan="on",
-        timeout_graceful_shutdown=5,
+        timeout_graceful_shutdown=8,
     )
     server = uvicorn.Server(config)
-
-    original_handle_exit = server.handle_exit
-
-    def handle_exit(sig, frame):
-        logger.info("Uvicorn SIGINT/SIGTERM — запускаем остановку бота")
-        from bot.shutdown import request_shutdown
-
-        request_shutdown(f"uvicorn-{sig}")
-        original_handle_exit(sig, frame)
-
-    server.handle_exit = handle_exit
     await server.serve()
 
 
