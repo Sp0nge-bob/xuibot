@@ -1,9 +1,12 @@
 import asyncio
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional, List, Dict, Any
 from loguru import logger
 
 from db.connection import DB_PATH, _apply_pragmas, get_db, init_connection
+
+_INIT_MARKER = Path(DB_PATH).parent / ".init_complete"
 
 
 async def _create_indexes(db) -> None:
@@ -123,8 +126,15 @@ async def init_db():
     logger.info("Initializing xui_nodes...")
     await init_xui_nodes()
     await init_tickets_tables()
+    _INIT_MARKER.parent.mkdir(parents=True, exist_ok=True)
+    _INIT_MARKER.write_text(datetime.utcnow().isoformat(), encoding="utf-8")
     logger.info("Database initialized at {}", DB_PATH)
     await asyncio.to_thread(logger.complete)
+
+
+def is_db_init_complete() -> bool:
+    """Полный init_db завершён (файл-маркер + bot.db)."""
+    return Path(DB_PATH).is_file() and _INIT_MARKER.is_file()
 
 async def get_or_create_user(tg_id: int, username: Optional[str] = None, first_name: Optional[str] = None):
     async with get_db() as db:

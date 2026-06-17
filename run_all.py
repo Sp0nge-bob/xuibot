@@ -32,21 +32,9 @@ def _start(script: str) -> subprocess.Popen[bytes]:
 
 
 def _db_is_ready() -> bool:
-    """Проверка SQLite надёжнее, чем строка в логе (loguru enqueue)."""
-    if not _DB_PATH.is_file():
-        return False
-    try:
-        conn = sqlite3.connect(f"file:{_DB_PATH}?mode=ro", uri=True, timeout=3)
-        try:
-            rows = conn.execute(
-                "SELECT name FROM sqlite_master "
-                "WHERE type='table' AND name IN ('users', 'xui_nodes', 'bot_settings')"
-            ).fetchall()
-            return len(rows) >= 3
-        finally:
-            conn.close()
-    except sqlite3.Error:
-        return False
+    """Ждём полного init_db (маркер), не только создания таблиц."""
+    marker = _ROOT / "data" / ".init_complete"
+    return _DB_PATH.is_file() and marker.is_file()
 
 
 def _log_has_db_marker() -> bool:
