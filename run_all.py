@@ -11,16 +11,19 @@ Ctrl+C останавливает оба.
 from __future__ import annotations
 
 import signal
-import sqlite3
 import subprocess
 import sys
 import time
 from pathlib import Path
 
+from db.database import clear_init_marker
+
 _ROOT = Path(__file__).resolve().parent
 _DB_PATH = _ROOT / "data" / "bot.db"
+_INIT_MARKER = _ROOT / "data" / ".init_complete"
 _PROCS: list[tuple[str, subprocess.Popen[bytes]]] = []
 _SHUTTING_DOWN = False
+_BOT_STARTED_AT = 0.0
 
 
 def _start(script: str) -> subprocess.Popen[bytes]:
@@ -32,20 +35,13 @@ def _start(script: str) -> subprocess.Popen[bytes]:
 
 
 def _db_is_ready() -> bool:
-    """Ждём полного init_db (маркер), не только создания таблиц."""
-    marker = _ROOT / "data" / ".init_complete"
-    return _DB_PATH.is_file() and marker.is_file()
-
-
-def _log_has_db_marker() -> bool:
-    log_dir = _ROOT / "data" / "logs"
-    if not log_dir.is_dir():
+    """Маркер появился после старта run_bot (не от прошлого запуска)."""
+    if not (_DB_PATH.is_file() and _INIT_MARKER.is_file()):
         return False
-    logs = sorted(log_dir.glob("bot_*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
-    if not logs:
-        return False
+    if _BOT_STARTED_AT <= 0:
+        return True
     try:
-        return "Database initialized" in logs[0].read_text(encoding="utf-8", errors="ignore")
+        return _INIT_MARKER.stat().st_mtime >= _BOT_STARTED_AT - 0.5
     except OSError:
         return False
 
@@ -54,11 +50,10 @@ def _wait_for_db_ready(timeout_sec: float = 120) -> bool:
     deadline = time.time() + timeout_sec
     print(f"Waiting for DB init (up to {int(timeout_sec)}s)...")
     while time.time() < deadline:
-        if _db_is_ready() or _log_has_db_marker():
-            time.sleep(1)
+        if _db_is_ready():
             print("DB ready.")
             return True
-        time.sleep(1)
+        time.sleep(0.5)
     print("Warning: DB not ready in time — starting app.py anyway.")
     return False
 
@@ -85,6 +80,9 @@ def main() -> None:
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
+    clear_init_marker()
+    global _BOT_STARTED_AT
+    _BOT_STARTED_AT = time.time()
     bot_proc = _start("run_bot.py")
     _PROCS.append(("run_bot.py", bot_proc))
     _wait_for_db_ready()

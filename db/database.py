@@ -31,7 +31,25 @@ async def _create_indexes(db) -> None:
     )
 
 
+def clear_init_marker() -> None:
+    """Сброс маркера перед новым запуском (run_all ждёт свежий файл)."""
+    try:
+        _INIT_MARKER.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 async def init_db():
+    from db.init_lock import acquire_init_lock, release_init_lock
+
+    lock_fd = await asyncio.to_thread(acquire_init_lock)
+    try:
+        await _init_db_impl()
+    finally:
+        await asyncio.to_thread(release_init_lock, lock_fd)
+
+
+async def _init_db_impl():
     await init_connection()
     async with get_db() as db:
         await _apply_pragmas(db)
