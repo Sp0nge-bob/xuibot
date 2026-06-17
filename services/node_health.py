@@ -1,9 +1,11 @@
 """Проверка доступности панелей 3x-ui."""
+import asyncio
 import time
 from typing import Any, Optional
 
 from loguru import logger
 
+from config.settings import settings
 from db import xui_nodes as nodes_db
 from services.xui import _probe_panel_read_api, get_api_for_node, invalidate_api_cache
 
@@ -42,12 +44,25 @@ async def check_node_health(node: dict[str, Any]) -> dict[str, Any]:
 
 async def check_all_nodes_health() -> list[dict[str, Any]]:
     nodes = await nodes_db.list_nodes(enabled_only=True)
-    results: list[dict[str, Any]] = []
-    for node in nodes:
-        try:
-            results.append(await check_node_health(node))
-        except Exception as e:
-            logger.error("Health check error for node {}: {}", node.get("id"), e)
+    if not nodes:
+        return []
+
+    sem = asyncio.Semaphore(settings.XUI_PANEL_CONCURRENCY)
+
+    async def _one(node: dict[str, Any]) -> dict[str, Any]:
+        async with sem:
+            try:
+                return await check_node_health(node)
+            except Exception as e:
+                logger.error("Health check error for node {}: {}", node.get("id"), e)
+                return {
+                    "node_id": node.get("id"),
+                    "name": node.get("name"),
+                    "ok": False,
+                    "error": str(e)[:200],
+                }
+
+    results = list(await asyncio.gather(*[_one(n) for n in nodes]))
     healthy = sum(1 for r in results if r.get("ok"))
     logger.info("Node health: {}/{} healthy", healthy, len(results))
     return results

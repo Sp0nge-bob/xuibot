@@ -1,4 +1,4 @@
-"""Кэш списка инбаундов панели — один запрос вместо N на каждого клиента."""
+"""Кэш инбаундов панели — per-host, один запрос вместо N на клиента."""
 import asyncio
 import time
 from typing import Optional
@@ -9,6 +9,9 @@ from py3xui.inbound import Inbound
 
 from config.settings import settings
 from services.panel_inbounds import fetch_inbounds_list
+
+_host_caches: dict[str, "PanelCache"] = {}
+_email_list_cache: dict[str, tuple[float, set[str]]] = {}
 
 
 class PanelCache:
@@ -21,7 +24,7 @@ class PanelCache:
         self._lock = asyncio.Lock()
 
     @staticmethod
-    def _api_host(api: AsyncApi) -> str:
+    def api_host(api: AsyncApi) -> str:
         return (getattr(api.client, "host", None) or "").rstrip("/").lower()
 
     @staticmethod
@@ -34,7 +37,7 @@ class PanelCache:
         return index
 
     async def refresh(self, api: AsyncApi, *, force: bool = False) -> list[Inbound]:
-        host = self._api_host(api)
+        host = self.api_host(api)
         async with self._lock:
             now = time.monotonic()
             host_changed = self._host and host and self._host != host
@@ -63,7 +66,6 @@ class PanelCache:
         self._inbounds = None
         self._index = {}
         self._ts = 0
-        self._host = None
 
     def locate(self, email: str) -> dict[int, Client]:
         return dict(self._index.get(email, {}))
@@ -72,4 +74,45 @@ class PanelCache:
         self._index.setdefault(email, {})[inbound_id] = client
 
 
+def get_panel_cache(api: AsyncApi) -> PanelCache:
+    host = PanelCache.api_host(api) or "_default"
+    cache = _host_caches.get(host)
+    if cache is None:
+        cache = PanelCache()
+        _host_caches[host] = cache
+    return cache
+
+
+def invalidate_panel_cache(api: AsyncApi | None = None) -> None:
+    if api is None:
+        for cache in _host_caches.values():
+            cache.invalidate()
+        _email_list_cache.clear()
+        return
+    host = PanelCache.api_host(api) or "_default"
+    cache = _host_caches.get(host)
+    if cache:
+        cache.invalidate()
+    _email_list_cache.pop(host, None)
+
+
+def get_cached_bot_emails(api: AsyncApi) -> set[str] | None:
+    host = PanelCache.api_host(api) or "_default"
+    ttl = float(settings.XUI_EMAIL_LIST_CACHE_TTL)
+    entry = _email_list_cache.get(host)
+    if not entry:
+        return None
+    ts, emails = entry
+    if time.monotonic() - ts >= ttl:
+        _email_list_cache.pop(host, None)
+        return None
+    return set(emails)
+
+
+def store_cached_bot_emails(api: AsyncApi, emails: set[str]) -> None:
+    host = PanelCache.api_host(api) or "_default"
+    _email_list_cache[host] = (time.monotonic(), set(emails))
+
+
+# Обратная совместимость для scripts/
 panel_cache = PanelCache()

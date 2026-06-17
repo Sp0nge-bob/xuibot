@@ -42,22 +42,23 @@ async def set_plan_price(plan_id: str, price: int) -> int:
     return price
 
 
-async def get_effective_plan(plan_id: str) -> Optional[Plan]:
-    base = get_plan(plan_id)
-    if not base:
-        return None
-    price = await get_plan_price(plan_id)
+def _effective_plan_from_base(base: Plan, overrides: Dict[str, int]) -> Plan:
+    price = overrides.get(base["id"], base["price"])
     return {
         **base,
-        "price": price if price is not None else base["price"],
+        "price": price,
         "default_price": base["price"],
     }
 
 
+async def get_effective_plan(plan_id: str) -> Optional[Plan]:
+    base = get_plan(plan_id)
+    if not base:
+        return None
+    overrides = await get_price_overrides()
+    return _effective_plan_from_base(base, overrides)
+
+
 async def get_all_effective_plans() -> List[Plan]:
-    plans: List[Plan] = []
-    for base in PLANS:
-        plan = await get_effective_plan(base["id"])
-        if plan:
-            plans.append(plan)
-    return plans
+    overrides = await get_price_overrides()
+    return [_effective_plan_from_base(base, overrides) for base in PLANS]

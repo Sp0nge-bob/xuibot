@@ -2,6 +2,8 @@
 from datetime import datetime
 from typing import Any, Dict, Optional
 
+from ui.theme import money, screen
+
 
 def _format_created_at(raw: Any) -> str:
     if not raw:
@@ -37,11 +39,8 @@ def payment_failed_user_text(
     created = _format_created_at(order.get("created_at"))
 
     lines = [
-        header,
-        "━━━━━━━━━━━━━━━━",
-        "",
         f"📦 {action}: <b>{plan_name}</b>",
-        f"💰 Сумма: <b>{amount} ₽</b>",
+        f"💰 Сумма: {money(amount)}",
     ]
     if order.get("promo_code"):
         lines.append(f"🎟 Промокод: <code>{order['promo_code']}</code>")
@@ -49,10 +48,12 @@ def payment_failed_user_text(
         f"🆔 ID заказа: <code>{order_id}</code>",
         f"🆔 ID транзакции Platega: <code>{tx_id}</code>",
         f"🕐 Инициирован: <b>{created}</b>",
-        "",
-        "Создайте новый заказ в разделе «Тарифы», если хотите оплатить снова.",
     ]
-    return "\n".join(lines)
+    return screen(
+        header,
+        "\n".join(lines),
+        hint="Создайте новый заказ в разделе «Тарифы», если хотите оплатить снова.",
+    )
 
 
 def _refund_access_line(reversal: Optional[Dict[str, Any]]) -> Optional[str]:
@@ -82,13 +83,10 @@ def refund_chargeback_user_text(
     tx_id = order.get("platega_tx_id") or "—"
 
     lines = [
-        "✅ <b>Средства возвращены</b>",
-        "━━━━━━━━━━━━━━━━",
-        "",
-        "Платёжная система подтвердила возврат по оплате:",
+        "Платёжная система подтвердила возврат:",
         "",
         f"📦 Тариф: <b>{plan_name}</b>",
-        f"💰 Сумма: <b>{amount} ₽</b>",
+        f"💰 Сумма: {money(amount)}",
         f"🧾 Заказ: <code>#{order_id}</code>",
         f"🆔 TX Platega: <code>{tx_id}</code>",
     ]
@@ -97,9 +95,8 @@ def refund_chargeback_user_text(
     access_line = _refund_access_line(reversal)
     if access_line:
         lines += ["", access_line]
-    lines += [
-        "",
-        "Средства поступят на счёт, с которого была оплата.",
-        "Срок зачисления зависит от банка (обычно 1–14 дней).",
-    ]
-    return "\n".join(lines)
+    return screen(
+        "✅ <b>Средства возвращены</b>",
+        "\n".join(lines),
+        hint="Средства поступят на счёт оплаты. Срок зачисления зависит от банка (обычно 1–14 дней).",
+    )

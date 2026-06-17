@@ -2,6 +2,11 @@
 venv/
 .venv/
 
+# Secrets
+.env
+.env.*
+!.env.example
+
 # Python cache
 __pycache__/
 *.py[cod]
@@ -19,11 +24,7 @@ report/
 .idea/
 .vscode/
 
+# Runtime data
 data/
-*.dbdata/bot.db
 *.db
-<<<<<<< HEAD
 data/*.db
-=======
-data/*.db
->>>>>>> be8af9fae2bf8ef3f90a93e35219b4c4dc51da6e

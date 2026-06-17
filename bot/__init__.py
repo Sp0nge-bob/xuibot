@@ -16,6 +16,7 @@ from .admin_tickets import router as admin_tickets_router
 from .admin_debug import router as admin_debug_router
 from .admin_start_text import router as admin_start_text_router
 from .admin_nodes import router as admin_nodes_router
+from .admin_payments import router as admin_payments_router
 from .middlewares import ActionLockMiddleware
 from .scheduler import run_full_nodes_sync, start_scheduler
 from .sender import send_message
@@ -38,6 +39,7 @@ dp.include_router(admin_tickets_router)
 dp.include_router(admin_debug_router)
 dp.include_router(admin_start_text_router)
 dp.include_router(admin_nodes_router)
+dp.include_router(admin_payments_router)
 
 
 async def start_bot():
@@ -68,11 +70,16 @@ async def start_bot():
     except Exception as e:
         logger.warning("log_inbound_port_conflicts: {}", e)
 
-    try:
-        await run_full_nodes_sync(source="startup")
-    except asyncio.CancelledError:
-        logger.info("Стартовая синхронизация прервана")
-        raise
+    async def _startup_sync() -> None:
+        try:
+            await run_full_nodes_sync(source="startup")
+        except asyncio.CancelledError:
+            logger.info("Стартовая синхронизация прервана")
+            raise
+        except Exception as e:
+            logger.exception("Стартовая синхронизация failed: {}", e)
+
+    asyncio.create_task(_startup_sync(), name="startup_nodes_sync")
 
     try:
         me = await bot.get_me()

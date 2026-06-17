@@ -6,7 +6,8 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 
 from db import database as db
-from services.panel_cache import panel_cache
+from config.settings import settings
+from services.panel_cache import get_panel_cache
 from services.xui import (
     audit_client_inbounds,
     get_panel_client_for_sync,
@@ -16,7 +17,6 @@ from services.xui import (
     get_api,
 )
 
-_SYNC_DEBOUNCE_SEC = 60.0
 _last_sync_by_tg: dict[int, float] = {}
 
 
@@ -45,7 +45,7 @@ def _client_traffic_limit_gb(client) -> int:
 def _should_debounce_sync(tg_id: int) -> bool:
     now = time.monotonic()
     last = _last_sync_by_tg.get(tg_id, 0.0)
-    if now - last < _SYNC_DEBOUNCE_SEC:
+    if now - last < float(settings.SUBSCRIPTION_SYNC_DEBOUNCE_SEC):
         return True
     _last_sync_by_tg[tg_id] = now
     return False
@@ -134,7 +134,7 @@ async def sync_subscription(
     sub: Dict[str, Any], *, repair: bool = False,
 ) -> Optional[Dict[str, Any]]:
     api = await get_api()
-    await panel_cache.refresh(api)
+    await get_panel_cache(api).refresh(api)
 
     audit = await audit_client_inbounds(sub["client_email"])
 

@@ -18,6 +18,7 @@ class AdminStates(StatesGroup):
     waiting_node_password = State()
     waiting_node_inbounds = State()
     waiting_start_announcement = State()
+    waiting_start_greeting = State()
 
 
 class AdminPricingStates(StatesGroup):

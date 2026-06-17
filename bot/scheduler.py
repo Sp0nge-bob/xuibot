@@ -9,7 +9,6 @@ from loguru import logger
 from config.settings import settings
 from db import database as db
 from services.xui import disable_client
-from services.subscription_sync import sync_subscription
 from services.node_sync import sync_all_secondary_nodes
 from services.node_health import check_all_nodes_health
 
@@ -27,9 +26,6 @@ async def check_expired_subscriptions():
     async def _one(sub: dict) -> None:
         async with sem:
             try:
-                synced = await sync_subscription(sub, repair=False)
-                if synced:
-                    return
                 await disable_client(sub["client_email"])
                 await db.deactivate_subscription(sub["id"])
                 logger.info("Deactivated expired subscription for tg_id={}", sub["tg_id"])
@@ -39,12 +35,24 @@ async def check_expired_subscriptions():
     await asyncio.gather(*[_one(sub) for sub in expired])
 
 
+async def expire_stale_pending_orders_job():
+    count = await db.expire_stale_pending_orders(settings.STALE_PENDING_ORDER_HOURS)
+    if count:
+        logger.info("Expired {} stale pending orders", count)
+
+
 async def check_nodes_health_job():
     await check_all_nodes_health()
 
 
 async def run_full_nodes_sync(*, source: str) -> None:
     """Тот же прогон, что кнопка «Синхронизировать вторичные» в админке."""
+    from db import bot_settings as bot_settings_db
+
+    if await bot_settings_db.is_sync_disabled():
+        logger.info("Full nodes sync skipped ({}) — disabled in debug", source)
+        return
+
     logger.info("Full nodes sync ({})", source)
     try:
         stats = await sync_all_secondary_nodes()
@@ -77,9 +85,10 @@ def start_scheduler():
         id="full_nodes_sync",
     )
     scheduler.add_job(check_expired_subscriptions, "interval", hours=1, id="check_expired")
+    scheduler.add_job(expire_stale_pending_orders_job, "interval", hours=6, id="expire_stale_pending")
     scheduler.start()
     logger.info(
-        "Scheduler started (health 5m, full nodes sync {}h, expiry 1h)",
+        "Scheduler started (health 5m, full nodes sync {}h, expiry 1h, stale pending 6h)",
         settings.FULL_SYNC_INTERVAL_HOURS,
     )
 

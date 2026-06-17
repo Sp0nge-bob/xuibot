@@ -129,6 +129,20 @@ async def graceful_shutdown(*, reason: str = "shutdown") -> None:
             pass
 
         from services.node_sync import stop_secondary_sync_workers
+        from services.fulfillment_queue import drain_fulfillment_queue, stop_fulfillment_workers
+        from db.connection import close_connection
+
+        try:
+            await asyncio.wait_for(drain_fulfillment_queue(), timeout=SHUTDOWN_WORKERS_TIMEOUT)
+        except asyncio.TimeoutError:
+            logger.warning("Fulfillment queue drain timeout")
+        except Exception as e:
+            logger.debug("drain_fulfillment_queue: {}", e)
+
+        try:
+            await asyncio.wait_for(stop_fulfillment_workers(), timeout=SHUTDOWN_WORKERS_TIMEOUT)
+        except Exception as e:
+            logger.debug("stop_fulfillment_workers: {}", e)
 
         try:
             await asyncio.wait_for(
@@ -142,6 +156,11 @@ async def graceful_shutdown(*, reason: str = "shutdown") -> None:
             )
         except Exception as e:
             logger.debug("stop_secondary_sync_workers: {}", e)
+
+        try:
+            await close_connection()
+        except Exception as e:
+            logger.debug("close_connection: {}", e)
 
         _shutdown_done = True
         logger.info("Бот остановлен ({})", reason)

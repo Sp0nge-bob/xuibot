@@ -80,13 +80,25 @@ async def check_payment_status(
                 status="",
             )
 
-    status, _ = await fetch_and_parse_status(tx_id)
-    callback_body = None
+    status, status_data = await fetch_and_parse_status(tx_id)
+    parsed = parse_status_response(status_data)
     if settings.TEST_MODE and tx_id.startswith("test-"):
         try:
             callback_body = _build_callback_body(tx_id, status)
         except KeyError:
-            pass
+            callback_body = {
+                "id": tx_id,
+                "status": status,
+                "amount": parsed.get("amount"),
+                "currency": parsed.get("currency") or "RUB",
+            }
+    else:
+        callback_body = {
+            "id": tx_id,
+            "status": status,
+            "amount": parsed.get("amount"),
+            "currency": parsed.get("currency") or "RUB",
+        }
 
     flow = await process_payment_status(
         tx_id, status, source=source, callback_body=callback_body, notify=notify,

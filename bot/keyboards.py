@@ -1,49 +1,77 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from config.payments import get_payment_methods
+from config.payments import PaymentMethod
 from config.plans import Plan
-from config.settings import settings
 from config.trial import is_trial_email
 from services.pricing import PriceQuote
+
+from ui.theme import (
+    BTN_BACK,
+    BTN_BACK_TARIFFS,
+    BTN_CHECK_PAY,
+    BTN_HOME,
+    BTN_PAY,
+    BTN_PROMO,
+    BTN_SUBSCRIPTION,
+    BTN_SUPPORT_SHORT,
+    BTN_TARIFFS,
+    BTN_TRIAL,
+    plan_button_label,
+)
+
+
+def nav_row(
+    back_callback: str | None = None,
+    *,
+    back_text: str = BTN_BACK,
+) -> list[InlineKeyboardButton]:
+    """Единая строка навигации: «Назад» (опционально) + «Главное меню»."""
+    buttons: list[InlineKeyboardButton] = []
+    if back_callback:
+        buttons.append(InlineKeyboardButton(text=back_text, callback_data=back_callback))
+    buttons.append(InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu"))
+    return buttons
 
 
 def main_menu_kb(*, trial_available: bool = False) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     if trial_available:
-        rows.append([InlineKeyboardButton(
-            text="🎁 Пробный период (3 дня)",
-            callback_data="trial_offer",
-        )])
+        rows.append([InlineKeyboardButton(text=BTN_TRIAL, callback_data="trial_offer")])
     rows += [
-        [InlineKeyboardButton(text="📦 Тарифы", callback_data="tariffs")],
-        [InlineKeyboardButton(text="🎟 Промокоды", callback_data="promo_enter")],
-        [InlineKeyboardButton(text="⚙️ Управление подпиской", callback_data="manage_sub")],
-        [InlineKeyboardButton(text="💬 Поддержка", callback_data="support")],
+        [
+            InlineKeyboardButton(text=BTN_TARIFFS, callback_data="tariffs"),
+            InlineKeyboardButton(text=BTN_SUBSCRIPTION, callback_data="manage_sub"),
+        ],
+        [
+            InlineKeyboardButton(text=BTN_PROMO, callback_data="promo_enter"),
+            InlineKeyboardButton(text=BTN_SUPPORT_SHORT, callback_data="support"),
+        ],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def plans_kb(plans: list[Plan], *, extend: bool = False) -> InlineKeyboardMarkup:
     prefix = "extend_plan" if extend else "select_plan"
-    rows = []
-    for plan in plans:
-        rows.append([
-            InlineKeyboardButton(
-                text=f"📦 {plan['name']} · {plan['price']} ₽",
-                callback_data=f"{prefix}:{plan['id']}",
-            )
-        ])
-    back_data = "manage_sub" if extend else "main_menu"
-    rows.append([InlineKeyboardButton(text="« Главное меню", callback_data=back_data)])
+    rows = [
+        [InlineKeyboardButton(
+            text=plan_button_label(plan),
+            callback_data=f"{prefix}:{plan['id']}",
+        )]
+        for plan in plans
+    ]
+    if extend:
+        rows.append(nav_row("manage_sub"))
+    else:
+        rows.append([InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def payment_methods_kb(
     plan_id: str,
     *,
+    methods: list[PaymentMethod],
     extend: bool = False,
     quote: PriceQuote | None = None,
 ) -> InlineKeyboardMarkup:
-    methods = get_payment_methods(settings.PLATEGA_SBP_METHOD, settings.PLATEGA_CRYPTO_METHOD)
     prefix = "pay_extend" if extend else "pay"
     rows = [
         [InlineKeyboardButton(
@@ -53,8 +81,7 @@ def payment_methods_kb(
         for m in methods
     ]
     back_data = "extend_menu" if extend else "tariffs"
-    rows.append([InlineKeyboardButton(text="« Назад", callback_data=back_data)])
-    rows.append([InlineKeyboardButton(text="« Главное меню", callback_data="main_menu")])
+    rows.append(nav_row(back_data, back_text=BTN_BACK_TARIFFS if not extend else BTN_BACK))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -75,11 +102,7 @@ def test_scenario_kb(plan_id: str, method_key: str, *, extend: bool = False) -> 
         )]
         for label, scenario in scenarios
     ]
-    rows.append([InlineKeyboardButton(
-        text="« Назад",
-        callback_data=f"{back_prefix}:{plan_id}",
-    )])
-    rows.append([InlineKeyboardButton(text="« Главное меню", callback_data="main_menu")])
+    rows.append(nav_row(f"{back_prefix}:{plan_id}"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -91,7 +114,7 @@ def payment_kb(
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     if payment_url:
-        rows.append([InlineKeyboardButton(text="💳 Перейти к оплате", url=payment_url)])
+        rows.append([InlineKeyboardButton(text=BTN_PAY, url=payment_url)])
     if test_mode:
         rows += [
             [InlineKeyboardButton(
@@ -123,10 +146,10 @@ def payment_kb(
         ]
     else:
         rows.append([InlineKeyboardButton(
-            text="🔄 Проверить оплату",
+            text=BTN_CHECK_PAY,
             callback_data=f"check_pay:{tx_id}",
         )])
-    rows.append([InlineKeyboardButton(text="« Главное меню", callback_data="main_menu")])
+    rows.append([InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -174,7 +197,7 @@ def subscriptions_manage_kb(
                 )])
     if has_paid:
         rows.append([InlineKeyboardButton(text="🔄 Продлить платную", callback_data="extend_menu")])
-    rows.append([InlineKeyboardButton(text="« Главное меню", callback_data="main_menu")])
+    rows.append([InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -203,7 +226,7 @@ def subscription_manage_kb(
             text="💸 Запросить возврат",
             callback_data=f"refund:{sub_id}",
         )])
-    rows.append([InlineKeyboardButton(text="« Главное меню", callback_data="main_menu")])
+    rows.append([InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -221,7 +244,7 @@ def support_menu_kb(tickets: list) -> InlineKeyboardMarkup:
         text="➕ Создать обращение",
         callback_data="ticket_create",
     )])
-    rows.append([InlineKeyboardButton(text="« Главное меню", callback_data="main_menu")])
+    rows.append([InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -229,7 +252,7 @@ def ticket_category_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🛠 Техподдержка", callback_data="ticket_new:support")],
         [InlineKeyboardButton(text="📁 Другое", callback_data="ticket_new:other")],
-        [InlineKeyboardButton(text="« Назад", callback_data="support")],
+        nav_row("support"),
     ])
 
 
@@ -242,14 +265,12 @@ def ticket_view_kb(
     rows: list[list[InlineKeyboardButton]] = []
     if is_open:
         rows.append([InlineKeyboardButton(
-            text="💬 Начать переписку по тикету",
+            text="💬 Начать переписку",
             callback_data=f"ticket_session:{ticket_id}",
         )])
-    if is_refund:
-        rows.append([InlineKeyboardButton(text="« Управление подпиской", callback_data="manage_sub")])
-    else:
-        rows.append([InlineKeyboardButton(text="« Поддержка", callback_data="support")])
-    rows.append([InlineKeyboardButton(text="« Главное меню", callback_data="main_menu")])
+    back_data = "manage_sub" if is_refund else "support"
+    back_text = BTN_SUBSCRIPTION if is_refund else BTN_BACK
+    rows.append(nav_row(back_data, back_text=back_text))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -259,11 +280,7 @@ def ticket_session_kb(ticket_id: int) -> InlineKeyboardMarkup:
             text="⏹ Завершить переписку",
             callback_data=f"ticket_session_end:{ticket_id}",
         )],
-        [InlineKeyboardButton(
-            text="« К тикету",
-            callback_data=f"ticket_view:{ticket_id}",
-        )],
-        [InlineKeyboardButton(text="« Главное меню", callback_data="main_menu")],
+        nav_row(f"ticket_view:{ticket_id}", back_text="◀️ К тикету"),
     ])
 
 
@@ -273,7 +290,7 @@ def payment_failed_kb(order_id: int) -> InlineKeyboardMarkup:
             text="💬 Обратиться в поддержку",
             callback_data=f"support_from_order:{order_id}",
         )],
-        [InlineKeyboardButton(text="« Главное меню", callback_data="main_menu")],
+        [InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")],
     ])
 
 
@@ -285,7 +302,7 @@ def refund_pick_kb(sub_id: int, orders: list[dict]) -> InlineKeyboardMarkup:
         )]
         for order in orders
     ]
-    rows.append([InlineKeyboardButton(text="« Назад", callback_data="manage_sub")])
+    rows.append(nav_row("manage_sub"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -295,26 +312,26 @@ def refund_confirm_kb(sub_id: int, order_id: int) -> InlineKeyboardMarkup:
             text="✅ Да, запросить возврат",
             callback_data=f"refund_confirm:{sub_id}:{order_id}",
         )],
-        [InlineKeyboardButton(text="« Назад", callback_data=f"refund:{sub_id}")],
+        nav_row(f"refund:{sub_id}"),
         [InlineKeyboardButton(text="❌ Отмена", callback_data="manage_sub")],
     ])
 
 
 def no_subscription_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📦 Выбрать тариф", callback_data="tariffs")],
-        [InlineKeyboardButton(text="« Главное меню", callback_data="main_menu")],
+        [InlineKeyboardButton(text=BTN_TARIFFS, callback_data="tariffs")],
+        [InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")],
     ])
 
 
 def trial_confirm_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Активировать", callback_data="trial_confirm")],
-        [InlineKeyboardButton(text="« Главное меню", callback_data="main_menu")],
+        [InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")],
     ])
 
 
 def back_to_main_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="« Главное меню", callback_data="main_menu")],
+        [InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")],
     ])

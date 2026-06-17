@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 
 import aiosqlite
 
-from db.database import DB_PATH
+from db.connection import get_db
 
 
 PROMO_TYPE_DISCOUNT = "discount"
@@ -25,7 +25,7 @@ def grant_plan_id(promo: Dict[str, Any]) -> Optional[str]:
 
 
 async def init_promo_tables():
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS promo_codes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,7 +65,7 @@ def _normalize_code(code: str) -> str:
     return code.strip().upper()
 
 
-def _row_to_dict(row: aiosqlite.Row) -> Dict[str, Any]:
+def _row_to_dict(row) -> Dict[str, Any]:
     return dict(row)
 
 
@@ -106,8 +106,7 @@ async def create_promo_code(
     if valid_days and valid_days > 0:
         valid_until = (datetime.utcnow() + timedelta(days=valid_days)).isoformat()
 
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
         try:
             cursor = await db.execute(
                 """INSERT INTO promo_codes
@@ -129,8 +128,7 @@ async def create_promo_code(
 
 
 async def get_promo_by_id(promo_id: int) -> Optional[Dict[str, Any]]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
         async with db.execute("SELECT * FROM promo_codes WHERE id = ?", (promo_id,)) as cur:
             row = await cur.fetchone()
             return _row_to_dict(row) if row else None
@@ -138,8 +136,7 @@ async def get_promo_by_id(promo_id: int) -> Optional[Dict[str, Any]]:
 
 async def get_promo_by_code(code: str) -> Optional[Dict[str, Any]]:
     code = _normalize_code(code)
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
         async with db.execute("SELECT * FROM promo_codes WHERE code = ?", (code,)) as cur:
             row = await cur.fetchone()
             return _row_to_dict(row) if row else None
@@ -150,14 +147,13 @@ async def list_promo_codes(*, active_only: bool = False) -> List[Dict[str, Any]]
     if active_only:
         query += " WHERE is_active = 1"
     query += " ORDER BY created_at DESC"
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
         async with db.execute(query) as cur:
             return [_row_to_dict(r) for r in await cur.fetchall()]
 
 
 async def set_promo_active(promo_id: int, is_active: bool) -> bool:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         cursor = await db.execute(
             "UPDATE promo_codes SET is_active = ? WHERE id = ?",
             (1 if is_active else 0, promo_id),
@@ -167,7 +163,7 @@ async def set_promo_active(promo_id: int, is_active: bool) -> bool:
 
 
 async def delete_promo_code(promo_id: int) -> bool:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute("DELETE FROM promo_uses WHERE promo_id = ?", (promo_id,))
         cursor = await db.execute("DELETE FROM promo_codes WHERE id = ?", (promo_id,))
         await db.commit()
@@ -175,7 +171,7 @@ async def delete_promo_code(promo_id: int) -> bool:
 
 
 async def count_user_promo_uses(promo_id: int, tg_id: int) -> int:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT COUNT(*) FROM promo_uses WHERE promo_id = ? AND tg_id = ?",
             (promo_id, tg_id),
@@ -185,7 +181,7 @@ async def count_user_promo_uses(promo_id: int, tg_id: int) -> int:
 
 
 async def has_order_promo_use(order_id: int) -> bool:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT 1 FROM promo_uses WHERE order_id = ? LIMIT 1",
             (order_id,),
@@ -194,22 +190,25 @@ async def has_order_promo_use(order_id: int) -> bool:
 
 
 async def record_promo_use(promo_id: int, tg_id: int, order_id: int) -> None:
-    if await has_order_promo_use(order_id):
-        return
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
+        cur = await db.execute(
+            """UPDATE promo_codes SET used_count = used_count + 1
+               WHERE id = ? AND is_active = 1
+                 AND (max_uses IS NULL OR used_count < max_uses)
+                 AND NOT EXISTS (SELECT 1 FROM promo_uses WHERE order_id = ?)""",
+            (promo_id, order_id),
+        )
+        if cur.rowcount == 0:
+            return
         await db.execute(
             "INSERT INTO promo_uses (promo_id, tg_id, order_id) VALUES (?, ?, ?)",
             (promo_id, tg_id, order_id),
-        )
-        await db.execute(
-            "UPDATE promo_codes SET used_count = used_count + 1 WHERE id = ?",
-            (promo_id,),
         )
         await db.commit()
 
 
 async def count_promo_uses() -> int:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute("SELECT COUNT(*) FROM promo_uses") as cur:
             row = await cur.fetchone()
             return int(row[0]) if row else 0
@@ -217,7 +216,7 @@ async def count_promo_uses() -> int:
 
 async def reset_all_promo_applications() -> dict[str, int]:
     """Очистить все записи применений промокодов и обнулить счётчики."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute("SELECT COUNT(*) FROM promo_uses") as cur:
             uses_deleted = int((await cur.fetchone())[0])
         await db.execute("DELETE FROM promo_uses")
@@ -232,13 +231,21 @@ async def reset_all_promo_applications() -> dict[str, int]:
 
 
 async def record_grant_promo_use(promo_id: int, tg_id: int) -> None:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
+        cur = await db.execute(
+            """UPDATE promo_codes SET used_count = used_count + 1
+               WHERE id = ? AND is_active = 1
+                 AND (max_uses IS NULL OR used_count < max_uses)
+                 AND (
+                   SELECT COUNT(*) FROM promo_uses
+                   WHERE promo_id = ? AND tg_id = ?
+                 ) < per_user_limit""",
+            (promo_id, promo_id, tg_id),
+        )
+        if cur.rowcount == 0:
+            raise ValueError("Промокод недоступен (лимит исчерпан)")
         await db.execute(
             "INSERT INTO promo_uses (promo_id, tg_id, order_id) VALUES (?, ?, NULL)",
             (promo_id, tg_id),
-        )
-        await db.execute(
-            "UPDATE promo_codes SET used_count = used_count + 1 WHERE id = ?",
-            (promo_id,),
         )
         await db.commit()

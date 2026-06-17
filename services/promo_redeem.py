@@ -1,8 +1,10 @@
 """Единая активация промокода из главного меню."""
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
+from config.settings import settings
 from db import promo_codes as promo_db
 from db import promo_pending as pending_db
 from db.promo_codes import is_grant_promo
@@ -24,7 +26,28 @@ def _discount_label(promo: dict) -> str:
     return f"{promo['discount_value']} ₽"
 
 
+_last_redeem_by_tg: dict[int, float] = {}
+
+
+def _promo_redeem_rate_limited(tg_id: int) -> bool:
+    cooldown = float(settings.PROMO_REDEEM_COOLDOWN_SEC)
+    if cooldown <= 0:
+        return False
+    now = time.monotonic()
+    last = _last_redeem_by_tg.get(tg_id, 0.0)
+    if now - last < cooldown:
+        return True
+    _last_redeem_by_tg[tg_id] = now
+    if len(_last_redeem_by_tg) > 10_000:
+        stale = [k for k, ts in _last_redeem_by_tg.items() if now - ts > cooldown * 20]
+        for k in stale:
+            _last_redeem_by_tg.pop(k, None)
+    return False
+
+
 async def redeem_promo_code(tg_id: int, code: str) -> PromoRedeemResult:
+    if _promo_redeem_rate_limited(tg_id):
+        raise ValueError("Подождите несколько секунд перед следующей попыткой")
     promo = await promo_db.get_promo_by_code(code)
     if not promo:
         raise ValueError("Промокод не найден")

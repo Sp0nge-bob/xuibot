@@ -116,9 +116,20 @@ async def handle_platega_status(
             except (TypeError, ValueError):
                 pass
         if cb_currency and cb_currency.upper() != "RUB":
-            logger.warning(
-                "Payment [{}]: unexpected currency {} for tx {}",
-                source, cb_currency, tx_id,
+            logger.error(
+                "Payment [{}]: currency mismatch tx={} expected=RUB got={}",
+                source, tx_id, cb_currency,
+            )
+            return PaymentProcessResult(
+                handled=False,
+                amount_mismatch=True,
+                user_message=payment_failed_user_text(
+                    order,
+                    title=(
+                        "⚠️ <b>Оплата не подтверждена</b>\n"
+                        "<i>Валюта платежа не RUB. Обратитесь в поддержку.</i>"
+                    ),
+                ),
             )
 
     if order["status"] == "paid":

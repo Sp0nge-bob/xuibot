@@ -599,7 +599,15 @@ async def cb_nodes_sync(cb: CallbackQuery):
     await send_or_edit(cb, "⏳ Синхронизация вторичных нод…")
     try:
         stats = await sync_all_secondary_nodes()
-        text = (
+        if stats.get("skipped"):
+            text = (
+                "⏸ <b>Автосинк отключён</b>\n\n"
+                "Плановая синхронизация выключена в отладке.\n"
+                "Удаление клиентов по-прежнему снимает его со всех нод.\n\n"
+                "Включить автосинк: /admin → Отладка."
+            )
+        else:
+            text = (
             "✅ <b>Синхронизация завершена</b>\n\n"
             f"Подписок в БД: {stats['subs']}\n"
             f"Основная: создано {stats.get('primary_created', 0)}, "
@@ -608,7 +616,7 @@ async def cb_nodes_sync(cb: CallbackQuery):
             f"Вторичные: нод {stats['nodes']}, expiry обновлено {stats['ok']}, "
             f"призраков {stats.get('purged', 0)}\n"
             f"Ошибок: {stats['failed']}"
-        )
+            )
     except Exception as e:
         logger.exception("Manual sync failed: {}", e)
         text = f"❌ Ошибка синхронизации: <code>{str(e)[:120]}</code>"

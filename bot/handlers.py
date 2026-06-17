@@ -5,6 +5,7 @@ from aiogram.fsm.context import FSMContext
 from loguru import logger
 
 from config.payments import get_payment_method_by_key
+from db import payment_methods as pay_methods_db
 from config.plans import get_plan
 from config.settings import settings
 from config.trial import is_trial_email
@@ -120,6 +121,7 @@ async def _show_main_menu(target: Message | CallbackQuery, *, edit: bool = False
         if promo:
             pending_promo = promo
             pending_expires = pending["expires_at"]
+    greeting_template = await settings_db.get_start_greeting()
     announcement = await settings_db.get_start_announcement()
     if announcement:
         announcement = safe_html_fragment(announcement)
@@ -127,6 +129,7 @@ async def _show_main_menu(target: Message | CallbackQuery, *, edit: bool = False
         user.first_name,
         user.username,
         subs,
+        greeting_template=greeting_template,
         announcement=announcement,
         pending_discount_promo=pending_promo,
         pending_discount_expires_at=pending_expires,
@@ -231,11 +234,15 @@ async def cb_select_plan(cb: CallbackQuery, state: FSMContext):
         await safe_cb_answer(cb, "Тариф не найден", show_alert=True)
         return
     sub = await get_primary_subscription_for_ui(cb.from_user.id)
+    methods = await pay_methods_db.get_enabled_payment_methods()
+    if not methods:
+        await safe_cb_answer(cb, "Способы оплаты временно недоступны", show_alert=True)
+        return
     await safe_cb_answer(cb)
     await send_or_edit(
         cb,
         plan_card_text(quote.plan, has_active_sub=sub is not None, quote=quote),
-        payment_methods_kb(plan_id, quote=quote),
+        payment_methods_kb(plan_id, methods=methods, quote=quote),
     )
 
 
@@ -246,11 +253,15 @@ async def cb_extend_plan(cb: CallbackQuery, state: FSMContext):
     if not quote:
         await safe_cb_answer(cb, "Тариф не найден", show_alert=True)
         return
+    methods = await pay_methods_db.get_enabled_payment_methods()
+    if not methods:
+        await safe_cb_answer(cb, "Способы оплаты временно недоступны", show_alert=True)
+        return
     await safe_cb_answer(cb)
     await send_or_edit(
         cb,
         plan_card_text(quote.plan, extend=True, quote=quote),
-        payment_methods_kb(plan_id, extend=True, quote=quote),
+        payment_methods_kb(plan_id, methods=methods, extend=True, quote=quote),
     )
 
 
@@ -293,13 +304,12 @@ async def _start_payment(
     state: FSMContext,
 ):
     quote = await _checkout_quote(state, plan_id, cb.from_user.id)
-    method = get_payment_method_by_key(
-        method_key,
-        settings.PLATEGA_SBP_METHOD,
-        settings.PLATEGA_CRYPTO_METHOD,
-    )
+    method = get_payment_method_by_key(method_key)
     if not quote or not method:
         await safe_cb_answer(cb, "Неверные данные оплаты", show_alert=True)
+        return
+    if not await pay_methods_db.is_payment_method_enabled(method_key):
+        await safe_cb_answer(cb, "Этот способ оплаты отключён", show_alert=True)
         return
 
     plan = quote.plan
@@ -420,13 +430,12 @@ async def _apply_test_scenario(
     state: FSMContext,
 ):
     quote = await _checkout_quote(state, plan_id, cb.from_user.id)
-    method = get_payment_method_by_key(
-        method_key,
-        settings.PLATEGA_SBP_METHOD,
-        settings.PLATEGA_CRYPTO_METHOD,
-    )
+    method = get_payment_method_by_key(method_key)
     if not quote or not method:
         await safe_cb_answer(cb, "Неверные данные", show_alert=True)
+        return
+    if not await pay_methods_db.is_payment_method_enabled(method_key):
+        await safe_cb_answer(cb, "Этот способ оплаты отключён", show_alert=True)
         return
 
     plan = quote.plan
@@ -582,11 +591,7 @@ async def _pending_payment_view(
     plan = get_plan(order["plan_id"])
     if not plan:
         return None, None
-    method = get_payment_method_by_key(
-        order.get("payment_method") or "",
-        settings.PLATEGA_SBP_METHOD,
-        settings.PLATEGA_CRYPTO_METHOD,
-    )
+    method = get_payment_method_by_key(order.get("payment_method") or "")
     quote = quote_from_order(order, plan)
     extend = (order.get("order_type") or "new") == "extend"
     existing_sub = await db.get_primary_subscription(order["tg_id"])
@@ -616,6 +621,9 @@ async def _guard_payment_order(cb: CallbackQuery, tx_id: str) -> dict | None:
     order = await db.get_order_by_platega_tx(tx_id)
     if not order:
         await safe_cb_answer(cb, "Заказ не найден", show_alert=True)
+        return None
+    if order["tg_id"] != cb.from_user.id:
+        await safe_cb_answer(cb, "Нет доступа к этому заказу", show_alert=True)
         return None
     if order["status"] == "paid":
         await safe_cb_answer(cb, "Оплата уже обработана!", show_alert=True)

@@ -2,33 +2,21 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from ui.theme import (
+    BRAND,
+    days_left,
+    format_date,
+    money,
+    price_per_month,
+    renewal_hint,
+    screen,
+    traffic_label,
+    user_chip,
+)
 from config.plans import Plan
 from config.settings import settings
 from config.trial import TRIAL_COOLDOWN_DAYS, TRIAL_DAYS, TRIAL_TRAFFIC_GB, is_trial_email
 from services.pricing import PriceQuote
-
-
-def _user_line(first_name: Optional[str], username: Optional[str]) -> str:
-    name = first_name or "Пользователь"
-    if username:
-        return f"👤 <b>{name}</b> (@{username})"
-    return f"👤 <b>{name}</b>"
-
-
-def _format_date(iso_date: str) -> str:
-    try:
-        dt = datetime.fromisoformat(iso_date.replace("Z", ""))
-        return dt.strftime("%d.%m.%Y")
-    except ValueError:
-        return iso_date[:10]
-
-
-def _days_left(iso_date: str) -> int:
-    try:
-        end = datetime.fromisoformat(iso_date.replace("Z", ""))
-        return max(0, (end - datetime.utcnow()).days)
-    except ValueError:
-        return 0
 
 
 def _sub_kind_label(sub: Dict[str, Any]) -> str:
@@ -36,9 +24,9 @@ def _sub_kind_label(sub: Dict[str, Any]) -> str:
 
 
 def _sub_menu_line(sub: Dict[str, Any]) -> str:
-    end = _format_date(sub["end_date"])
-    left = _days_left(sub["end_date"])
-    traffic = "безлимит" if sub.get("traffic_limit_gb", 0) == 0 else f"{sub['traffic_limit_gb']} ГБ"
+    end = format_date(sub["end_date"])
+    left = days_left(sub["end_date"])
+    traffic = traffic_label(sub.get("traffic_limit_gb", 0))
     return f"{_sub_kind_label(sub)} · до <b>{end}</b> · {left} дн. · {traffic}"
 
 
@@ -69,69 +57,65 @@ def main_menu_text(
     username: Optional[str],
     subscriptions: List[Dict[str, Any]],
     *,
+    greeting_template: Optional[str] = None,
     announcement: Optional[str] = None,
     pending_discount_promo: Optional[Dict[str, Any]] = None,
     pending_discount_expires_at: Optional[str] = None,
 ) -> str:
-    lines = ["🌐 <b>VPN Bot</b>", "━━━━━━━━━━━━━━━━", _user_line(first_name, username), ""]
+    blocks: list[str] = [user_chip(first_name, username, template=greeting_template)]
 
     if announcement:
-        lines.append(announcement)
-        lines.append("")
+        blocks.append(announcement)
 
     if not subscriptions:
-        lines.append("📊 <b>Подписка:</b> ❌ Нет активной")
+        blocks.append(
+            "📊 Подписка: пока нет активной.\n"
+            "Можно начать с пробного периода или выбрать тариф."
+        )
     elif len(subscriptions) == 1:
-        lines += ["📊 <b>Подписка:</b>", f"   └ {_sub_menu_line(subscriptions[0])}"]
+        blocks.append(f"📊 Ваша подписка:\n{_sub_menu_line(subscriptions[0])}")
     else:
-        lines.append("📊 <b>Подписки:</b>")
-        for sub in subscriptions:
-            lines.append(f"   └ {_sub_menu_line(sub)}")
+        lines = [f"   └ {_sub_menu_line(sub)}" for sub in subscriptions]
+        blocks.append("📊 Ваши подписки:\n" + "\n".join(lines))
 
     if pending_discount_promo and pending_discount_expires_at:
-        lines += ["", *_pending_discount_menu_lines(
+        blocks.append("\n".join(_pending_discount_menu_lines(
             pending_discount_promo, pending_discount_expires_at,
-        )]
+        )))
 
-    if settings.TEST_MODE:
-        lines += ["", "⚠️ <i>Тестовый режим включён</i>"]
-
-    lines += ["", "Выберите действие:"]
-    return "\n".join(lines)
-
-
-def _renewal_note(*, extend: bool = False, has_active_sub: bool = False) -> str:
-    if extend:
-        return "ℹ️ Срок будет <b>добавлен</b> к текущей подписке."
-    if has_active_sub:
-        return (
-            "ℹ️ У вас уже есть активная подписка.\n"
-            "Оплата <b>продлит</b> её — новый ключ не создаётся."
-        )
-    return ""
+    footer = "⚠️ <i>Тестовый режим включён</i>" if settings.TEST_MODE else None
+    return screen(
+        f"🌐 <b>{BRAND}</b>",
+        *blocks,
+        hint="Выберите действие ниже 👇",
+        footer=footer,
+    )
 
 
 def plans_menu_text(*, has_active_sub: bool = False) -> str:
-    lines = [
+    hint = renewal_hint(has_active_sub=has_active_sub) or None
+    return screen(
         "📦 <b>Тарифы</b>",
-        "━━━━━━━━━━━━━━━━",
-        "",
-        "Выберите подходящий план.",
-        "После выбора тарифа вы сможете выбрать способ оплаты.",
+        "Выберите подходящий план — после этого откроется выбор способа оплаты.",
+        hint=hint,
+    )
+
+
+def _price_block(quote: PriceQuote | None, plan: Plan) -> str:
+    traffic = traffic_label(plan.get("traffic_gb", 0))
+    ppm = price_per_month(plan)
+    lines = [
+        f"⏱ Срок: <b>{plan['days']} дн.</b>",
+        f"📊 Трафик: {traffic}",
     ]
-    note = _renewal_note(has_active_sub=has_active_sub)
-    if note:
-        lines += ["", note]
-    return "\n".join(lines)
-
-
-def _price_lines(quote: PriceQuote | None, plan: Plan) -> list[str]:
     if quote and quote.has_discount:
-        return [
-            f"💰 Цена: <s>{quote.base_price} ₽</s> → <b>{quote.final_price} ₽</b>",
+        lines += [
+            f"💰 Цена: <s>{quote.base_price} ₽</s> → {money(quote.final_price)} · ~{ppm} ₽/мес",
             f"🎟 Скидка: <b>−{quote.discount_amount} ₽</b> ({quote.promo_code})",
         ]
-    return [f"💰 Стоимость: <b>{plan['price']} ₽</b>"]
+    else:
+        lines.append(f"💰 Цена: {money(plan['price'])} · ~{ppm} ₽/мес")
+    return "\n".join(lines)
 
 
 def plan_card_text(
@@ -141,31 +125,23 @@ def plan_card_text(
     has_active_sub: bool = False,
     quote: PriceQuote | None = None,
 ) -> str:
-    traffic = "безлимит" if plan["traffic_gb"] == 0 else f"{plan['traffic_gb']} ГБ"
     is_renewal = extend or has_active_sub
     action = "Продление" if is_renewal else "Тариф"
-    lines = [
+    hint_parts = [renewal_hint(extend=extend, has_active_sub=has_active_sub), "Выберите способ оплаты:"]
+    hint = "\n".join(p for p in hint_parts if p) or None
+    return screen(
         f"📦 <b>{action}: {plan['name']}</b>",
-        "━━━━━━━━━━━━━━━━",
-        "",
-        f"⏱ Срок: <b>{plan['days']} дн.</b>",
-        f"📊 Трафик: {traffic}",
-        *_price_lines(quote, plan),
-    ]
-    note = _renewal_note(extend=extend, has_active_sub=has_active_sub)
-    if note:
-        lines += ["", note]
-    lines += ["", "Выберите способ оплаты:"]
-    return "\n".join(lines)
+        _price_block(quote, plan),
+        hint=hint,
+    )
 
 
 def payment_method_text(plan: Plan, method_name: str, method_emoji: str) -> str:
-    return (
-        f"💳 <b>Оплата</b>\n"
-        "━━━━━━━━━━━━━━━━\n\n"
-        f"📦 Тариф: <b>{plan['name']}</b> — {plan['price']} ₽\n"
-        f"💰 Способ: {method_emoji} <b>{method_name}</b>\n\n"
-        "Нажмите кнопку ниже для перехода к оплате."
+    return screen(
+        "💳 <b>Оплата</b>",
+        f"📦 Тариф: <b>{plan['name']}</b> — {money(plan['price'])}",
+        f"💰 Способ: {method_emoji} <b>{method_name}</b>",
+        hint="Нажмите кнопку ниже — откроется страница оплаты.",
     )
 
 
@@ -182,39 +158,35 @@ def test_payment_text(
     is_renewal = extend or has_active_sub
     action = "Продление" if is_renewal else "Тариф"
     final_amount = quote.final_price if quote else plan["price"]
-    price_line = (
-        f"📦 {action}: <b>{plan['name']}</b> — <s>{quote.base_price}</s> <b>{quote.final_price} ₽</b>"
-        if quote and quote.has_discount
-        else f"📦 {action}: <b>{plan['name']}</b> — <b>{plan['price']} ₽</b>"
-    )
-    lines = [
-        "⚠️ <b>Тестовый режим</b>",
-        "━━━━━━━━━━━━━━━━",
-        "",
-        price_line,
+    if quote and quote.has_discount:
+        summary = (
+            f"📦 {action}: <b>{plan['name']}</b> — "
+            f"<s>{quote.base_price}</s> {money(quote.final_price)}"
+        )
+    else:
+        summary = f"📦 {action}: <b>{plan['name']}</b> — {money(plan['price'])}"
+    blocks = [
+        summary,
         f"💰 Способ: {method_emoji} <b>{method_name}</b>",
-        f"💳 К оплате: <b>{final_amount} ₽</b>",
+        f"💳 К оплате: {money(final_amount)}",
     ]
     if quote and quote.has_discount:
-        lines.append(f"🎟 Промокод: <code>{quote.promo_code}</code> (−{quote.discount_amount} ₽)")
-    note = _renewal_note(extend=extend, has_active_sub=has_active_sub)
-    if note:
-        lines += ["", note]
+        blocks.append(f"🎟 Промокод: <code>{quote.promo_code}</code> (−{quote.discount_amount} ₽)")
+    renewal = renewal_hint(extend=extend, has_active_sub=has_active_sub)
+    if renewal:
+        blocks.append(renewal)
     if request_preview:
-        lines += [
-            "",
-            "📡 <b>Запрос к Platega (не отправляется):</b>",
-            request_preview,
-            "",
-            "📥 <b>Ожидаемый ответ:</b>",
-            "<code>{\"transactionId\": \"...\", \"status\": \"PENDING\", \"redirect\": \"...\"}</code>",
-        ]
-    lines += [
-        "",
-        "Реальные деньги не списываются.",
-        "Выберите сценарий:",
-    ]
-    return "\n".join(lines)
+        blocks.append(
+            "📡 <b>Запрос к Platega (не отправляется):</b>\n"
+            f"{request_preview}\n\n"
+            "📥 <b>Ожидаемый ответ:</b>\n"
+            "<code>{\"transactionId\": \"...\", \"status\": \"PENDING\", \"redirect\": \"...\"}</code>"
+        )
+    return screen(
+        "⚠️ <b>Тестовый режим</b>",
+        *blocks,
+        hint="Реальные деньги не списываются. Выберите сценарий:",
+    )
 
 
 def test_scenario_result_text(scenario: str, tx_id: str | None = None) -> str:
@@ -226,21 +198,16 @@ def test_scenario_result_text(scenario: str, tx_id: str | None = None) -> str:
         "CREATE_ERROR": "💥 Ошибка API",
     }
     label = labels.get(scenario, scenario)
-    lines = [
-        "🧪 <b>Симуляция Platega</b>",
-        "━━━━━━━━━━━━━━━━",
-        "",
-        f"Сценарий: {label}",
-    ]
+    block = f"Сценарий: {label}"
     if tx_id:
-        lines.append(f"🆔 transactionId: <code>{tx_id}</code>")
-    return "\n".join(lines)
+        block += f"\n🆔 transactionId: <code>{tx_id}</code>"
+    return screen("🧪 <b>Симуляция Platega</b>", block)
 
 
-def _subscription_detail_block(sub: Dict[str, Any], sub_link: Optional[str]) -> list[str]:
-    end = _format_date(sub["end_date"])
-    left = _days_left(sub["end_date"])
-    traffic = "безлимит" if sub.get("traffic_limit_gb", 0) == 0 else f"{sub['traffic_limit_gb']} ГБ"
+def _subscription_detail_block(sub: Dict[str, Any], sub_link: Optional[str]) -> str:
+    end = format_date(sub["end_date"])
+    left = days_left(sub["end_date"])
+    traffic = traffic_label(sub.get("traffic_limit_gb", 0))
     lines = [
         f"<b>{_sub_kind_label(sub)}</b>",
         f"📅 Действует до: <b>{end}</b> ({left} дн.)",
@@ -249,54 +216,48 @@ def _subscription_detail_block(sub: Dict[str, Any], sub_link: Optional[str]) -> 
     ]
     if sub_link:
         lines += [f"🔗 <b>Ссылка:</b>", f"<code>{sub_link}</code>"]
-    return lines
+    return "\n".join(lines)
 
 
 def subscription_manage_text(sub: Dict[str, Any], sub_link: Optional[str]) -> str:
-    lines = [
-        "⚙️ <b>Управление подпиской</b>",
-        "━━━━━━━━━━━━━━━━",
-        "",
-        *_subscription_detail_block(sub, sub_link),
-        "",
-        "Что хотите сделать?",
-    ]
-    return "\n".join(lines)
+    return screen(
+        "⚙️ <b>Подписка</b>",
+        _subscription_detail_block(sub, sub_link),
+        hint="Что хотите сделать?",
+    )
 
 
 def subscriptions_manage_text(
     subs: List[Dict[str, Any]],
     sub_links: Dict[int, Optional[str]],
 ) -> str:
-    lines = ["⚙️ <b>Управление подписками</b>", "━━━━━━━━━━━━━━━━", ""]
+    blocks: list[str] = []
     for i, sub in enumerate(subs):
         if i > 0:
-            lines.append("──────────────")
-            lines.append("")
-        lines.extend(_subscription_detail_block(sub, sub_links.get(sub["id"])))
-    lines += ["", "Что хотите сделать?"]
-    return "\n".join(lines)
+            blocks.append("──────────────")
+        blocks.append(_subscription_detail_block(sub, sub_links.get(sub["id"])))
+    return screen("⚙️ <b>Подписки</b>", *blocks, hint="Что хотите сделать?")
 
 
 def no_subscription_text() -> str:
-    return (
-        "⚙️ <b>Управление подпиской</b>\n"
-        "━━━━━━━━━━━━━━━━\n\n"
-        "У вас пока нет активной подписки.\n"
-        "Оформите тариф или возьмите пробный период в главном меню."
+    return screen(
+        "⚙️ <b>Подписка</b>",
+        "У вас пока нет активной подписки.",
+        hint="Оформите тариф или возьмите пробный период в главном меню.",
     )
 
 
 def trial_offer_text() -> str:
-    return (
-        "🎁 <b>Пробный период</b>\n"
-        "━━━━━━━━━━━━━━━━\n\n"
-        f"⏱ Срок: <b>{TRIAL_DAYS} дн.</b>\n"
-        f"📊 Трафик: <b>{TRIAL_TRAFFIC_GB} ГБ</b>\n"
-        f"👤 Клиент: <code>tgfree…</code>\n\n"
+    return screen(
+        "🎁 <b>Пробный период</b>",
+        "\n".join([
+            f"⏱ Срок: <b>{TRIAL_DAYS} дн.</b>",
+            f"📊 Трафик: <b>{TRIAL_TRAFFIC_GB} ГБ</b>",
+            f"👤 Клиент: <code>tgfree…</code>",
+        ]),
         f"Доступен <b>1 раз в {TRIAL_COOLDOWN_DAYS} дн.</b> на аккаунт Telegram.\n"
-        "После окончания можно оформить платный тариф.\n\n"
-        "Активировать пробный период?"
+        "После окончания можно оформить платный тариф.",
+        hint="Активировать пробный период?",
     )
 
 
@@ -341,36 +302,77 @@ def _truncate_preview(text: str, limit: int = 1200) -> str:
 
 
 def admin_start_text_menu_text(
+    greeting_preview: str,
     announcement: Optional[str],
     *,
-    html_invalid: bool = False,
+    greeting_html_invalid: bool = False,
+    announcement_html_invalid: bool = False,
+    greeting_is_custom: bool = False,
 ) -> str:
+    from ui.theme import DEFAULT_GREETING_TEMPLATE
+
     lines = [
-        "📢 <b>Сообщение /start</b>",
+        "📢 <b>Экран /start</b>",
         "━━━━━━━━━━━━━━━━",
         "",
-        "Произвольный блок для новостей, скидок и акций.",
-        "Показывается в главном меню <b>между приветствием и статусом подписки</b>.",
+        "<b>👋 Приветствие</b>",
+        "Шаблон с подстановкой имени пользователя.",
+        "Плейсхолдеры: <code>{name}</code>, <code>{username}</code>, "
+        "<code>{username_line}</code> (пробел + @ник, если есть).",
         "",
-        "Системные строки (подписка, промокод, тестовый режим, «Выберите действие») "
-        "формируются ботом автоматически и не меняются.",
+        "<b>Сейчас:</b>",
+    ]
+    if greeting_is_custom and greeting_html_invalid:
+        lines.append(
+            "⚠️ <i>Шаблон с ошибкой HTML — в меню показывается как обычный текст.</i>"
+        )
+    lines.append(_truncate_preview(greeting_preview, limit=400))
+    if not greeting_is_custom:
+        lines.append(
+            f"<i>По умолчанию: <code>{DEFAULT_GREETING_TEMPLATE}</code></i>"
+        )
+    lines += [
+        "",
+        "<b>📰 Блок новостей</b>",
+        "Произвольный текст между приветствием и статусом подписки.",
         "",
         "<b>Сейчас:</b>",
     ]
     if announcement:
-        if html_invalid:
+        if announcement_html_invalid:
             lines.append(
                 "⚠️ <i>Сохранённый текст с ошибкой HTML — в меню показывается как обычный текст.</i>"
             )
         lines.append(_truncate_preview(announcement))
     else:
-        lines.append("<i>Не задано — показывается только системное меню.</i>")
+        lines.append("<i>Не задано.</i>")
+    lines += [
+        "",
+        "Статус подписки, промокод, тестовый режим и кнопки меню "
+        "формируются ботом автоматически.",
+    ]
     return "\n".join(lines)
+
+
+def admin_start_greeting_edit_prompt_text() -> str:
+    from ui.theme import DEFAULT_GREETING_TEMPLATE
+
+    return (
+        "✏️ <b>Шаблон приветствия</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        "Отправьте текст приветствия для главного меню.\n\n"
+        "Подстановки:\n"
+        "• <code>{name}</code> — имя из Telegram (или «друг»)\n"
+        "• <code>{username}</code> — @ник без скобок\n"
+        "• <code>{username_line}</code> — « (@ник)», если ник есть\n\n"
+        f"Пример: <code>{DEFAULT_GREETING_TEMPLATE}</code>\n\n"
+        "Поддерживается HTML. Для отмены: /admin"
+    )
 
 
 def admin_start_text_edit_prompt_text() -> str:
     return (
-        "✏️ <b>Новое сообщение /start</b>\n"
+        "✏️ <b>Блок новостей /start</b>\n"
         "━━━━━━━━━━━━━━━━\n\n"
         "Отправьте текст для блока новостей/акций.\n"
         "Поддерживается HTML: <code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, "
@@ -389,10 +391,39 @@ def admin_debug_entry_confirm_text() -> str:
         "• очистка всех применений промокодов\n"
         "• сброс истории всех заказов\n"
         "• сброс учёта всех тикетов\n"
-        "• сброс учёта пользователей\n\n"
+        "• сброс учёта пользователей\n"
+        "• отключение автосинка нод (удаление клиентов не затрагивается)\n\n"
         "Используйте только для отладки и тестирования.\n\n"
         "Войти в раздел?"
     )
+
+
+def admin_payment_methods_text(enabled: dict[str, bool]) -> str:
+    from config.payments import all_payment_method_definitions
+
+    lines = [
+        "💳 <b>Способы оплаты</b>",
+        "━━━━━━━━━━━━━━━━",
+        "",
+        "Нажмите на способ, чтобы включить или отключить.",
+        "Пользователи видят только <b>включённые</b> методы.",
+        "",
+    ]
+    on_count = sum(1 for v in enabled.values() if v)
+    for m in all_payment_method_definitions():
+        flag = "✅" if enabled.get(m["key"]) else "❌"
+        lines.append(
+            f"{flag} {m['emoji']} <b>{m['name']}</b> "
+            f"(Platega ID <code>{m['platega_id']}</code>)"
+        )
+    lines += [
+        "",
+        f"Включено: <b>{on_count}</b> из <b>{len(all_payment_method_definitions())}</b>",
+        "",
+        "<i>ID методов можно переопределить в .env (PLATEGA_*_METHOD).</i>",
+        "<i>Доступность на стороне Platega уточняйте у менеджера.</i>",
+    ]
+    return "\n".join(lines)
 
 
 def admin_debug_menu_text(
@@ -404,10 +435,19 @@ def admin_debug_menu_text(
     tickets_count: int = 0,
     ticket_messages_count: int = 0,
     users_count: int = 0,
+    sync_disabled: bool = False,
 ) -> str:
+    sync_line = (
+        "⏸ <b>Автосинк нод: отключён</b>\n"
+        "   └ старт, таймер и очередь после оплаты\n"
+        "   └ <i>удаление, выдача и продление — как обычно, со всех нод</i>"
+        if sync_disabled
+        else "🔄 <b>Автосинк нод: включён</b>"
+    )
     return (
         "🧪 <b>Отладка</b>\n"
         "━━━━━━━━━━━━━━━━\n\n"
+        f"{sync_line}\n\n"
         f"🎁 Активных пробных подписок: <b>{trial_count}</b>\n"
         f"🎟 Применений промокодов (promo_uses): <b>{promo_uses}</b>\n"
         f"⏳ Ожидающих скидок (pending): <b>{promo_pending}</b>\n"
@@ -508,51 +548,40 @@ def _order_payment_lines(order: Dict[str, Any]) -> list[str]:
 
 
 def refund_pick_text() -> str:
-    return (
-        "💸 <b>Запрос на возврат</b>\n"
-        "━━━━━━━━━━━━━━━━\n\n"
-        "Выберите оплату, по которой хотите оформить возврат:"
+    return screen(
+        "💸 <b>Запрос на возврат</b>",
+        hint="Выберите оплату, по которой хотите оформить возврат:",
     )
 
 
 def refund_confirm_text(order: Dict[str, Any]) -> str:
-    lines = [
+    return screen(
         "💸 <b>Подтверждение возврата</b>",
-        "━━━━━━━━━━━━━━━━",
-        "",
-        "Возврат по оплате:",
-        "",
-        *_order_payment_lines(order),
-        "",
-        "Отправить запрос администратору?",
-        "Подписка останется активной до решения.",
-    ]
-    return "\n".join(lines)
+        "Возврат по оплате:\n\n" + "\n".join(_order_payment_lines(order)),
+        hint="Отправить запрос администратору? Подписка останется активной до решения.",
+    )
 
 
 def refund_request_sent_text(ticket_id: int) -> str:
-    return (
-        "💸 <b>Запрос на возврат отправлен</b>\n"
-        "━━━━━━━━━━━━━━━━\n\n"
-        f"Тикет <code>#{ticket_id}</code> создан.\n"
-        "Администратор рассмотрит ваш запрос.\n"
-        "Переписка — в «Управление подпиской» → <b>Тикет возврата</b>."
+    return screen(
+        "💸 <b>Запрос отправлен</b>",
+        f"Тикет <code>#{ticket_id}</code> создан — администратор рассмотрит ваш запрос.",
+        hint="Переписка: «Подписка» → <b>Тикет возврата</b>.",
     )
 
 
 def support_menu_text(tickets: list) -> str:
     open_count = len([t for t in tickets if t.get("category") != "refund"])
-    lines = [
+    status = (
+        f"Открытых обращений: <b>{open_count}</b>"
+        if open_count
+        else "Открытых обращений нет — мы на связи."
+    )
+    return screen(
         "💬 <b>Поддержка</b>",
-        "━━━━━━━━━━━━━━━━",
-        "",
-    ]
-    if open_count:
-        lines.append(f"Открытых обращений: <b>{open_count}</b>\n")
-    else:
-        lines.append("Нет открытых обращений.\n")
-    lines.append("Создайте новое или выберите тикет из списка.")
-    return "\n".join(lines)
+        status,
+        hint="Создайте новое обращение или выберите тикет из списка.",
+    )
 
 
 def ticket_view_text(ticket: Dict[str, Any]) -> str:
@@ -560,9 +589,6 @@ def ticket_view_text(ticket: Dict[str, Any]) -> str:
     cat = category_label(ticket["category"])
     status = "открыт" if ticket.get("status") == STATUS_OPEN else "закрыт"
     lines = [
-        f"🎫 <b>Тикет #{ticket['id']}</b>",
-        "━━━━━━━━━━━━━━━━",
-        "",
         f"📁 Категория: <b>{cat}</b>",
         f"📌 Статус: <b>{status}</b>",
         f"🕐 Создан: {(ticket.get('created_at') or '')[:16]}",
@@ -576,68 +602,62 @@ def ticket_view_text(ticket: Dict[str, Any]) -> str:
             f"💰 Сумма: <b>{ticket.get('order_amount') or '—'} ₽</b>",
             f"🆔 TX Platega: <code>{ticket.get('platega_tx_id') or '—'}</code>",
         ]
-    if ticket.get("status") == STATUS_OPEN:
-        lines += ["", "Нажмите «Начать переписку», чтобы отправить сообщение администратору."]
-    return "\n".join(lines)
+    hint = (
+        "Нажмите «Начать переписку», чтобы написать администратору."
+        if ticket.get("status") == STATUS_OPEN
+        else None
+    )
+    return screen(f"🎫 <b>Тикет #{ticket['id']}</b>", "\n".join(lines), hint=hint)
 
 
 def ticket_session_banner_text(ticket_id: int, category: str, *, is_new: bool = False) -> str:
     from db.tickets import category_label
-    header = "🎫 <b>Новый тикет создан</b>" if is_new else "🔴 <b>Активная переписка</b>"
-    return (
-        f"{header}\n"
-        "━━━━━━━━━━━━━━━━\n\n"
-        f"Тикет <code>#{ticket_id}</code> · {category_label(category)}\n\n"
-        "Отправляйте сообщения любого типа — текст, фото, голосовые.\n"
-        "Они будут переданы администратору.\n\n"
-        "«Завершить переписку» — выйти из режима (тикет останется открытым)."
+    title = "🎫 <b>Новый тикет</b>" if is_new else "🔴 <b>Активная переписка</b>"
+    return screen(
+        title,
+        f"Тикет <code>#{ticket_id}</code> · {category_label(category)}",
+        "Отправляйте текст, фото или голосовые — всё дойдёт до администратора.",
+        hint="«Завершить переписку» — выйти из режима (тикет останется открытым).",
     )
 
 
 def ticket_created_text(ticket_id: int) -> str:
-    return f"✅ Тикет <code>#{ticket_id}</code> создан."
+    return f"✅ Тикет <code>#{ticket_id}</code> создан — можно писать сообщения."
 
 
 def refund_ticket_approved_user_text(ticket: Dict[str, Any]) -> str:
     ticket_id = ticket["id"]
-    lines = [
-        "✅ <b>Запрос на возврат одобрен</b>",
-        "━━━━━━━━━━━━━━━━",
-        "",
+    blocks = [
         f"Тикет <code>#{ticket_id}</code> закрыт.",
-        "",
-        "Возврат средств выполняется вручную через платёжную систему.",
-        "После подтверждения возврата доступ к VPN будет скорректирован автоматически.",
-        "Когда возврат будет подтверждён, вы получите отдельное уведомление.",
+        "Возврат выполняется через платёжную систему.\n"
+        "После подтверждения доступ к VPN скорректируется автоматически.\n"
+        "Мы пришлём отдельное уведомление, когда возврат подтвердят.",
     ]
     if ticket.get("order_id"):
-        lines += [
-            "",
+        blocks.append("\n".join([
             f"🧾 Заказ: <code>#{ticket['order_id']}</code>",
             f"📦 Тариф: <b>{ticket.get('plan_name') or '—'}</b>",
             f"💰 Сумма: <b>{ticket.get('order_amount') or '—'} ₽</b>",
-        ]
-    return "\n".join(lines)
+        ]))
+    return screen("✅ <b>Возврат одобрен</b>", *blocks)
 
 
 def refund_ticket_rejected_user_text(ticket: Dict[str, Any]) -> str:
     ticket_id = ticket["id"]
-    lines = [
-        "❌ <b>Запрос на возврат отклонён</b>",
-        "━━━━━━━━━━━━━━━━",
-        "",
+    blocks = [
         f"Тикет <code>#{ticket_id}</code> закрыт.",
-        "",
-        "Если остались вопросы — напишите в поддержку.",
     ]
     if ticket.get("order_id"):
-        lines += [
-            "",
+        blocks.append("\n".join([
             f"🧾 Заказ: <code>#{ticket['order_id']}</code>",
             f"📦 Тариф: <b>{ticket.get('plan_name') or '—'}</b>",
             f"💰 Сумма: <b>{ticket.get('order_amount') or '—'} ₽</b>",
-        ]
-    return "\n".join(lines)
+        ]))
+    return screen(
+        "❌ <b>Возврат отклонён</b>",
+        *blocks,
+        hint="Если остались вопросы — напишите в поддержку.",
+    )
 
 
 def refund_admin_text(
@@ -652,7 +672,7 @@ def refund_admin_text(
         "💸 <b>Запрос на возврат</b>",
         "",
         f"👤 Пользователь: {user} (<code>{tg_id}</code>)",
-        f"📅 Подписка до: {_format_date(sub['end_date'])}",
+        f"📅 Подписка до: {format_date(sub['end_date'])}",
         f"👤 Клиент: <code>{sub['client_email']}</code>",
         f"🆔 Подписка #{sub['id']}",
         "",
@@ -676,20 +696,18 @@ def pending_payment_text(
     is_renewal = extend or has_active_sub
     action = "Продление" if is_renewal else "Тариф"
     if quote and quote.has_discount:
-        price_part = f"<s>{quote.base_price}</s> <b>{quote.final_price} ₽</b>"
+        price_part = f"<s>{quote.base_price}</s> {money(quote.final_price)}"
     elif quote:
-        price_part = f"<b>{quote.final_price} ₽</b>"
+        price_part = money(quote.final_price)
     else:
-        price_part = f"<b>{plan['price']} ₽</b>"
+        price_part = money(plan["price"])
     title = "⏳ <b>Ожидаем оплату</b> (тест)" if test_mode else "⏳ <b>Ожидаем оплату</b>"
-    lines = [title, "━━━━━━━━━━━━━━━━"]
-    if status_note:
-        lines += ["", f"⚠️ {status_note}"]
-    lines += [
-        "",
+    lines = [
         f"📦 {action}: <b>{plan['name']}</b> — {price_part}",
         f"💳 Способ: <b>{method_name}</b>",
     ]
+    if status_note:
+        lines.insert(0, f"⚠️ {status_note}")
     if expires_in:
         if expires_in == "00:00:00":
             lines.append("⏱ <b>Время оплаты истекло</b> — создайте новый заказ")
@@ -699,38 +717,35 @@ def pending_payment_text(
         lines.append("⏱ Окно оплаты: <b>30 минут</b> с момента создания счёта")
     if quote and quote.has_discount:
         lines.append(f"🎟 Промокод: <code>{quote.promo_code}</code>")
-    note = _renewal_note(extend=extend, has_active_sub=has_active_sub)
-    if note:
-        lines += ["", note]
-    lines += [""]
+    renewal = renewal_hint(extend=extend, has_active_sub=has_active_sub)
+    if renewal:
+        lines.append(renewal)
     if test_mode:
-        lines += [
-            "<i>Тест: таймер ~30 мин, как у Platega.</i>",
-            "Кнопки ниже симулируют проверку, оплату, webhook и отмену.",
-        ]
+        hint = (
+            "<i>Тест: таймер ~30 мин, как у Platega.</i>\n"
+            "Кнопки ниже симулируют проверку, оплату, webhook и отмену."
+        )
     else:
-        lines += [
-            "После оплаты ключ выдаётся автоматически.",
-            "Можно нажать «Проверить оплату», если уже оплатили.",
-        ]
-    return "\n".join(lines)
+        hint = (
+            "После оплаты ключ выдаётся автоматически.\n"
+            "Уже оплатили? Нажмите «Проверить оплату»."
+        )
+    return screen(title, "\n".join(lines), hint=hint)
 
 
 def promo_enter_text() -> str:
-    return (
-        "🎟 <b>Промокоды</b>\n"
-        "━━━━━━━━━━━━━━━━\n\n"
-        "Отправьте код в следующем сообщении.\n\n"
+    return screen(
+        "🎟 <b>Промокод</b>",
         "• <b>Бесплатный тариф</b> — активируется сразу\n"
-        "• <b>Скидка</b> — применится к ближайшей оплате в течение 7 дней\n\n"
-        "Для отмены: /start или «Главное меню»."
+        "• <b>Скидка</b> — применится к ближайшей оплате в течение 7 дней",
+        hint="Отправьте код следующим сообщением. Отмена: /start или «Главное меню».",
     )
 
 
 def promo_applied_text(code: str, discount: int, final_price: int) -> str:
-    return (
-        f"✅ Промокод <code>{code}</code> применён!\n"
-        f"Скидка: <b>−{discount} ₽</b>, к оплате: <b>{final_price} ₽</b>"
+    return screen(
+        f"✅ Промокод <code>{code}</code> применён",
+        f"Скидка: <b>−{discount} ₽</b> · к оплате: {money(final_price)}",
     )
 
 

@@ -7,24 +7,41 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📊 Статистика", callback_data="adm:stats")],
         [InlineKeyboardButton(text="💰 Цены тарифов", callback_data="adm:plans")],
+        [InlineKeyboardButton(text="💳 Способы оплаты", callback_data="adm:payments")],
         [InlineKeyboardButton(text="🎟 Промокоды", callback_data="adm:promos")],
         [InlineKeyboardButton(text="👥 Пользователи", callback_data="adm:users")],
         [InlineKeyboardButton(text="🎫 Тикеты", callback_data="adm:tickets")],
         [InlineKeyboardButton(text="🖧 Ноды", callback_data="adm:nodes")],
         [InlineKeyboardButton(text="📡 Inbounds подписки", callback_data="adm:inbounds")],
         [InlineKeyboardButton(text="🎁 Пробный период", callback_data="adm:trial")],
-        [InlineKeyboardButton(text="📢 Сообщение /start", callback_data="adm:start_text")],
+        [InlineKeyboardButton(text="📢 Экран /start", callback_data="adm:start_text")],
         [InlineKeyboardButton(text="🧪 Отладка", callback_data="adm:debug")],
     ])
 
 
-def admin_start_text_kb(*, has_text: bool) -> InlineKeyboardMarkup:
+def admin_start_text_kb(
+    *,
+    has_greeting: bool = False,
+    has_announcement: bool = False,
+) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text="✏️ Изменить", callback_data="adm:start_text:edit")],
+        [InlineKeyboardButton(
+            text="👋 Изменить приветствие",
+            callback_data="adm:start_text:greeting:edit",
+        )],
     ]
-    if has_text:
+    if has_greeting:
         rows.append([InlineKeyboardButton(
-            text="🗑 Очистить",
+            text="↩️ Сбросить приветствие",
+            callback_data="adm:start_text:greeting:clear",
+        )])
+    rows.append([InlineKeyboardButton(
+        text="✏️ Изменить блок новостей",
+        callback_data="adm:start_text:edit",
+    )])
+    if has_announcement:
+        rows.append([InlineKeyboardButton(
+            text="🗑 Очистить блок новостей",
             callback_data="adm:start_text:clear",
         )])
     rows.append([InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")])
@@ -51,8 +68,17 @@ def admin_debug_entry_confirm_kb() -> InlineKeyboardMarkup:
     ])
 
 
-def admin_debug_kb() -> InlineKeyboardMarkup:
+def admin_debug_kb(*, sync_disabled: bool = False) -> InlineKeyboardMarkup:
+    sync_label = (
+        "▶️ Включить автосинк нод"
+        if sync_disabled
+        else "⏸ Отключить автосинк нод"
+    )
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=sync_label,
+            callback_data="adm:debug:sync_toggle",
+        )],
         [InlineKeyboardButton(
             text="🗑 Сбросить все пробные",
             callback_data="adm:trial:reset_all",
@@ -115,6 +141,21 @@ def admin_debug_promo_reset_confirm_kb() -> InlineKeyboardMarkup:
         )],
         [InlineKeyboardButton(text="« Отмена", callback_data="adm:debug:enter")],
     ])
+
+
+def admin_payment_methods_kb(enabled: dict[str, bool]) -> InlineKeyboardMarkup:
+    from config.payments import all_payment_method_definitions
+
+    rows: list[list[InlineKeyboardButton]] = []
+    for m in all_payment_method_definitions():
+        is_on = enabled.get(m["key"], False)
+        status = "✅" if is_on else "❌"
+        rows.append([InlineKeyboardButton(
+            text=f"{status} {m['emoji']} {m['name']}",
+            callback_data=f"adm:payments:toggle:{m['key']}",
+        )])
+    rows.append([InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def admin_back_kb() -> InlineKeyboardMarkup:

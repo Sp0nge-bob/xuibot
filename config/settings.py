@@ -15,8 +15,11 @@ class Settings(BaseSettings):
     PLATEGA_MERCHANT_ID: str
     PLATEGA_SECRET: str
     PLATEGA_BASE_URL: str = "https://app.platega.io"
-    # ID способов оплаты Platega (уточните у менеджера; 2=СБП, 13=крипта — типичные значения)
+    # ID способов оплаты Platega (docs.platega.io; уточните у менеджера)
     PLATEGA_SBP_METHOD: int = 2
+    PLATEGA_ERIP_METHOD: int = 3
+    PLATEGA_CARD_METHOD: int = 11
+    PLATEGA_INTL_METHOD: int = 12
     PLATEGA_CRYPTO_METHOD: int = 13
     PLATEGA_RETURN_URL: str = ""
     PLATEGA_FAILED_URL: str = ""
@@ -37,9 +40,12 @@ class Settings(BaseSettings):
     XUI_INBOUND_CACHE_TTL: int = 180
     XUI_REQUEST_DELAY_MS: int = 20
     XUI_SECONDARY_SYNC_WORKERS: int = 3
+    XUI_SECONDARY_SYNC_QUEUE_SIZE: int = 500
+    XUI_EMAIL_LIST_CACHE_TTL: int = 120
 
     # Полная синхронизация нод (как кнопка в админке) — bot/scheduler.py
     FULL_SYNC_INTERVAL_HOURS: int = 24
+    SUBSCRIPTION_SYNC_DEBOUNCE_SEC: int = 60
 
     # Пока бот настроен на одну ноду.
     # Если хочешь раздавать клиентов по 3 нодам — скажи, добавлю выбор ноды / балансировку.
@@ -66,6 +72,10 @@ class Settings(BaseSettings):
     WEBHOOK_PORT: int = 8080
     WEBHOOK_PATH: str = "/platega-webhook"
     PUBLIC_WEBHOOK_URL: str = ""
+    WEBHOOK_RATE_LIMIT_PER_MIN: int = 120
+    WEBHOOK_IDEMPOTENCY_TTL_SEC: int = 300
+    FULFILLMENT_QUEUE_WORKERS: int = 2
+    FULFILLMENT_QUEUE_MAX_SIZE: int = 200
 
     LOG_LEVEL: str = "INFO"
     LOG_DIR: str = "data/logs"
@@ -75,6 +85,9 @@ class Settings(BaseSettings):
     # Защита от наложения нажатий (двойная оплата, параллельные callback)
     BOT_ACTION_LOCK_ENABLED: bool = True
     BOT_ACTION_DEBOUNCE_SEC: float = 0.5
+    BOT_ACTION_DEBOUNCE_MAX_ENTRIES: int = 5000
+    PROMO_REDEEM_COOLDOWN_SEC: float = 3.0
+    STALE_PENDING_ORDER_HOURS: int = 48
 
     # Тестовый режим (без реальной Platega)
     # Когда True — оплата симулируется, ключи выдаются сразу.
@@ -122,6 +135,18 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
+
+def warn_unsafe_runtime_config() -> None:
+    """Предупреждение при опасной конфигурации (TEST_MODE + production webhook)."""
+    from loguru import logger
+
+    if settings.TEST_MODE and (settings.PUBLIC_WEBHOOK_URL or "").strip():
+        logger.warning(
+            "TEST_MODE=true при заданном PUBLIC_WEBHOOK_URL — "
+            "для продакшена установите TEST_MODE=false"
+        )
+
+
 from config.logging_setup import setup_logging
 
 setup_logging(
@@ -129,3 +154,4 @@ setup_logging(
     log_dir=settings.LOG_DIR,
     session_retain=settings.LOG_SESSION_RETAIN,
 )
+warn_unsafe_runtime_config()

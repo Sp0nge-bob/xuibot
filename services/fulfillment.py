@@ -191,22 +191,19 @@ def _success_text(
     is_test: bool,
     inbound_count: int,
 ) -> str:
-    traffic = "безлимит" if plan["traffic_gb"] == 0 else f"{plan['traffic_gb']} ГБ"
-    lines = [
-        f"✅ <b>{title}</b>",
-        "",
+    from ui.theme import screen, traffic_label
+
+    details = [
         f"📦 Тариф: <b>{plan['name']}</b>",
         f"📅 Действует до: <b>{end_date}</b>",
-        f"📊 Трафик: {traffic}",
-        "",
+        f"📊 Трафик: {traffic_label(plan['traffic_gb'])}",
     ]
     if sub_link:
-        lines += [f"🔗 <b>Ссылка на подписку:</b>", f"<code>{sub_link}</code>", ""]
-    lines.append(f"👤 Клиент: <code>{client_email}</code>")
-    if is_test:
-        lines += ["", "⚠️ <i>Тестовый режим — оплата симулирована</i>"]
-    lines.append(qr_and_sync_footer(inbound_count))
-    return "\n".join(lines)
+        details += ["", "🔗 <b>Ссылка на подписку:</b>", f"<code>{sub_link}</code>"]
+    details.append(f"👤 Клиент: <code>{client_email}</code>")
+    footer = "⚠️ <i>Тестовый режим — оплата симулирована</i>" if is_test else None
+    text = screen(f"✅ <b>{title}</b>", "\n".join(details), footer=footer)
+    return text + qr_and_sync_footer(inbound_count)
 
 
 def load_happ_setup_photos() -> List[FSInputFile]:

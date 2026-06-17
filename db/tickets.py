@@ -2,9 +2,8 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-import aiosqlite
 
-from db.database import DB_PATH
+from db.connection import get_db
 
 CATEGORY_REFUND = "refund"
 CATEGORY_SUPPORT = "support"
@@ -28,7 +27,7 @@ def category_label(category: str) -> str:
 
 
 async def init_tickets_tables() -> None:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS tickets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,7 +74,7 @@ async def init_tickets_tables() -> None:
         await _migrate_refund_decision_column(db)
 
 
-async def _migrate_refund_decision_column(db: aiosqlite.Connection) -> None:
+async def _migrate_refund_decision_column(db) -> None:
     async with db.execute("PRAGMA table_info(tickets)") as cur:
         columns = {row[1] for row in await cur.fetchall()}
     if "refund_decision" not in columns:
@@ -83,7 +82,7 @@ async def _migrate_refund_decision_column(db: aiosqlite.Connection) -> None:
         await db.commit()
 
 
-async def _migrate_refund_tables(db: aiosqlite.Connection) -> None:
+async def _migrate_refund_tables(db) -> None:
     async with db.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='refund_requests'"
     ) as cur:
@@ -162,7 +161,7 @@ async def create_ticket(
         if existing:
             return existing["id"]
 
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         cursor = await db.execute(
             """INSERT INTO tickets (tg_id, category, subscription_id, order_id, last_message_at)
                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)""",
@@ -173,8 +172,7 @@ async def create_ticket(
 
 
 async def get_ticket_by_id(ticket_id: int) -> Optional[Dict[str, Any]]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
         async with db.execute(
             _ticket_select_sql() + " WHERE t.id = ?",
             (ticket_id,),
@@ -187,8 +185,7 @@ async def get_open_refund_ticket_for_order(
     subscription_id: int,
     order_id: int,
 ) -> Optional[Dict[str, Any]]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
         async with db.execute(
             _ticket_select_sql()
             + """ WHERE t.subscription_id = ? AND t.order_id = ?
@@ -203,8 +200,7 @@ async def get_open_refund_ticket_for_order(
 async def get_open_refund_tickets_for_subscription(
     subscription_id: int,
 ) -> List[Dict[str, Any]]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
         async with db.execute(
             _ticket_select_sql()
             + """ WHERE t.subscription_id = ? AND t.category = ? AND t.status = ?
@@ -222,7 +218,7 @@ async def get_open_refund_order_ids_for_subscription(subscription_id: int) -> se
 
 async def get_refund_blocked_order_ids_for_subscription(subscription_id: int) -> set[int]:
     """Заказы с открытым тикетом возврата или уже одобренным возвратом."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute(
             """SELECT DISTINCT order_id FROM tickets
                WHERE subscription_id = ? AND category = ? AND order_id IS NOT NULL
@@ -243,7 +239,7 @@ async def get_refund_blocked_order_ids_for_subscription(subscription_id: int) ->
 
 
 async def has_approved_refund_for_order(subscription_id: int, order_id: int) -> bool:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute(
             """SELECT 1 FROM tickets
                WHERE subscription_id = ? AND order_id = ? AND category = ?
@@ -263,8 +259,7 @@ async def has_approved_refund_for_order(subscription_id: int, order_id: int) -> 
 async def get_open_refund_tickets_by_subscription_for_user(
     tg_id: int,
 ) -> dict[int, list[Dict[str, Any]]]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
         async with db.execute(
             _ticket_select_sql()
             + """ WHERE t.tg_id = ? AND t.category = ? AND t.status = ?
@@ -281,8 +276,7 @@ async def get_open_refund_tickets_by_subscription_for_user(
 
 
 async def get_user_open_tickets(tg_id: int) -> List[Dict[str, Any]]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
         async with db.execute(
             _ticket_select_sql()
             + " WHERE t.tg_id = ? AND t.status = ? ORDER BY t.last_message_at DESC",
@@ -303,8 +297,7 @@ async def get_open_tickets(
         clause += " AND t.category = ?"
         params.append(category)
     params.append(limit)
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
         async with db.execute(
             _ticket_select_sql()
             + clause
@@ -316,7 +309,7 @@ async def get_open_tickets(
 
 
 async def close_ticket(ticket_id: int) -> bool:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         cursor = await db.execute(
             """UPDATE tickets SET status = ?, closed_at = CURRENT_TIMESTAMP
                WHERE id = ? AND status = ?""",
@@ -329,7 +322,7 @@ async def close_ticket(ticket_id: int) -> bool:
 async def close_refund_ticket(ticket_id: int, decision: str) -> bool:
     if decision not in (REFUND_DECISION_APPROVED, REFUND_DECISION_REJECTED):
         raise ValueError(f"invalid refund decision: {decision}")
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         cursor = await db.execute(
             """UPDATE tickets SET status = ?, refund_decision = ?,
                       closed_at = CURRENT_TIMESTAMP
@@ -342,8 +335,7 @@ async def close_refund_ticket(ticket_id: int, decision: str) -> bool:
 
 async def get_refund_ticket_for_order(order_id: int) -> Optional[Dict[str, Any]]:
     """Последний refund-тикет по заказу (для уведомления при chargeback)."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
         async with db.execute(
             _ticket_select_sql()
             + """ WHERE t.order_id = ? AND t.category = ?
@@ -355,7 +347,7 @@ async def get_refund_ticket_for_order(order_id: int) -> Optional[Dict[str, Any]]
 
 
 async def cancel_tickets_for_subscription(subscription_id: int) -> None:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute(
             """UPDATE tickets SET status = ?, closed_at = CURRENT_TIMESTAMP
                WHERE subscription_id = ? AND category = ? AND status = ?""",
@@ -365,7 +357,7 @@ async def cancel_tickets_for_subscription(subscription_id: int) -> None:
 
 
 async def touch_ticket_activity(ticket_id: int) -> None:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute(
             "UPDATE tickets SET last_message_at = CURRENT_TIMESTAMP WHERE id = ?",
             (ticket_id,),
@@ -374,7 +366,7 @@ async def touch_ticket_activity(ticket_id: int) -> None:
 
 
 async def mark_ticket_read_by_admin(ticket_id: int) -> None:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute(
             "UPDATE tickets SET admin_last_read_at = CURRENT_TIMESTAMP WHERE id = ?",
             (ticket_id,),
@@ -383,7 +375,7 @@ async def mark_ticket_read_by_admin(ticket_id: int) -> None:
 
 
 async def count_unread_for_admin(ticket_id: int) -> int:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT admin_last_read_at FROM tickets WHERE id = ?",
             (ticket_id,),
@@ -416,7 +408,7 @@ async def add_ticket_message(
     body: str | None = None,
     file_id: str | None = None,
 ) -> int:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         cursor = await db.execute(
             """INSERT INTO ticket_messages
                (ticket_id, sender_tg_id, is_admin, content_type, body, file_id)
@@ -432,8 +424,7 @@ async def add_ticket_message(
 
 
 async def get_ticket_messages(ticket_id: int, limit: int = 50) -> List[Dict[str, Any]]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
         async with db.execute(
             """SELECT id, ticket_id, sender_tg_id, is_admin, content_type, body, file_id, created_at
                FROM ticket_messages WHERE ticket_id = ? ORDER BY id ASC LIMIT ?""",
@@ -444,20 +435,20 @@ async def get_ticket_messages(ticket_id: int, limit: int = 50) -> List[Dict[str,
 
 
 async def count_tickets() -> int:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute("SELECT COUNT(*) FROM tickets") as cur:
             return int((await cur.fetchone())[0])
 
 
 async def count_ticket_messages() -> int:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute("SELECT COUNT(*) FROM ticket_messages") as cur:
             return int((await cur.fetchone())[0])
 
 
 async def reset_all_tickets() -> dict[str, int]:
     """Удалить все тикеты и переписку (для отладки)."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute("SELECT COUNT(*) FROM tickets") as cur:
             tickets_count = int((await cur.fetchone())[0])
         async with db.execute("SELECT COUNT(*) FROM ticket_messages") as cur:
@@ -476,7 +467,7 @@ async def reset_all_tickets() -> dict[str, int]:
 
 
 async def get_ticket_stats() -> Dict[str, int]:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT COUNT(*) FROM tickets WHERE status = ?", (STATUS_OPEN,),
         ) as cur:

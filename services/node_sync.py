@@ -36,8 +36,19 @@ _secondary_worker_tasks: list[asyncio.Task[Any]] = []
 def _get_secondary_sync_queue() -> asyncio.Queue[int]:
     global _secondary_sync_queue
     if _secondary_sync_queue is None:
-        _secondary_sync_queue = asyncio.Queue()
+        maxsize = max(1, int(settings.XUI_SECONDARY_SYNC_QUEUE_SIZE))
+        _secondary_sync_queue = asyncio.Queue(maxsize=maxsize)
     return _secondary_sync_queue
+
+
+def _client_state_from_info(info: tuple) -> dict[str, Any]:
+    client, _, _ = info
+    return {
+        "sub_id": client.sub_id or "",
+        "expiry_ms": int(client.expiry_time or 0),
+        "total_gb": int(client.total_gb or 0),
+        "enable": bool(client.enable),
+    }
 
 
 async def _get_primary_client_state(email: str) -> dict[str, Any] | None:
@@ -46,13 +57,20 @@ async def _get_primary_client_state(email: str) -> dict[str, Any] | None:
     info = await _unified_get_client_info(api, email)
     if info is None:
         return None
-    client, _, _ = info
-    return {
-        "sub_id": client.sub_id or "",
-        "expiry_ms": int(client.expiry_time or 0),
-        "total_gb": int(client.total_gb or 0),
-        "enable": bool(client.enable),
-    }
+    return _client_state_from_info(info)
+
+
+async def _batch_primary_client_states(emails: set[str]) -> dict[str, dict[str, Any]]:
+    """Один проход по основной: состояния для набора email (без N×повторов в phase2)."""
+    if not emails:
+        return {}
+    api = await get_api()
+    result: dict[str, dict[str, Any]] = {}
+    for email in emails:
+        info = await _unified_get_client_info(api, email)
+        if info is not None:
+            result[str(email).lower()] = _client_state_from_info(info)
+    return result
 
 
 async def _purge_orphan_bot_clients_on_primary(db_emails: set[str]) -> int:
@@ -206,6 +224,8 @@ async def _sync_secondaries_from_primary(
     subs_on_primary = [
         s for s in subs if str(s["client_email"]).lower() in primary_emails
     ]
+    unique_emails = {str(s["client_email"]).lower() for s in subs_on_primary}
+    primary_states = await _batch_primary_client_states(unique_emails)
 
     async def _one_node(node: dict) -> None:
         node_id = node["id"]
@@ -239,7 +259,7 @@ async def _sync_secondaries_from_primary(
 
             for sub in subs_on_primary:
                 email = sub["client_email"]
-                primary_state = await _get_primary_client_state(email)
+                primary_state = primary_states.get(str(email).lower())
                 if not primary_state:
                     continue
                 async with sem:
@@ -307,8 +327,31 @@ async def run_full_nodes_sync() -> dict[str, Any]:
     return {"phase1": phase1, "phase2": phase2}
 
 
+def _sync_skipped_stats() -> dict[str, int]:
+    return {
+        "skipped": True,
+        "subs": 0,
+        "nodes": 0,
+        "ok": 0,
+        "failed": 0,
+        "primary_created": 0,
+        "primary_updated": 0,
+        "primary_failed": 0,
+        "primary_orphans_purged": 0,
+        "secondary_failed": 0,
+        "purged": 0,
+        "secondary_missing": 0,
+    }
+
+
 async def sync_all_secondary_nodes() -> dict[str, int]:
-    """Scheduler и админка: полный цикл синхронизации."""
+    """Scheduler и админка: полный цикл синхронизации (не delete/provision/extend)."""
+    from db import bot_settings as bot_settings_db
+
+    if await bot_settings_db.is_sync_disabled():
+        logger.info("Full nodes sync skipped — disabled in debug")
+        return _sync_skipped_stats()
+
     result = await run_full_nodes_sync()
     p1, p2 = result["phase1"], result["phase2"]
     return {
@@ -371,6 +414,9 @@ async def _secondary_sync_worker() -> None:
         except asyncio.CancelledError:
             break
         try:
+            from db import bot_settings as bot_settings_db
+            if await bot_settings_db.is_sync_disabled():
+                continue
             await sync_subscription_to_secondaries(sub_id)
         except asyncio.CancelledError:
             break
@@ -382,6 +428,11 @@ async def _secondary_sync_worker() -> None:
 
 async def start_secondary_sync_workers() -> None:
     global _secondary_workers_started, _secondary_worker_tasks
+    from db import bot_settings as bot_settings_db
+
+    if await bot_settings_db.is_sync_disabled():
+        logger.info("Secondary sync workers not started — sync disabled in debug")
+        return
     if _secondary_workers_started:
         return
     _secondary_shutdown.clear()
@@ -408,11 +459,22 @@ async def stop_secondary_sync_workers() -> None:
     logger.info("Secondary sync workers stopped")
 
 
+async def _enqueue_secondary_sync(sub_id: int) -> None:
+    from db import bot_settings as bot_settings_db
+
+    if await bot_settings_db.is_sync_disabled():
+        return
+    try:
+        _get_secondary_sync_queue().put_nowait(sub_id)
+    except asyncio.QueueFull:
+        logger.warning("Secondary sync queue full — dropping sub #{}", sub_id)
+
+
 def schedule_secondary_sync(sub_id: int) -> None:
     """Очередь после оплаты/пробного — не блокирует бота и не ломает выдачу ключа."""
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(_get_secondary_sync_queue().put(sub_id))
+        loop.create_task(_enqueue_secondary_sync(sub_id))
     except Exception as e:
         logger.error("schedule_secondary_sync failed for #{}: {}", sub_id, e)
 

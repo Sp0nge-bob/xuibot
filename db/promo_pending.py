@@ -2,15 +2,14 @@
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
-import aiosqlite
 
-from db.database import DB_PATH
+from db.connection import get_db
 
 PENDING_DISCOUNT_DAYS = 7
 
 
 async def init_promo_pending_tables() -> None:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS promo_pending_discounts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,8 +35,7 @@ async def set_pending_discount(
     days: int = PENDING_DISCOUNT_DAYS,
 ) -> Dict[str, Any]:
     expires_at = (datetime.utcnow() + timedelta(days=days)).isoformat()
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
         await db.execute(
             "DELETE FROM promo_pending_discounts WHERE tg_id = ? AND consumed_order_id IS NULL",
             (tg_id,),
@@ -61,8 +59,7 @@ async def set_pending_discount(
 
 async def get_active_pending_discount(tg_id: int) -> Optional[Dict[str, Any]]:
     now = datetime.utcnow().isoformat()
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
         async with db.execute(
             """SELECT * FROM promo_pending_discounts
                WHERE tg_id = ? AND consumed_order_id IS NULL AND expires_at > ?
@@ -74,14 +71,14 @@ async def get_active_pending_discount(tg_id: int) -> Optional[Dict[str, Any]]:
 
 
 async def count_pending_discounts() -> int:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute("SELECT COUNT(*) FROM promo_pending_discounts") as cur:
             row = await cur.fetchone()
             return int(row[0]) if row else 0
 
 
 async def clear_all_pending_discounts() -> int:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         cursor = await db.execute("DELETE FROM promo_pending_discounts")
         await db.commit()
         return cursor.rowcount
@@ -93,7 +90,7 @@ async def consume_pending_discount(
     promo_code: str,
 ) -> bool:
     code = promo_code.strip().upper()
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         cursor = await db.execute(
             """UPDATE promo_pending_discounts
                SET consumed_order_id = ?

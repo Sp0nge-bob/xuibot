@@ -4,10 +4,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
-import aiosqlite
 
 from config.settings import settings
-from db.database import DB_PATH
+from db.connection import get_db
 
 _INIT_DONE = False
 _INIT_IN_PROGRESS = False
@@ -29,7 +28,7 @@ def normalize_node_host(host: str) -> str:
 
 
 async def _ensure_single_primary() -> None:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT id FROM xui_nodes ORDER BY is_primary DESC, id ASC LIMIT 1"
         ) as cur:
@@ -44,8 +43,7 @@ async def _ensure_single_primary() -> None:
 
 async def dedupe_nodes() -> dict[str, int]:
     """Одна запись на host, одна primary. Удаляет дубликаты и health_checks."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
         async with db.execute("SELECT * FROM xui_nodes ORDER BY id") as cur:
             rows = [dict(r) for r in await cur.fetchall()]
 
@@ -75,7 +73,7 @@ async def dedupe_nodes() -> dict[str, int]:
         remove_ids.extend(r["id"] for r in group[1:])
 
     if remove_ids:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             for rid in remove_ids:
                 await db.execute(
                     "DELETE FROM node_health_checks WHERE node_id = ?", (rid,),
@@ -109,7 +107,7 @@ async def init_xui_nodes() -> None:
 
 
 async def _init_xui_nodes_impl() -> None:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS xui_nodes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -167,7 +165,7 @@ async def _ensure_init() -> None:
 
 
 async def count_nodes() -> int:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute("SELECT COUNT(*) FROM xui_nodes") as cur:
             return (await cur.fetchone())[0]
 
@@ -198,8 +196,7 @@ async def list_nodes(*, enabled_only: bool = False) -> list[dict[str, Any]]:
     if enabled_only:
         sql += " WHERE is_enabled = 1"
     sql += " ORDER BY is_primary DESC, sort_order ASC, id ASC"
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
         async with db.execute(sql) as cur:
             return [dict(r) for r in await cur.fetchall()]
 
@@ -217,8 +214,7 @@ async def get_node_by_host(host: str) -> Optional[dict[str, Any]]:
 
 async def get_node(node_id: int) -> Optional[dict[str, Any]]:
     await _ensure_init()
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
         async with db.execute("SELECT * FROM xui_nodes WHERE id = ?", (node_id,)) as cur:
             row = await cur.fetchone()
             return dict(row) if row else None
@@ -226,8 +222,7 @@ async def get_node(node_id: int) -> Optional[dict[str, Any]]:
 
 async def get_primary_node() -> Optional[dict[str, Any]]:
     await _ensure_init()
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
         async with db.execute(
             "SELECT * FROM xui_nodes WHERE is_primary = 1 ORDER BY id LIMIT 1"
         ) as cur:
@@ -282,7 +277,7 @@ async def create_node(
         raise ValueError("Для основной ноды укажите inbound IDs подписки")
     if await get_node_by_host(host):
         raise ValueError("Нода с таким host уже зарегистрирована")
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         if is_primary:
             await db.execute("UPDATE xui_nodes SET is_primary = 0")
         cursor = await db.execute(
@@ -330,7 +325,7 @@ async def update_node(node_id: int, **fields: Any) -> bool:
     if not parts:
         return False
     values.append(node_id)
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute(f"UPDATE xui_nodes SET {', '.join(parts)} WHERE id = ?", values)
         await db.commit()
         return True
@@ -362,7 +357,7 @@ async def set_primary_node(node_id: int) -> tuple[bool, str]:
         return False, "Нода не найдена"
     if not parse_inbound_ids(node.get("inbound_ids") or ""):
         return False, "Сначала укажите inbound IDs подписки на этой ноде (редактирование)"
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute("UPDATE xui_nodes SET is_primary = 0")
         cursor = await db.execute(
             "UPDATE xui_nodes SET is_primary = 1 WHERE id = ?", (node_id,),
@@ -381,14 +376,14 @@ async def delete_node(node_id: int) -> tuple[bool, str]:
     if not node:
         return False, "Нода не найдена"
     if node.get("is_primary"):
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute(
                 "SELECT COUNT(*) FROM xui_nodes WHERE is_primary = 0"
             ) as cur:
                 others = (await cur.fetchone())[0]
         if others == 0:
             return False, "Нельзя удалить единственную основную ноду"
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute("DELETE FROM node_health_checks WHERE node_id = ?", (node_id,))
         await db.execute("DELETE FROM xui_nodes WHERE id = ?", (node_id,))
         await db.commit()
@@ -420,7 +415,7 @@ async def record_health_check(
         last_health_error=error if not ok else None,
         consecutive_failures=failures,
     )
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute(
             """INSERT INTO node_health_checks (node_id, ok, latency_ms, error)
                VALUES (?, ?, ?, ?)""",
@@ -432,7 +427,7 @@ async def record_health_check(
 
 async def _prune_health_checks(node_id: int, keep_days: int = 7) -> None:
     cutoff = (datetime.utcnow() - timedelta(days=keep_days)).isoformat()
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute(
             "DELETE FROM node_health_checks WHERE node_id = ? AND checked_at < ?",
             (node_id, cutoff),
@@ -443,7 +438,7 @@ async def _prune_health_checks(node_id: int, keep_days: int = 7) -> None:
 async def get_uptime_24h(node_id: int) -> Optional[float]:
     """Доля успешных проверок за 24ч (0.0–1.0) или None если нет данных."""
     since = (datetime.utcnow() - timedelta(hours=24)).isoformat()
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute(
             """SELECT COUNT(*), SUM(ok) FROM node_health_checks
                WHERE node_id = ? AND checked_at >= ?""",

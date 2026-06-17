@@ -21,7 +21,7 @@ from loguru import logger
 
 from config.settings import settings
 from db.bot_settings import get_subscription_inbound_ids
-from services.panel_cache import panel_cache
+from services.panel_cache import get_panel_cache, invalidate_panel_cache, panel_cache
 from services.panel_inbounds import fetch_inbound_by_id, fetch_inbounds_list
 
 _apis: dict[int, AsyncApi] = {}
@@ -500,8 +500,9 @@ async def _ensure_email_absent_on_panel(api: AsyncApi, email: str) -> list[int]:
 async def _locate_client_inbounds(
     api: AsyncApi, email: str, *, force: bool = False,
 ) -> dict[int, Client]:
-    await panel_cache.refresh(api, force=force)
-    return panel_cache.locate(email)
+    cache = get_panel_cache(api)
+    await cache.refresh(api, force=force)
+    return cache.locate(email)
 
 
 async def _missing_inbound_ids(
@@ -1074,11 +1075,18 @@ async def _list_bot_group_emails_on_panel(api: AsyncApi) -> set[str]:
     return emails
 
 
-async def list_bot_client_emails_on_panel(api: AsyncApi) -> set[str]:
+async def list_bot_client_emails_on_panel(api: AsyncApi, *, force: bool = False) -> set[str]:
     """Все tg/tgfree: settings ∪ groups/emails ∪ clients/list (fallback)."""
+    from services.panel_cache import get_cached_bot_emails, store_cached_bot_emails
+
+    if not force:
+        cached = get_cached_bot_emails(api)
+        if cached is not None:
+            return cached
+
     emails: set[str] = set()
-    panel_cache.invalidate()
-    inbounds = await panel_cache.refresh(api, force=True)
+    cache = get_panel_cache(api)
+    inbounds = await cache.refresh(api, force=force)
     for inbound in inbounds:
         for client in inbound.settings.clients or []:
             email = (client.email or "").strip()
@@ -1087,6 +1095,7 @@ async def list_bot_client_emails_on_panel(api: AsyncApi) -> set[str]:
     emails.update(await _list_bot_group_emails_on_panel(api))
     if not emails:
         emails.update(await _list_unified_clients_emails_on_panel(api))
+    store_cached_bot_emails(api, emails)
     return emails
 
 

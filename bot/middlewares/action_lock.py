@@ -49,12 +49,27 @@ class ActionLockMiddleware(BaseMiddleware):
     async def _reject_busy_message(self, message: Message) -> None:
         await message.answer("⏳ Подождите, предыдущее действие ещё выполняется")
 
+    def _trim_debounce_cache(self) -> None:
+        max_entries = int(settings.BOT_ACTION_DEBOUNCE_MAX_ENTRIES)
+        if len(self._last_callback) <= max_entries:
+            return
+        now = time.monotonic()
+        stale = [
+            uid for uid, (_, ts) in self._last_callback.items()
+            if now - ts > self._debounce_sec * 10
+        ]
+        for uid in stale:
+            self._last_callback.pop(uid, None)
+        while len(self._last_callback) > max_entries:
+            self._last_callback.pop(next(iter(self._last_callback)))
+
     def _should_debounce_callback(self, user_id: int, data: str) -> bool:
         now = time.monotonic()
         prev = self._last_callback.get(user_id)
         if prev and prev[0] == data and now - prev[1] < self._debounce_sec:
             return True
         self._last_callback[user_id] = (data, now)
+        self._trim_debounce_cache()
         return False
 
     async def __call__(

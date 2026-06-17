@@ -1,21 +1,11 @@
-import aiosqlite
-import os
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from loguru import logger
 
-DB_PATH = os.getenv("DB_PATH", "data/bot.db")
-
-os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
+from db.connection import DB_PATH, _apply_pragmas, get_db, init_connection
 
 
-async def _apply_pragmas(db: aiosqlite.Connection) -> None:
-    await db.execute("PRAGMA journal_mode=WAL")
-    await db.execute("PRAGMA busy_timeout=5000")
-    await db.execute("PRAGMA foreign_keys=ON")
-
-
-async def _create_indexes(db: aiosqlite.Connection) -> None:
+async def _create_indexes(db) -> None:
     await db.execute(
         "CREATE INDEX IF NOT EXISTS idx_subscriptions_tg_active "
         "ON subscriptions(tg_id, is_active)"
@@ -27,10 +17,19 @@ async def _create_indexes(db: aiosqlite.Connection) -> None:
     await db.execute(
         "CREATE INDEX IF NOT EXISTS idx_orders_tg_status ON orders(tg_id, status)"
     )
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_orders_status_created "
+        "ON orders(status, created_at)"
+    )
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_orders_platega_tx "
+        "ON orders(platega_tx_id)"
+    )
 
 
 async def init_db():
-    async with aiosqlite.connect(DB_PATH) as db:
+    await init_connection()
+    async with get_db() as db:
         await _apply_pragmas(db)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -125,8 +124,8 @@ async def init_db():
     logger.info("Database initialized at {}", DB_PATH)
 
 async def get_or_create_user(tg_id: int, username: Optional[str] = None, first_name: Optional[str] = None):
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
+
         async with db.execute("SELECT * FROM users WHERE tg_id = ?", (tg_id,)) as cur:
             row = await cur.fetchone()
         if row:
@@ -152,7 +151,7 @@ async def create_order(
     discount_amount: int = 0,
     payment_redirect: Optional[str] = None,
 ) -> int:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         cursor = await db.execute(
             """INSERT INTO orders
                (tg_id, plan_id, plan_name, amount, platega_tx_id, payment_method, order_type,
@@ -165,7 +164,7 @@ async def create_order(
         return cursor.lastrowid
 
 async def update_order_status(platega_tx_id: str, status: str):
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await _apply_pragmas(db)
         await db.execute(
             "UPDATE orders SET status = ?, paid_at = ? WHERE platega_tx_id = ?",
@@ -176,7 +175,7 @@ async def update_order_status(platega_tx_id: str, status: str):
 
 async def mark_order_paid_if_pending(platega_tx_id: str) -> bool:
     """Атомарно pending → paid. False если уже paid или не pending."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await _apply_pragmas(db)
         cur = await db.execute(
             """UPDATE orders SET status = 'paid', paid_at = ?
@@ -187,23 +186,23 @@ async def mark_order_paid_if_pending(platega_tx_id: str) -> bool:
         return cur.rowcount > 0
 
 async def get_order_by_platega_tx(tx_id: str) -> Optional[Dict[str, Any]]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
+
         async with db.execute("SELECT * FROM orders WHERE platega_tx_id = ?", (tx_id,)) as cur:
             row = await cur.fetchone()
             return dict(row) if row else None
 
 
 async def get_order_by_id(order_id: int) -> Optional[Dict[str, Any]]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
+
         async with db.execute("SELECT * FROM orders WHERE id = ?", (order_id,)) as cur:
             row = await cur.fetchone()
             return dict(row) if row else None
 
 
 async def count_users() -> int:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await _apply_pragmas(db)
         async with db.execute("SELECT COUNT(*) FROM users") as cur:
             return int((await cur.fetchone())[0])
@@ -211,7 +210,7 @@ async def count_users() -> int:
 
 async def reset_all_users() -> dict[str, int]:
     """Удалить все записи из users (для отладки). Подписки и заказы не трогаются."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await _apply_pragmas(db)
         async with db.execute("SELECT COUNT(*) FROM users") as cur:
             users_count = int((await cur.fetchone())[0])
@@ -225,7 +224,7 @@ async def reset_all_users() -> dict[str, int]:
 
 
 async def count_orders() -> int:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await _apply_pragmas(db)
         async with db.execute("SELECT COUNT(*) FROM orders") as cur:
             return int((await cur.fetchone())[0])
@@ -233,7 +232,7 @@ async def count_orders() -> int:
 
 async def reset_all_orders() -> dict[str, int]:
     """Удалить все заказы и отвязать ссылки (подписки, тикеты, промо)."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await _apply_pragmas(db)
         async with db.execute("SELECT COUNT(*) FROM orders") as cur:
             orders_count = int((await cur.fetchone())[0])
@@ -263,8 +262,8 @@ async def reset_all_orders() -> dict[str, int]:
 
 async def get_paid_orders_for_user(tg_id: int, *, limit: int = 50) -> List[Dict[str, Any]]:
     """Оплаченные заказы пользователя (новые и продления), новые первыми."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
+
         async with db.execute(
             """SELECT * FROM orders
                WHERE tg_id = ? AND status = 'paid'
@@ -287,7 +286,7 @@ async def create_subscription(
 ) -> int:
     now = datetime.utcnow()
     end = now + timedelta(days=days)
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         cursor = await db.execute(
             """INSERT INTO subscriptions 
                (tg_id, order_id, inbound_id, client_email, client_uuid, sub_id, 
@@ -300,9 +299,9 @@ async def create_subscription(
         return cursor.lastrowid
 
 async def get_primary_subscription(tg_id: int) -> Optional[Dict[str, Any]]:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await _apply_pragmas(db)
-        db.row_factory = aiosqlite.Row
+
         async with db.execute(
             """SELECT * FROM subscriptions
                WHERE tg_id = ? AND is_active = 1
@@ -316,9 +315,9 @@ async def get_primary_subscription(tg_id: int) -> Optional[Dict[str, Any]]:
 
 
 async def get_primary_paid_subscription(tg_id: int) -> Optional[Dict[str, Any]]:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await _apply_pragmas(db)
-        db.row_factory = aiosqlite.Row
+
         async with db.execute(
             """SELECT * FROM subscriptions
                WHERE tg_id = ? AND is_active = 1
@@ -332,16 +331,16 @@ async def get_primary_paid_subscription(tg_id: int) -> Optional[Dict[str, Any]]:
 
 
 async def get_subscription_by_id(sub_id: int) -> Optional[Dict[str, Any]]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
+
         async with db.execute("SELECT * FROM subscriptions WHERE id = ?", (sub_id,)) as cur:
             row = await cur.fetchone()
             return dict(row) if row else None
 
 
 async def get_subscription_by_order_id(order_id: int) -> Optional[Dict[str, Any]]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
+
         async with db.execute(
             "SELECT * FROM subscriptions WHERE order_id = ? LIMIT 1",
             (order_id,),
@@ -358,7 +357,7 @@ async def extend_subscription_record(subscription_id: int, additional_days: int)
     now = datetime.utcnow()
     base = current_end if current_end > now else now
     new_end = base + timedelta(days=additional_days)
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute(
             "UPDATE subscriptions SET end_date = ?, is_active = 1 WHERE id = ?",
             (new_end.isoformat(), subscription_id),
@@ -375,7 +374,7 @@ async def shrink_subscription_record(subscription_id: int, days: int) -> tuple[s
     current_end = datetime.fromisoformat(str(sub["end_date"]).replace("Z", ""))
     new_end = current_end - timedelta(days=days)
     still_active = new_end > datetime.utcnow()
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute(
             "UPDATE subscriptions SET end_date = ?, is_active = ? WHERE id = ?",
             (new_end.isoformat(), int(still_active), subscription_id),
@@ -384,9 +383,21 @@ async def shrink_subscription_record(subscription_id: int, days: int) -> tuple[s
     return new_end.isoformat(), still_active
 
 
+async def expire_stale_pending_orders(hours: int = 48) -> int:
+    """Пометить старые pending-заказы как failed (разгрузка БД и UI)."""
+    cutoff = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+    async with get_db() as db:
+        cur = await db.execute(
+            "UPDATE orders SET status = 'failed' WHERE status = 'pending' AND created_at < ?",
+            (cutoff,),
+        )
+        await db.commit()
+        return cur.rowcount
+
+
 async def get_pending_order(tg_id: int) -> Optional[Dict[str, Any]]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
+
         async with db.execute(
             """SELECT * FROM orders
                WHERE tg_id = ? AND status = 'pending'
@@ -398,8 +409,8 @@ async def get_pending_order(tg_id: int) -> Optional[Dict[str, Any]]:
 
 
 async def get_active_subscriptions(tg_id: int) -> List[Dict[str, Any]]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
+
         async with db.execute(
             """SELECT * FROM subscriptions
                WHERE tg_id = ? AND is_active = 1
@@ -417,9 +428,9 @@ _SYNC_SUB_COLS = (
 
 
 async def get_all_active_subscriptions() -> List[Dict[str, Any]]:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await _apply_pragmas(db)
-        db.row_factory = aiosqlite.Row
+
         async with db.execute(
             f"SELECT {_SYNC_SUB_COLS} FROM subscriptions "
             "WHERE is_active = 1 ORDER BY end_date DESC"
@@ -429,7 +440,7 @@ async def get_all_active_subscriptions() -> List[Dict[str, Any]]:
 
 
 async def count_active_trial_subscriptions() -> int:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await _apply_pragmas(db)
         async with db.execute(
             """SELECT COUNT(*) FROM subscriptions
@@ -441,8 +452,8 @@ async def count_active_trial_subscriptions() -> int:
 
 async def get_expired_subscriptions() -> List[Dict[str, Any]]:
     now = datetime.utcnow().isoformat()
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
+
         async with db.execute(
             "SELECT * FROM subscriptions WHERE is_active = 1 AND end_date < ?",
             (now,)
@@ -451,13 +462,13 @@ async def get_expired_subscriptions() -> List[Dict[str, Any]]:
             return [dict(r) for r in rows]
 
 async def deactivate_subscription(sub_id: int):
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute("UPDATE subscriptions SET is_active = 0 WHERE id = ?", (sub_id,))
         await db.commit()
 
 
 async def get_admin_stats() -> Dict[str, int]:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute("SELECT COUNT(*) FROM users") as cur:
             users = (await cur.fetchone())[0]
         async with db.execute(
@@ -500,8 +511,8 @@ async def search_connected_users(query: str, limit: int = 25) -> List[Dict[str, 
         JOIN users u ON u.tg_id = s.tg_id
         WHERE s.is_active = 1
     """
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
+
         if q.isdigit():
             from config.trial import trial_client_email
             tg_id = int(q)
@@ -536,7 +547,7 @@ def _connected_users_trial_clause(trial_only: Optional[bool]) -> str:
 
 async def count_connected_users(*, trial_only: Optional[bool] = None) -> int:
     clause = _connected_users_trial_clause(trial_only)
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute(
             f"""SELECT COUNT(*) FROM subscriptions s
                 WHERE s.is_active = 1{clause}""",
@@ -550,8 +561,8 @@ async def get_connected_users(
     trial_only: Optional[bool] = None,
 ) -> List[Dict[str, Any]]:
     clause = _connected_users_trial_clause(trial_only)
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
+
         async with db.execute(
             f"""SELECT s.id AS subscription_id, u.tg_id, u.username, u.first_name,
                       s.end_date, s.client_email, s.sub_id
@@ -577,7 +588,7 @@ async def update_subscription_from_panel(
     is_active: bool = True,
     traffic_limit_gb: Optional[int] = None,
 ):
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         if sub_id and traffic_limit_gb is not None:
             await db.execute(
                 """UPDATE subscriptions

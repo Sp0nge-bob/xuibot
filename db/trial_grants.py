@@ -2,17 +2,16 @@
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-import aiosqlite
 
 from config.trial import TRIAL_COOLDOWN_DAYS, is_trial_email
-from db.database import DB_PATH
+from db.connection import get_db
 
 _INIT_DONE = False
 
 
 async def init_trial_tables() -> None:
     global _INIT_DONE
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS trial_grants (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,8 +35,7 @@ async def _ensure_init() -> None:
 
 async def get_last_trial_grant(tg_id: int) -> Optional[Dict[str, Any]]:
     await _ensure_init()
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
         async with db.execute(
             """SELECT * FROM trial_grants
                WHERE tg_id = ?
@@ -58,7 +56,7 @@ async def has_recent_trial_grant(tg_id: int, *, days: int = TRIAL_COOLDOWN_DAYS)
 
 async def record_trial_grant(tg_id: int, subscription_id: int) -> int:
     await _ensure_init()
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         cursor = await db.execute(
             "INSERT INTO trial_grants (tg_id, subscription_id) VALUES (?, ?)",
             (tg_id, subscription_id),
@@ -92,7 +90,7 @@ async def can_claim_trial(tg_id: int) -> tuple[bool, str]:
 async def reset_trial_eligibility(tg_id: int) -> int:
     """Удаляет записи о выдаче пробного — пользователь сможет взять снова."""
     await _ensure_init()
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         cursor = await db.execute("DELETE FROM trial_grants WHERE tg_id = ?", (tg_id,))
         await db.commit()
         return cursor.rowcount
@@ -101,7 +99,7 @@ async def reset_trial_eligibility(tg_id: int) -> int:
 async def reset_all_trial_grants() -> int:
     """Полный сброс лимитов пробного периода для всех пользователей."""
     await _ensure_init()
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         cursor = await db.execute("DELETE FROM trial_grants")
         await db.commit()
         return cursor.rowcount
@@ -109,7 +107,7 @@ async def reset_all_trial_grants() -> int:
 
 async def count_trial_grants() -> int:
     await _ensure_init()
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute("SELECT COUNT(*) FROM trial_grants") as cur:
             row = await cur.fetchone()
             return int(row[0] if row else 0)
@@ -117,8 +115,7 @@ async def count_trial_grants() -> int:
 
 async def list_recent_trial_grants(limit: int = 15) -> List[Dict[str, Any]]:
     await _ensure_init()
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
         async with db.execute(
             """SELECT g.id, g.tg_id, g.granted_at, g.subscription_id,
                       u.username, u.first_name
