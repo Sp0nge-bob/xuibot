@@ -7,6 +7,7 @@ from config.settings import settings
 from db.database import DB_PATH
 
 SETTING_SUBSCRIPTION_INBOUNDS = "subscription_inbounds"
+SETTING_START_ANNOUNCEMENT = "start_announcement"
 
 
 async def init_bot_settings():
@@ -81,3 +82,19 @@ async def get_subscription_inbounds_display() -> str:
 
 async def get_subscription_inbound_count() -> int:
     return len(await get_subscription_inbound_ids())
+
+
+async def get_start_announcement() -> Optional[str]:
+    """Произвольный текст новостей/акций для /start (не затрагивает системные блоки меню)."""
+    raw = await get_setting(SETTING_START_ANNOUNCEMENT)
+    if raw and raw.strip():
+        return raw.strip()
+    return None
+
+
+async def set_start_announcement(text: str) -> None:
+    await set_setting(SETTING_START_ANNOUNCEMENT, text.strip())
+
+
+async def clear_start_announcement() -> None:
+    await set_setting(SETTING_START_ANNOUNCEMENT, "")

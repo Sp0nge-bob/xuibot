@@ -9,7 +9,10 @@ from config.plans import get_plan
 from config.settings import settings
 from config.trial import is_trial_email
 from db import database as db
+from db import promo_codes as promo_db
+from db import promo_pending as pending_db
 from db import trial_grants as trial_db
+from db import bot_settings as settings_db
 from services import platega_simulator as platega_sim
 from services.payment_pending import (
     expires_in_from_order_created,
@@ -50,10 +53,9 @@ from .keyboards import (
     payment_kb,
     subscription_manage_kb,
     subscriptions_manage_kb,
-    refund_confirm_kb,
-    refund_chat_kb,
     no_subscription_kb,
     back_to_main_kb,
+    payment_failed_kb,
     trial_confirm_kb,
 )
 from .messages import (
@@ -66,17 +68,20 @@ from .messages import (
     subscription_manage_text,
     subscriptions_manage_text,
     no_subscription_text,
-    refund_confirm_text,
-    refund_request_sent_text,
-    refund_admin_text,
     pending_payment_text,
     promo_enter_text,
     trial_offer_text,
 )
 from .states import UserStates
-from .refund_chat import format_refund_chat_history, store_and_deliver_refund_message
 
 router = Router()
+
+
+def _payment_failure_kb(order: dict, result) -> "InlineKeyboardMarkup":
+    from aiogram.types import InlineKeyboardMarkup
+    if result.amount_mismatch or order.get("status") == "failed":
+        return payment_failed_kb(order["id"])
+    return back_to_main_kb()
 
 
 async def _checkout_quote(
@@ -106,7 +111,23 @@ async def _show_main_menu(target: Message | CallbackQuery, *, edit: bool = False
     await db.get_or_create_user(user.id, user.username, user.first_name)
     subs = await get_active_subscriptions_for_ui(user.id)
     trial_available = await get_trial_button_visible(user.id)
-    text = main_menu_text(user.first_name, user.username, subs)
+    pending_promo = None
+    pending_expires = None
+    pending = await pending_db.get_active_pending_discount(user.id)
+    if pending:
+        promo = await promo_db.get_promo_by_id(pending["promo_id"])
+        if promo:
+            pending_promo = promo
+            pending_expires = pending["expires_at"]
+    announcement = await settings_db.get_start_announcement()
+    text = main_menu_text(
+        user.first_name,
+        user.username,
+        subs,
+        announcement=announcement,
+        pending_discount_promo=pending_promo,
+        pending_discount_expires_at=pending_expires,
+    )
     kb = main_menu_kb(trial_available=trial_available)
 
     if isinstance(target, CallbackQuery):
@@ -515,7 +536,8 @@ async def _apply_test_scenario(
             notify=True,
         )
         text = chargeback_result.user_message or test_scenario_result_text(scenario, tx_id)
-        await send_or_edit(cb, text, back_to_main_kb())
+        failed_order = await db.get_order_by_platega_tx(tx_id) or order
+        await send_or_edit(cb, text, _payment_failure_kb(failed_order, chargeback_result))
         return
 
     callback_body = platega_sim.build_callback_payload(tx_id, scenario)
@@ -612,7 +634,10 @@ async def _respond_payment_flow(cb: CallbackQuery, order: dict, tx_id: str, flow
         await cb.message.answer("Оплата уже обработана!", reply_markup=back_to_main_kb())
         return
     if result.amount_mismatch and result.user_message:
-        await cb.message.answer(result.user_message, reply_markup=back_to_main_kb())
+        await cb.message.answer(
+            result.user_message,
+            reply_markup=_payment_failure_kb(order, result),
+        )
         return
     if result.photo and result.user_message:
         await deliver_fulfillment(
@@ -635,7 +660,11 @@ async def _respond_payment_flow(cb: CallbackQuery, order: dict, tx_id: str, flow
             await send_or_edit(cb, pending_text, pending_kb)
             return
     if result.user_message:
-        await cb.message.answer(result.user_message, reply_markup=back_to_main_kb())
+        fresh_order = await db.get_order_by_platega_tx(tx_id) or order
+        await cb.message.answer(
+            result.user_message,
+            reply_markup=_payment_failure_kb(fresh_order, result),
+        )
         return
     await cb.message.answer("Не удалось обработать статус. Попробуйте позже.")
 
@@ -750,47 +779,9 @@ async def cb_test_sim_mismatch(cb: CallbackQuery):
     await _process_pending_test_outcome(cb, tx_id, PendingTestOutcome.WEBHOOK_MISMATCH)
 
 
-async def _pending_refund_ids(tg_id: int) -> dict[int, int]:
-    row = await db.get_pending_refund_for_user(tg_id)
-    if not row or not row.get("subscription_id"):
-        return {}
-    return {row["subscription_id"]: row["id"]}
-
-
 async def _show_subscriptions_manage(cb: CallbackQuery, tg_id: int) -> None:
-    subs = await get_active_subscriptions_for_ui(tg_id)
-    if not subs:
-        await send_or_edit(cb, no_subscription_text(), no_subscription_kb())
-        return
-
-    if len(subs) == 1:
-        sub = subs[0]
-        sub_link = (
-            await build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
-        )
-        refund_ids = await _pending_refund_ids(tg_id)
-        await send_or_edit(
-            cb,
-            subscription_manage_text(sub, sub_link),
-            subscription_manage_kb(
-                sub["id"],
-                refund_id=refund_ids.get(sub["id"]),
-                is_trial=is_trial_email(sub.get("client_email")),
-            ),
-        )
-        return
-
-    sub_links = {}
-    for sub in subs:
-        sub_links[sub["id"]] = (
-            await build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
-        )
-    refund_ids = await _pending_refund_ids(tg_id)
-    await send_or_edit(
-        cb,
-        subscriptions_manage_text(subs, sub_links),
-        subscriptions_manage_kb(subs, refund_ids=refund_ids),
-    )
+    from .tickets import show_subscriptions_manage
+    await show_subscriptions_manage(cb, tg_id)
 
 
 @router.callback_query(F.data == "manage_sub")
@@ -897,123 +888,3 @@ async def cb_sub_link(cb: CallbackQuery):
     )
 
 
-@router.callback_query(F.data.startswith("refund:"))
-async def cb_refund(cb: CallbackQuery):
-    sub_id = int(cb.data.split(":", 1)[1])
-    sub = await db.get_subscription_by_id(sub_id)
-    if not sub or sub["tg_id"] != cb.from_user.id:
-        await safe_cb_answer(cb, "Подписка не найдена", show_alert=True)
-        return
-
-    if not sub.get("is_active"):
-        await safe_cb_answer(cb, "Подписка неактивна", show_alert=True)
-        return
-
-    await safe_cb_answer(cb)
-    await send_or_edit(cb, refund_confirm_text(), refund_confirm_kb(sub_id))
-
-
-@router.callback_query(F.data.startswith("refund_confirm:"))
-async def cb_refund_confirm(cb: CallbackQuery):
-    sub_id = int(cb.data.split(":", 1)[1])
-    sub = await db.get_subscription_by_id(sub_id)
-    if not sub or sub["tg_id"] != cb.from_user.id:
-        await safe_cb_answer(cb, "Подписка не найдена", show_alert=True)
-        return
-
-    if not sub.get("is_active"):
-        await safe_cb_answer(cb, "Подписка неактивна", show_alert=True)
-        return
-
-    refund_id = await db.create_refund_request(cb.from_user.id, sub_id)
-    await _notify_admins(
-        refund_admin_text(
-            cb.from_user.id,
-            cb.from_user.username,
-            cb.from_user.first_name,
-            sub,
-        )
-        + f"\n\n💬 Переписка: /admin → Возвраты → #{refund_id}"
-    )
-    await safe_cb_answer(cb, "Запрос отправлен")
-    await send_or_edit(cb, refund_request_sent_text(), back_to_main_kb())
-
-
-@router.callback_query(F.data.startswith("refund_chat:"))
-async def cb_refund_chat(cb: CallbackQuery, state: FSMContext):
-    refund_id = int(cb.data.split(":", 1)[1])
-    row = await db.get_refund_request_by_id(refund_id)
-    if not row or row["tg_id"] != cb.from_user.id or row.get("status") != "pending":
-        await safe_cb_answer(cb, "Переписка недоступна", show_alert=True)
-        return
-
-    await state.set_state(None)
-    messages = await db.get_refund_messages(refund_id)
-    text = format_refund_chat_history(messages, refund_id=refund_id, for_admin=False)
-    await safe_cb_answer(cb)
-    await send_or_edit(cb, text, refund_chat_kb(refund_id))
-
-
-@router.callback_query(F.data.startswith("refund_reply:"))
-async def cb_refund_reply_start(cb: CallbackQuery, state: FSMContext):
-    refund_id = int(cb.data.split(":", 1)[1])
-    row = await db.get_refund_request_by_id(refund_id)
-    if not row or row["tg_id"] != cb.from_user.id or row.get("status") != "pending":
-        await safe_cb_answer(cb, "Переписка недоступна", show_alert=True)
-        return
-
-    await state.set_state(UserStates.waiting_refund_reply)
-    await state.update_data(refund_chat_id=refund_id)
-    await safe_cb_answer(cb)
-    await send_or_edit(
-        cb,
-        f"✏️ <b>Сообщение по возврату #{refund_id}</b>\n\n"
-        "Опишите ситуацию или ответьте администратору.\n"
-        "Для отмены: /start",
-        refund_chat_kb(refund_id),
-    )
-
-
-@router.message(UserStates.waiting_refund_reply)
-async def msg_refund_reply(message: Message, state: FSMContext):
-    data = await state.get_data()
-    refund_id = data.get("refund_chat_id")
-    if not refund_id:
-        await state.clear()
-        await message.answer("Сессия истекла. Откройте «Управление подпиской».")
-        return
-
-    body = (message.text or "").strip()
-    if not body:
-        await message.answer("❌ Введите текст сообщения.")
-        return
-
-    cmd = _message_command(body)
-    if cmd == "/start":
-        await state.clear()
-        await _show_main_menu(message, state=state)
-        return
-    if cmd:
-        await message.answer("Ввод отменён. Откройте переписку снова из меню подписки.")
-        await state.clear()
-        return
-
-    from bot import bot as tg_bot
-    saved = await store_and_deliver_refund_message(
-        refund_id=refund_id,
-        sender_tg_id=message.from_user.id,
-        is_admin=False,
-        body=body,
-        bot=tg_bot,
-    )
-    if not saved:
-        await state.clear()
-        await message.answer("❌ Запрос на возврат уже закрыт.")
-        return
-
-    messages = await db.get_refund_messages(refund_id)
-    text = format_refund_chat_history(messages, refund_id=refund_id, for_admin=False)
-    await message.answer(
-        "✅ Сообщение отправлено.\n\n" + text,
-        reply_markup=refund_chat_kb(refund_id),
-    )

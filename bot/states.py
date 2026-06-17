@@ -3,13 +3,13 @@ from aiogram.fsm.state import State, StatesGroup
 
 class UserStates(StatesGroup):
     waiting_promo_code = State()
-    waiting_refund_reply = State()
+    in_ticket_chat = State()
 
 
 class AdminStates(StatesGroup):
     waiting_inbounds = State()
     waiting_user_search = State()
-    waiting_refund_reply = State()
+    in_ticket_chat = State()
     waiting_trial_reset = State()
     waiting_node_name = State()
     waiting_node_host = State()
@@ -17,6 +17,7 @@ class AdminStates(StatesGroup):
     waiting_node_login = State()
     waiting_node_password = State()
     waiting_node_inbounds = State()
+    waiting_start_announcement = State()
 
 
 class AdminPricingStates(StatesGroup):

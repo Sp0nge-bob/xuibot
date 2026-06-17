@@ -9,10 +9,69 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="💰 Цены тарифов", callback_data="adm:plans")],
         [InlineKeyboardButton(text="🎟 Промокоды", callback_data="adm:promos")],
         [InlineKeyboardButton(text="👥 Пользователи", callback_data="adm:users")],
-        [InlineKeyboardButton(text="💸 Запросы на возврат", callback_data="adm:refunds")],
+        [InlineKeyboardButton(text="🎫 Тикеты", callback_data="adm:tickets")],
         [InlineKeyboardButton(text="🖧 Ноды", callback_data="adm:nodes")],
         [InlineKeyboardButton(text="📡 Inbounds подписки", callback_data="adm:inbounds")],
         [InlineKeyboardButton(text="🎁 Пробный период", callback_data="adm:trial")],
+        [InlineKeyboardButton(text="📢 Сообщение /start", callback_data="adm:start_text")],
+        [InlineKeyboardButton(text="🧪 Отладка", callback_data="adm:debug")],
+    ])
+
+
+def admin_start_text_kb(*, has_text: bool) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text="✏️ Изменить", callback_data="adm:start_text:edit")],
+    ]
+    if has_text:
+        rows.append([InlineKeyboardButton(
+            text="🗑 Очистить",
+            callback_data="adm:start_text:clear",
+        )])
+    rows.append([InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_start_text_clear_confirm_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="⚠️ Да, очистить",
+            callback_data="adm:start_text:clear:confirm",
+        )],
+        [InlineKeyboardButton(text="« Отмена", callback_data="adm:start_text")],
+    ])
+
+
+def admin_debug_entry_confirm_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="✅ Да, войти в отладку",
+            callback_data="adm:debug:enter",
+        )],
+        [InlineKeyboardButton(text="« Отмена", callback_data="adm:menu")],
+    ])
+
+
+def admin_debug_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="🗑 Сбросить все пробные",
+            callback_data="adm:trial:reset_all",
+        )],
+        [InlineKeyboardButton(
+            text="🎟 Очистить применения промокодов",
+            callback_data="adm:debug:promos_reset",
+        )],
+        [InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")],
+    ])
+
+
+def admin_debug_promo_reset_confirm_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="⚠️ Подтвердить очистку",
+            callback_data="adm:debug:promos_reset:confirm",
+        )],
+        [InlineKeyboardButton(text="« Отмена", callback_data="adm:debug:enter")],
     ])
 
 
@@ -132,20 +191,70 @@ def admin_delete_confirm_kb(subscription_id: int, *, from_search: bool = False) 
     ])
 
 
-def admin_refunds_kb(refunds: list) -> InlineKeyboardMarkup:
+def admin_tickets_filter_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📋 Все", callback_data="adm:tickets:all")],
+        [
+            InlineKeyboardButton(text="💸 Возврат", callback_data="adm:tickets:refund"),
+            InlineKeyboardButton(text="🛠 Поддержка", callback_data="adm:tickets:support"),
+        ],
+        [InlineKeyboardButton(text="📁 Другое", callback_data="adm:tickets:other")],
+        [InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")],
+    ])
+
+
+def admin_tickets_kb(tickets: list, *, filter_key: str = "all") -> InlineKeyboardMarkup:
     rows = []
-    for r in refunds:
-        label = r.get("username") or r.get("first_name") or str(r["tg_id"])
-        if len(label) > 20:
-            label = label[:17] + "..."
-        rows.append([
-            InlineKeyboardButton(
-                text=f"💸 #{r['id']} {label}",
-                callback_data=f"adm:refund:{r['id']}",
-            )
-        ])
+    emoji_map = {"refund": "💸", "support": "🛠", "other": "📁"}
+    for t in tickets:
+        label = t.get("username") or t.get("first_name") or str(t["tg_id"])
+        if len(label) > 16:
+            label = label[:13] + "..."
+        em = emoji_map.get(t.get("category"), "🎫")
+        unread = t.get("unread", 0)
+        badge = f" ●{unread}" if unread else ""
+        order_hint = ""
+        if t.get("category") == "refund" and t.get("order_id"):
+            order_hint = f" · #{t['order_id']}"
+        rows.append([InlineKeyboardButton(
+            text=f"{em} #{t['id']}{order_hint} {label}{badge}",
+            callback_data=f"adm:ticket:{t['id']}",
+        )])
+    rows.append([InlineKeyboardButton(
+        text="« Фильтры",
+        callback_data="adm:tickets",
+    )])
     rows.append([InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_ticket_detail_kb(ticket_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="💬 Начать переписку по тикету",
+            callback_data=f"adm:ticket:session:{ticket_id}",
+        )],
+        [InlineKeyboardButton(
+            text="✅ Закрыть тикет",
+            callback_data=f"adm:ticket:close:{ticket_id}",
+        )],
+        [InlineKeyboardButton(text="« К списку", callback_data="adm:tickets:all")],
+        [InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")],
+    ])
+
+
+def admin_ticket_session_kb(ticket_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="⏹ Завершить переписку",
+            callback_data=f"adm:ticket:session_end:{ticket_id}",
+        )],
+        [InlineKeyboardButton(
+            text="« К тикету",
+            callback_data=f"adm:ticket:{ticket_id}",
+        )],
+        [InlineKeyboardButton(text="« К списку", callback_data="adm:tickets:all")],
+    ])
 
 
 def admin_plans_kb(plans: list) -> InlineKeyboardMarkup:
@@ -205,21 +314,6 @@ def admin_promo_detail_kb(promo_id: int, *, is_active: bool) -> InlineKeyboardMa
     ])
 
 
-def admin_refund_detail_kb(refund_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text="💬 Переписка",
-            callback_data=f"adm:refund:chat:{refund_id}",
-        )],
-        [InlineKeyboardButton(
-            text="✅ Закрыть запрос",
-            callback_data=f"adm:refund:close:{refund_id}",
-        )],
-        [InlineKeyboardButton(text="« К списку", callback_data="adm:refunds")],
-        [InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")],
-    ])
-
-
 def admin_trial_reset_all_confirm_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
@@ -261,15 +355,3 @@ def admin_trial_reset_confirm_kb(tg_id: int) -> InlineKeyboardMarkup:
     ])
 
 
-def admin_refund_chat_kb(refund_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text="✏️ Написать пользователю",
-            callback_data=f"adm:refund:reply:{refund_id}",
-        )],
-        [InlineKeyboardButton(
-            text="« К запросу",
-            callback_data=f"adm:refund:{refund_id}",
-        )],
-        [InlineKeyboardButton(text="« К списку", callback_data="adm:refunds")],
-    ])

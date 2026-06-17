@@ -5,6 +5,7 @@ from loguru import logger
 
 from config.trial import is_trial_email
 from db import database as db
+from db import tickets as tickets_db
 from db import trial_grants as trial_db
 from services.xui import remove_client_everywhere
 
@@ -19,7 +20,7 @@ async def admin_delete_subscription(subscription_id: int) -> dict[str, Any]:
     email = sub["client_email"]
     removed = await remove_client_everywhere(email)
     await db.deactivate_subscription(subscription_id)
-    await db.cancel_refund_requests_for_subscription(subscription_id)
+    await tickets_db.cancel_tickets_for_subscription(subscription_id)
 
     logger.success(
         "Admin deleted subscription #{} ({}) from panel inbounds {}",
@@ -45,7 +46,7 @@ async def admin_reset_all_trials() -> dict[str, Any]:
         try:
             removed = await remove_client_everywhere(email)
             await db.deactivate_subscription(sub["id"])
-            await db.cancel_refund_requests_for_subscription(sub["id"])
+            await tickets_db.cancel_tickets_for_subscription(sub["id"])
             removed_trials.append({
                 "subscription_id": sub["id"],
                 "tg_id": sub["tg_id"],
@@ -83,7 +84,7 @@ async def admin_reset_trial_for_user(tg_id: int) -> dict[str, Any]:
         email = sub["client_email"]
         removed = await remove_client_everywhere(email)
         await db.deactivate_subscription(sub["id"])
-        await db.cancel_refund_requests_for_subscription(sub["id"])
+        await tickets_db.cancel_tickets_for_subscription(sub["id"])
         removed_trials.append({
             "subscription_id": sub["id"],
             "email": email,

@@ -10,7 +10,11 @@ from config.settings import settings
 from services.node_sync import start_secondary_sync_workers, stop_secondary_sync_workers
 from services.xui import ensure_bot_group, log_inbound_port_conflicts
 from .handlers import router as main_router
+from .tickets import router as tickets_router
 from .admin import router as admin_router
+from .admin_tickets import router as admin_tickets_router
+from .admin_debug import router as admin_debug_router
+from .admin_start_text import router as admin_start_text_router
 from .admin_nodes import router as admin_nodes_router
 from .middlewares import ActionLockMiddleware
 from .scheduler import run_full_nodes_sync, start_scheduler
@@ -28,7 +32,11 @@ dp.callback_query.middleware(_action_lock)
 dp.message.middleware(_action_lock)
 
 dp.include_router(main_router)
+dp.include_router(tickets_router)
 dp.include_router(admin_router)
+dp.include_router(admin_tickets_router)
+dp.include_router(admin_debug_router)
+dp.include_router(admin_start_text_router)
 dp.include_router(admin_nodes_router)
 
 

@@ -17,6 +17,7 @@ def main_menu_kb(*, trial_available: bool = False) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📦 Тарифы", callback_data="tariffs")],
         [InlineKeyboardButton(text="🎟 Промокоды", callback_data="promo_enter")],
         [InlineKeyboardButton(text="⚙️ Управление подпиской", callback_data="manage_sub")],
+        [InlineKeyboardButton(text="💬 Поддержка", callback_data="support")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -133,12 +134,22 @@ def _sub_action_label(sub: dict) -> str:
     return "🎁 Пробная" if is_trial_email(sub.get("client_email")) else "✅ Платная"
 
 
+def _refund_order_button_label(order: dict) -> str:
+    kind = "🔄" if (order.get("order_type") or "new") == "extend" else "📦"
+    plan = order.get("plan_name") or "тариф"
+    if len(plan) > 12:
+        plan = plan[:9] + "..."
+    return f"{kind} #{order['id']} · {plan} · {order.get('amount', 0)}₽"
+
+
 def subscriptions_manage_kb(
     subs: list[dict],
     *,
-    refund_ids: dict[int, int] | None = None,
+    refund_tickets: dict[int, list[dict]] | None = None,
+    can_request_refund: dict[int, bool] | None = None,
 ) -> InlineKeyboardMarkup:
-    refund_ids = refund_ids or {}
+    refund_tickets = refund_tickets or {}
+    can_request_refund = can_request_refund or {}
     rows: list[list[InlineKeyboardButton]] = []
     has_paid = False
     for sub in subs:
@@ -149,13 +160,14 @@ def subscriptions_manage_kb(
         )])
         if not is_trial_email(sub.get("client_email")):
             has_paid = True
-            refund_id = refund_ids.get(sub["id"])
-            if refund_id:
+            for ticket in refund_tickets.get(sub["id"], []):
+                order_id = ticket.get("order_id")
+                btn = f"💬 Возврат заказа #{order_id}" if order_id else f"💬 Возврат #{ticket['id']}"
                 rows.append([InlineKeyboardButton(
-                    text=f"💬 {label} — переписка по возврату",
-                    callback_data=f"refund_chat:{refund_id}",
+                    text=f"{label} — {btn}",
+                    callback_data=f"ticket_view:{ticket['id']}",
                 )])
-            else:
+            if can_request_refund.get(sub["id"], True):
                 rows.append([InlineKeyboardButton(
                     text=f"💸 {label} — запросить возврат",
                     callback_data=f"refund:{sub['id']}",
@@ -169,20 +181,24 @@ def subscriptions_manage_kb(
 def subscription_manage_kb(
     sub_id: int,
     *,
-    refund_id: int | None = None,
+    refund_tickets: list[dict] | None = None,
+    can_request_refund: bool = True,
     is_trial: bool = False,
 ) -> InlineKeyboardMarkup:
+    refund_tickets = refund_tickets or []
     rows = [
         [InlineKeyboardButton(text="🔗 Ссылка и QR", callback_data=f"sub_link:{sub_id}")],
     ]
     if not is_trial:
         rows.append([InlineKeyboardButton(text="🔄 Продлить подписку", callback_data="extend_menu")])
-    if refund_id:
+    for ticket in refund_tickets:
+        order_id = ticket.get("order_id")
+        label = f"💬 Возврат заказа #{order_id}" if order_id else f"💬 Возврат #{ticket['id']}"
         rows.append([InlineKeyboardButton(
-            text="💬 Переписка по возврату",
-            callback_data=f"refund_chat:{refund_id}",
+            text=label,
+            callback_data=f"ticket_view:{ticket['id']}",
         )])
-    elif not is_trial:
+    if can_request_refund and not is_trial:
         rows.append([InlineKeyboardButton(
             text="💸 Запросить возврат",
             callback_data=f"refund:{sub_id}",
@@ -191,20 +207,95 @@ def subscription_manage_kb(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def refund_chat_kb(refund_id: int) -> InlineKeyboardMarkup:
+def support_menu_kb(tickets: list) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for t in tickets:
+        if t.get("category") == "refund":
+            continue
+        cat = "🛠" if t["category"] == "support" else "📁"
+        rows.append([InlineKeyboardButton(
+            text=f"{cat} Тикет #{t['id']}",
+            callback_data=f"ticket_view:{t['id']}",
+        )])
+    rows.append([InlineKeyboardButton(
+        text="➕ Создать обращение",
+        callback_data="ticket_create",
+    )])
+    rows.append([InlineKeyboardButton(text="« Главное меню", callback_data="main_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def ticket_category_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🛠 Техподдержка", callback_data="ticket_new:support")],
+        [InlineKeyboardButton(text="📁 Другое", callback_data="ticket_new:other")],
+        [InlineKeyboardButton(text="« Назад", callback_data="support")],
+    ])
+
+
+def ticket_view_kb(
+    ticket_id: int,
+    *,
+    is_open: bool = True,
+    is_refund: bool = False,
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if is_open:
+        rows.append([InlineKeyboardButton(
+            text="💬 Начать переписку по тикету",
+            callback_data=f"ticket_session:{ticket_id}",
+        )])
+    if is_refund:
+        rows.append([InlineKeyboardButton(text="« Управление подпиской", callback_data="manage_sub")])
+    else:
+        rows.append([InlineKeyboardButton(text="« Поддержка", callback_data="support")])
+    rows.append([InlineKeyboardButton(text="« Главное меню", callback_data="main_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def ticket_session_kb(ticket_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
-            text="✏️ Написать сообщение",
-            callback_data=f"refund_reply:{refund_id}",
+            text="⏹ Завершить переписку",
+            callback_data=f"ticket_session_end:{ticket_id}",
         )],
-        [InlineKeyboardButton(text="« Управление подпиской", callback_data="manage_sub")],
+        [InlineKeyboardButton(
+            text="« К тикету",
+            callback_data=f"ticket_view:{ticket_id}",
+        )],
         [InlineKeyboardButton(text="« Главное меню", callback_data="main_menu")],
     ])
 
 
-def refund_confirm_kb(sub_id: int) -> InlineKeyboardMarkup:
+def payment_failed_kb(order_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Да, запросить возврат", callback_data=f"refund_confirm:{sub_id}")],
+        [InlineKeyboardButton(
+            text="💬 Обратиться в поддержку",
+            callback_data=f"support_from_order:{order_id}",
+        )],
+        [InlineKeyboardButton(text="« Главное меню", callback_data="main_menu")],
+    ])
+
+
+def refund_pick_kb(sub_id: int, orders: list[dict]) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(
+            text=_refund_order_button_label(order),
+            callback_data=f"refund_pick:{sub_id}:{order['id']}",
+        )]
+        for order in orders
+    ]
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data="manage_sub")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def refund_confirm_kb(sub_id: int, order_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="✅ Да, запросить возврат",
+            callback_data=f"refund_confirm:{sub_id}:{order_id}",
+        )],
+        [InlineKeyboardButton(text="« Назад", callback_data=f"refund:{sub_id}")],
         [InlineKeyboardButton(text="❌ Отмена", callback_data="manage_sub")],
     ])
 

@@ -42,12 +42,42 @@ def _sub_menu_line(sub: Dict[str, Any]) -> str:
     return f"{_sub_kind_label(sub)} · до <b>{end}</b> · {left} дн. · {traffic}"
 
 
+def _promo_discount_label(promo: Dict[str, Any]) -> str:
+    if promo.get("discount_type") == "percent":
+        return f"{promo['discount_value']}%"
+    return f"{promo['discount_value']} ₽"
+
+
+def _pending_discount_menu_lines(promo: Dict[str, Any], expires_at: str) -> List[str]:
+    try:
+        expires = datetime.fromisoformat(expires_at.replace("Z", "")).strftime("%d.%m.%Y %H:%M")
+    except ValueError:
+        expires = expires_at[:16]
+    allowed = (promo.get("plan_ids") or "").strip()
+    plans_hint = f"<code>{allowed}</code>" if allowed else "любой тариф"
+    return [
+        "🎟 <b>Активная скидка</b>",
+        f"   └ Код: <code>{promo['code']}</code> · <b>−{_promo_discount_label(promo)}</b>",
+        f"   └ Тарифы: {plans_hint}",
+        f"   └ Действует до: <b>{expires} UTC</b>",
+        "   └ Применится при оплате в «Тарифы»",
+    ]
+
+
 def main_menu_text(
     first_name: Optional[str],
     username: Optional[str],
     subscriptions: List[Dict[str, Any]],
+    *,
+    announcement: Optional[str] = None,
+    pending_discount_promo: Optional[Dict[str, Any]] = None,
+    pending_discount_expires_at: Optional[str] = None,
 ) -> str:
     lines = ["🌐 <b>VPN Bot</b>", "━━━━━━━━━━━━━━━━", _user_line(first_name, username), ""]
+
+    if announcement:
+        lines.append(announcement)
+        lines.append("")
 
     if not subscriptions:
         lines.append("📊 <b>Подписка:</b> ❌ Нет активной")
@@ -57,6 +87,11 @@ def main_menu_text(
         lines.append("📊 <b>Подписки:</b>")
         for sub in subscriptions:
             lines.append(f"   └ {_sub_menu_line(sub)}")
+
+    if pending_discount_promo and pending_discount_expires_at:
+        lines += ["", *_pending_discount_menu_lines(
+            pending_discount_promo, pending_discount_expires_at,
+        )]
 
     if settings.TEST_MODE:
         lines += ["", "⚠️ <i>Тестовый режим включён</i>"]
@@ -299,6 +334,86 @@ def admin_trial_reset_all_confirm_text(*, trial_count: int, grants_count: int) -
     )
 
 
+def _truncate_preview(text: str, limit: int = 1200) -> str:
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3] + "..."
+
+
+def admin_start_text_menu_text(announcement: Optional[str]) -> str:
+    lines = [
+        "📢 <b>Сообщение /start</b>",
+        "━━━━━━━━━━━━━━━━",
+        "",
+        "Произвольный блок для новостей, скидок и акций.",
+        "Показывается в главном меню <b>между приветствием и статусом подписки</b>.",
+        "",
+        "Системные строки (подписка, промокод, тестовый режим, «Выберите действие») "
+        "формируются ботом автоматически и не меняются.",
+        "",
+        "<b>Сейчас:</b>",
+    ]
+    if announcement:
+        lines.append(_truncate_preview(announcement))
+    else:
+        lines.append("<i>Не задано — показывается только системное меню.</i>")
+    return "\n".join(lines)
+
+
+def admin_start_text_edit_prompt_text() -> str:
+    return (
+        "✏️ <b>Новое сообщение /start</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        "Отправьте текст для блока новостей/акций.\n"
+        "Поддерживается HTML: <code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, "
+        "<code>&lt;code&gt;</code> и т.д.\n\n"
+        "Для отмены: /admin"
+    )
+
+
+def admin_debug_entry_confirm_text() -> str:
+    return (
+        "🧪 <b>Раздел отладки</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        "⚠️ Здесь доступны опасные операции:\n"
+        "• массовый сброс пробных подписок\n"
+        "• очистка всех применений промокодов\n\n"
+        "Используйте только для отладки и тестирования.\n\n"
+        "Войти в раздел?"
+    )
+
+
+def admin_debug_menu_text(
+    *,
+    trial_count: int,
+    promo_uses: int,
+    promo_pending: int,
+) -> str:
+    return (
+        "🧪 <b>Отладка</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        f"🎁 Активных пробных подписок: <b>{trial_count}</b>\n"
+        f"🎟 Применений промокодов (promo_uses): <b>{promo_uses}</b>\n"
+        f"⏳ Ожидающих скидок (pending): <b>{promo_pending}</b>\n\n"
+        "Выберите действие:"
+    )
+
+
+def admin_debug_promo_reset_confirm_text(*, uses_count: int, pending_count: int) -> str:
+    return (
+        "🎟 <b>Очистка применений промокодов</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        f"Записей promo_uses: <b>{uses_count}</b>\n"
+        f"Ожидающих скидок: <b>{pending_count}</b>\n\n"
+        "Будет выполнено:\n"
+        "• удаление всех записей <code>promo_uses</code>\n"
+        "• удаление всех ожидающих скидок (<code>promo_pending_discounts</code>)\n"
+        "• обнуление <code>used_count</code> у всех промокодов\n\n"
+        "Сами промокоды останутся без изменений.\n\n"
+        "Продолжить?"
+    )
+
+
 def admin_trial_reset_confirm_text(tg_id: int, label: str) -> str:
     return (
         "🔄 <b>Сброс пробного периода</b>\n"
@@ -311,23 +426,111 @@ def admin_trial_reset_confirm_text(tg_id: int, label: str) -> str:
     )
 
 
-def refund_confirm_text() -> str:
+def _order_payment_lines(order: Dict[str, Any]) -> list[str]:
+    order_type = order.get("order_type") or "new"
+    action = "Продление" if order_type == "extend" else "Покупка"
+    paid = (order.get("paid_at") or order.get("created_at") or "")[:16].replace("T", " ")
+    lines = [
+        f"📦 {action}: <b>{order.get('plan_name') or '—'}</b>",
+        f"💰 Сумма: <b>{order.get('amount') or 0} ₽</b>",
+        f"🆔 ID заказа: <code>{order.get('id')}</code>",
+        f"🆔 ID транзакции Platega: <code>{order.get('platega_tx_id') or '—'}</code>",
+        f"🕐 Оплачен: <b>{paid or '—'}</b>",
+    ]
+    if order.get("promo_code"):
+        lines.append(f"🎟 Промокод: <code>{order['promo_code']}</code>")
+    return lines
+
+
+def refund_pick_text() -> str:
     return (
         "💸 <b>Запрос на возврат</b>\n"
         "━━━━━━━━━━━━━━━━\n\n"
-        "Вы уверены, что хотите запросить возврат?\n\n"
-        "После отправки запроса администратор свяжется с вами.\n"
-        "Подписка останется активной до решения администратора."
+        "Выберите оплату, по которой хотите оформить возврат:"
     )
 
 
-def refund_request_sent_text() -> str:
+def refund_confirm_text(order: Dict[str, Any]) -> str:
+    lines = [
+        "💸 <b>Подтверждение возврата</b>",
+        "━━━━━━━━━━━━━━━━",
+        "",
+        "Возврат по оплате:",
+        "",
+        *_order_payment_lines(order),
+        "",
+        "Отправить запрос администратору?",
+        "Подписка останется активной до решения.",
+    ]
+    return "\n".join(lines)
+
+
+def refund_request_sent_text(ticket_id: int) -> str:
     return (
         "💸 <b>Запрос на возврат отправлен</b>\n"
         "━━━━━━━━━━━━━━━━\n\n"
+        f"Тикет <code>#{ticket_id}</code> создан.\n"
         "Администратор рассмотрит ваш запрос.\n"
-        "Переписка — в «Управление подпиской» → <b>Переписка по возврату</b>."
+        "Переписка — в «Управление подпиской» → <b>Тикет возврата</b>."
     )
+
+
+def support_menu_text(tickets: list) -> str:
+    open_count = len([t for t in tickets if t.get("category") != "refund"])
+    lines = [
+        "💬 <b>Поддержка</b>",
+        "━━━━━━━━━━━━━━━━",
+        "",
+    ]
+    if open_count:
+        lines.append(f"Открытых обращений: <b>{open_count}</b>\n")
+    else:
+        lines.append("Нет открытых обращений.\n")
+    lines.append("Создайте новое или выберите тикет из списка.")
+    return "\n".join(lines)
+
+
+def ticket_view_text(ticket: Dict[str, Any]) -> str:
+    from db.tickets import category_label, STATUS_OPEN
+    cat = category_label(ticket["category"])
+    status = "открыт" if ticket.get("status") == STATUS_OPEN else "закрыт"
+    lines = [
+        f"🎫 <b>Тикет #{ticket['id']}</b>",
+        "━━━━━━━━━━━━━━━━",
+        "",
+        f"📁 Категория: <b>{cat}</b>",
+        f"📌 Статус: <b>{status}</b>",
+        f"🕐 Создан: {(ticket.get('created_at') or '')[:16]}",
+    ]
+    if ticket.get("client_email"):
+        lines.append(f"👤 Клиент: <code>{ticket['client_email']}</code>")
+    if ticket.get("order_id"):
+        lines += [
+            f"🧾 Заказ: <code>#{ticket['order_id']}</code>",
+            f"📦 Тариф: <b>{ticket.get('plan_name') or '—'}</b>",
+            f"💰 Сумма: <b>{ticket.get('order_amount') or '—'} ₽</b>",
+            f"🆔 TX Platega: <code>{ticket.get('platega_tx_id') or '—'}</code>",
+        ]
+    if ticket.get("status") == STATUS_OPEN:
+        lines += ["", "Нажмите «Начать переписку», чтобы отправить сообщение администратору."]
+    return "\n".join(lines)
+
+
+def ticket_session_banner_text(ticket_id: int, category: str, *, is_new: bool = False) -> str:
+    from db.tickets import category_label
+    header = "🎫 <b>Новый тикет создан</b>" if is_new else "🔴 <b>Активная переписка</b>"
+    return (
+        f"{header}\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        f"Тикет <code>#{ticket_id}</code> · {category_label(category)}\n\n"
+        "Отправляйте сообщения любого типа — текст, фото, голосовые.\n"
+        "Они будут переданы администратору.\n\n"
+        "«Завершить переписку» — выйти из режима (тикет останется открытым)."
+    )
+
+
+def ticket_created_text(ticket_id: int) -> str:
+    return f"✅ Тикет <code>#{ticket_id}</code> создан."
 
 
 def refund_admin_text(
@@ -335,15 +538,21 @@ def refund_admin_text(
     username: Optional[str],
     first_name: Optional[str],
     sub: Dict[str, Any],
+    order: Dict[str, Any],
 ) -> str:
     user = f"@{username}" if username else (first_name or str(tg_id))
-    return (
-        "💸 <b>Запрос на возврат</b>\n\n"
-        f"👤 Пользователь: {user} (<code>{tg_id}</code>)\n"
-        f"📅 Подписка до: {_format_date(sub['end_date'])}\n"
-        f"👤 Клиент: <code>{sub['client_email']}</code>\n"
-        f"🆔 Подписка #{sub['id']}"
-    )
+    lines = [
+        "💸 <b>Запрос на возврат</b>",
+        "",
+        f"👤 Пользователь: {user} (<code>{tg_id}</code>)",
+        f"📅 Подписка до: {_format_date(sub['end_date'])}",
+        f"👤 Клиент: <code>{sub['client_email']}</code>",
+        f"🆔 Подписка #{sub['id']}",
+        "",
+        "💳 <b>Оплата для возврата:</b>",
+        *_order_payment_lines(order),
+    ]
+    return "\n".join(lines)
 
 
 def pending_payment_text(

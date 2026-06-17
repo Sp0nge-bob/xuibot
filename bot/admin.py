@@ -26,7 +26,6 @@ from .messages import (
 from config.trial import is_trial_email
 from services.trial import admin_reset_all_trial_subscriptions, admin_reset_trial
 from .states import AdminPricingStates, AdminStates
-from .refund_chat import format_refund_chat_history, store_and_deliver_refund_message
 from services.subscription_admin import admin_delete_subscription
 from .admin_users import (
     admin_users_category_text,
@@ -49,9 +48,6 @@ from .admin_keyboards import (
     admin_users_search_kb,
     admin_user_detail_kb,
     admin_delete_confirm_kb,
-    admin_refunds_kb,
-    admin_refund_detail_kb,
-    admin_refund_chat_kb,
     admin_trial_kb,
     admin_trial_reset_all_confirm_kb,
     admin_trial_reset_confirm_kb,
@@ -75,7 +71,8 @@ def _admin_stats_block(stats: dict[str, int]) -> str:
         f"✅ Платных подписок: <b>{stats['paid_subs']}</b>\n"
         f"🎁 Пробных подписок: <b>{stats['trial_subs']}</b>\n"
         f"💰 Оплаченных заказов: <b>{stats['paid_orders']}</b>\n"
-        f"💸 Запросов на возврат: <b>{stats['pending_refunds']}</b>"
+        f"🎫 Открытых тикетов: <b>{stats['pending_tickets']}</b> "
+        f"(💸 {stats['pending_refunds']} · 🛠 {stats['pending_support']} · 📁 {stats['pending_other']})"
     )
 
 
@@ -372,161 +369,6 @@ async def cb_admin_delete_sub(cb: CallbackQuery, state: FSMContext):
         "Клиент полностью удалён с панелей."
     )
     await send_or_edit(cb, text, admin_back_kb())
-
-
-@router.callback_query(F.data == "adm:refunds")
-async def cb_admin_refunds(cb: CallbackQuery):
-    if not is_admin(cb.from_user.id):
-        return
-    rows = await db.get_pending_refunds()
-    if not rows:
-        text = "💸 <b>Запросы на возврат</b>\n\nНет открытых запросов."
-        kb = admin_back_kb()
-    else:
-        text = (
-            "💸 <b>Запросы на возврат</b>\n"
-            "━━━━━━━━━━━━━━━━\n\n"
-            f"Открытых: <b>{len(rows)}</b>\n"
-            "Выберите запрос для просмотра и закрытия:"
-        )
-        kb = admin_refunds_kb(rows)
-    await safe_cb_answer(cb)
-    await send_or_edit(cb, text, kb)
-
-
-@router.callback_query(F.data.startswith("adm:refund:chat:"))
-async def cb_admin_refund_chat(cb: CallbackQuery, state: FSMContext):
-    if not is_admin(cb.from_user.id):
-        return
-    await state.set_state(None)
-    refund_id = int(cb.data.split(":")[3])
-    row = await db.get_refund_request_by_id(refund_id)
-    if not row or row.get("status") != "pending":
-        await safe_cb_answer(cb, "Запрос не найден или уже закрыт", show_alert=True)
-        return
-
-    messages = await db.get_refund_messages(refund_id)
-    text = format_refund_chat_history(messages, refund_id=refund_id, for_admin=True)
-    await safe_cb_answer(cb)
-    await send_or_edit(cb, text, admin_refund_chat_kb(refund_id))
-
-
-@router.callback_query(F.data.startswith("adm:refund:reply:"))
-async def cb_admin_refund_reply_start(cb: CallbackQuery, state: FSMContext):
-    if not is_admin(cb.from_user.id):
-        return
-    refund_id = int(cb.data.split(":")[3])
-    row = await db.get_refund_request_by_id(refund_id)
-    if not row or row.get("status") != "pending":
-        await safe_cb_answer(cb, "Запрос закрыт", show_alert=True)
-        return
-    await state.set_state(AdminStates.waiting_refund_reply)
-    await state.update_data(refund_chat_id=refund_id)
-    await safe_cb_answer(cb)
-    await send_or_edit(
-        cb,
-        f"✏️ <b>Ответ по возврату #{refund_id}</b>\n\n"
-        "Отправьте сообщение пользователю.\n"
-        "Для отмены: /admin",
-        admin_refund_chat_kb(refund_id),
-    )
-
-
-@router.message(AdminStates.waiting_refund_reply)
-async def msg_admin_refund_reply(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        return
-    data = await state.get_data()
-    refund_id = data.get("refund_chat_id")
-    if not refund_id:
-        await state.clear()
-        await message.answer("Сессия истекла. /admin")
-        return
-
-    body = (message.text or "").strip()
-    if not body:
-        await message.answer("❌ Пустое сообщение. Введите текст.")
-        return
-    if body.startswith("/"):
-        if body.split("@")[0].lower() == "/admin":
-            await state.set_state(None)
-            await message.answer(await _admin_menu_text(), reply_markup=admin_menu_kb())
-        return
-
-    from bot import bot as tg_bot
-    saved = await store_and_deliver_refund_message(
-        refund_id=refund_id,
-        sender_tg_id=message.from_user.id,
-        is_admin=True,
-        body=body,
-        bot=tg_bot,
-    )
-    if not saved:
-        await state.set_state(None)
-        await message.answer("❌ Запрос на возврат уже закрыт.")
-        return
-
-    messages = await db.get_refund_messages(refund_id)
-    text = format_refund_chat_history(messages, refund_id=refund_id, for_admin=True)
-    await message.answer(
-        "✅ Сообщение отправлено.\n\n" + text,
-        reply_markup=admin_refund_chat_kb(refund_id),
-    )
-
-
-@router.callback_query(F.data.regexp(r"^adm:refund:\d+$"))
-async def cb_admin_refund_detail(cb: CallbackQuery, state: FSMContext):
-    if not is_admin(cb.from_user.id):
-        return
-    await state.set_state(None)
-    refund_id = int(cb.data.split(":")[2])
-    row = await db.get_refund_request_by_id(refund_id)
-    if not row or row.get("status") != "pending":
-        await safe_cb_answer(cb, "Запрос не найден или уже закрыт", show_alert=True)
-        return
-
-    label = _user_label(row.get("username"), row.get("first_name"), row["tg_id"])
-    msg_count = len(await db.get_refund_messages(refund_id))
-    text = (
-        "💸 <b>Запрос на возврат</b>\n"
-        "━━━━━━━━━━━━━━━━\n\n"
-        f"Запрос: <code>#{refund_id}</code>\n"
-        f"Пользователь: {label}\n"
-        f"TG ID: <code>{row['tg_id']}</code>\n"
-        f"Клиент: <code>{row['client_email']}</code>\n"
-        f"Подписка до: <b>{row['end_date'][:10]}</b>\n"
-        f"Создан: {row['created_at'][:16]}\n"
-        f"💬 Сообщений в переписке: <b>{msg_count}</b>"
-    )
-    await safe_cb_answer(cb)
-    await send_or_edit(cb, text, admin_refund_detail_kb(refund_id))
-
-
-@router.callback_query(F.data.startswith("adm:refund:close:"))
-async def cb_admin_refund_close(cb: CallbackQuery):
-    if not is_admin(cb.from_user.id):
-        return
-    refund_id = int(cb.data.split(":")[3])
-    closed = await db.close_refund_request(refund_id)
-    if not closed:
-        await safe_cb_answer(cb, "Запрос не найден или уже закрыт", show_alert=True)
-        return
-
-    await safe_cb_answer(cb, "Запрос закрыт")
-    rows = await db.get_pending_refunds()
-    if not rows:
-        text = "💸 <b>Запросы на возврат</b>\n\nНет открытых запросов."
-        kb = admin_back_kb()
-    else:
-        text = (
-            "✅ <b>Запрос закрыт</b>\n\n"
-            "💸 <b>Запросы на возврат</b>\n"
-            "━━━━━━━━━━━━━━━━\n\n"
-            f"Открытых: <b>{len(rows)}</b>\n"
-            "Выберите запрос:"
-        )
-        kb = admin_refunds_kb(rows)
-    await send_or_edit(cb, text, kb)
 
 
 @router.callback_query(F.data == "adm:plans")

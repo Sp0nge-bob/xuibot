@@ -73,6 +73,20 @@ async def get_active_pending_discount(tg_id: int) -> Optional[Dict[str, Any]]:
             return dict(row) if row else None
 
 
+async def count_pending_discounts() -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT COUNT(*) FROM promo_pending_discounts") as cur:
+            row = await cur.fetchone()
+            return int(row[0]) if row else 0
+
+
+async def clear_all_pending_discounts() -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("DELETE FROM promo_pending_discounts")
+        await db.commit()
+        return cursor.rowcount
+
+
 async def consume_pending_discount(
     tg_id: int,
     order_id: int,

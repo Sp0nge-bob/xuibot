@@ -208,6 +208,29 @@ async def record_promo_use(promo_id: int, tg_id: int, order_id: int) -> None:
         await db.commit()
 
 
+async def count_promo_uses() -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT COUNT(*) FROM promo_uses") as cur:
+            row = await cur.fetchone()
+            return int(row[0]) if row else 0
+
+
+async def reset_all_promo_applications() -> dict[str, int]:
+    """Очистить все записи применений промокодов и обнулить счётчики."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT COUNT(*) FROM promo_uses") as cur:
+            uses_deleted = int((await cur.fetchone())[0])
+        await db.execute("DELETE FROM promo_uses")
+        await db.execute("UPDATE promo_codes SET used_count = 0")
+        await db.commit()
+    from db import promo_pending as pending_db
+    pending_deleted = await pending_db.clear_all_pending_discounts()
+    return {
+        "uses_deleted": uses_deleted,
+        "pending_deleted": pending_deleted,
+    }
+
+
 async def record_grant_promo_use(promo_id: int, tg_id: int) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
