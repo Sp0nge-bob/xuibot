@@ -106,7 +106,6 @@ async def start_bot():
         )
     except asyncio.CancelledError:
         logger.info("Polling cancelled")
-        raise
 
 
 async def stop_bot():

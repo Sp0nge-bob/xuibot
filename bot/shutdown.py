@@ -168,6 +168,24 @@ async def graceful_shutdown(*, reason: str = "shutdown") -> None:
     _shutdown_task = None
 
 
+async def ensure_shutdown_complete(*, reason: str = "shutdown") -> None:
+    """Дождаться остановки; защищено от повторного Ctrl+C во время cleanup."""
+    if _shutdown_done:
+        return
+    if _shutdown_task is not None and not _shutdown_task.done():
+        try:
+            await asyncio.shield(_shutdown_task)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.debug("await _shutdown_task: {}", e)
+        return
+    try:
+        await asyncio.shield(graceful_shutdown(reason=reason))
+    except asyncio.CancelledError:
+        pass
+
+
 def install_shutdown_handlers() -> None:
     """Для run_bot.py (без uvicorn)."""
     global _handlers_installed

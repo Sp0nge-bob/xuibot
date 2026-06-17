@@ -12,7 +12,7 @@
 """
 import asyncio
 
-from bot.shutdown import graceful_shutdown, install_shutdown_handlers
+from bot.shutdown import ensure_shutdown_complete, install_shutdown_handlers
 from db.database import init_db
 
 
@@ -23,13 +23,15 @@ async def _main() -> None:
 
     try:
         await start_bot()
+    except asyncio.CancelledError:
+        pass
     finally:
-        await graceful_shutdown(reason="run_bot")
+        await ensure_shutdown_complete(reason="run_bot")
 
 
 if __name__ == "__main__":
     print("Starting Telegram bot (polling)...")
     try:
         asyncio.run(_main())
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, asyncio.CancelledError):
         print("\nBot stopped.")
