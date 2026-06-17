@@ -20,13 +20,30 @@ class PaymentProcessResult:
     amount_mismatch: bool = False
 
 
-def _amounts_match(order_amount: int, callback_amount: Any, tolerance: float = 0.01) -> bool:
+# Platega может прислать в callback сумму с комиссией сверх цены заказа (1 ₽ → 1.13 ₽).
+_MAX_COMMISSION_RATE = 0.25
+
+
+def _callback_amount_acceptable(
+    order_amount: int,
+    callback_amount: Any,
+    *,
+    tolerance: float = 0.01,
+) -> bool:
     if callback_amount is None:
         return True
     try:
-        return abs(float(order_amount) - float(callback_amount)) <= tolerance
+        order = float(order_amount)
+        callback = float(callback_amount)
     except (TypeError, ValueError):
         return False
+
+    if abs(order - callback) <= tolerance:
+        return True
+
+    # Комиссия сверху: callback >= order и не больше разумного потолка.
+    max_allowed = order * (1 + _MAX_COMMISSION_RATE) + tolerance
+    return order - tolerance <= callback <= max_allowed
 
 
 async def handle_platega_status(
@@ -50,7 +67,7 @@ async def handle_platega_status(
     if callback_body:
         cb_amount = callback_body.get("amount")
         cb_currency = callback_body.get("currency")
-        if cb_amount is not None and not _amounts_match(order["amount"], cb_amount):
+        if cb_amount is not None and not _callback_amount_acceptable(order["amount"], cb_amount):
             logger.error(
                 "Payment [{}]: amount mismatch tx={} order={} callback={}",
                 source, tx_id, order["amount"], cb_amount,
@@ -60,6 +77,17 @@ async def handle_platega_status(
                 amount_mismatch=True,
                 user_message="⚠️ Сумма в callback не совпадает с заказом. Обратитесь в поддержку.",
             )
+        if cb_amount is not None:
+            try:
+                order_amt = float(order["amount"])
+                cb_amt = float(cb_amount)
+                if cb_amt > order_amt + 0.01:
+                    logger.info(
+                        "Payment [{}]: Platega commission tx={} order={} callback={}",
+                        source, tx_id, order["amount"], cb_amount,
+                    )
+            except (TypeError, ValueError):
+                pass
         if cb_currency and cb_currency.upper() != "RUB":
             logger.warning(
                 "Payment [{}]: unexpected currency {} for tx {}",

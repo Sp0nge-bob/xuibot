@@ -174,6 +174,26 @@ def admin_promos_kb(promos: list) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def admin_promo_type_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💰 Скидка при оплате", callback_data="adm:promo:type:discount")],
+        [InlineKeyboardButton(text="🎁 Бесплатный тариф", callback_data="adm:promo:type:grant")],
+        [InlineKeyboardButton(text="« Отмена", callback_data="adm:promos")],
+    ])
+
+
+def admin_promo_grant_plans_kb(plans: list) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(
+            text=f"📦 {p['name']} ({p['days']} дн.)",
+            callback_data=f"adm:promo:grant_plan:{p['id']}",
+        )]
+        for p in plans
+    ]
+    rows.append([InlineKeyboardButton(text="« Отмена", callback_data="adm:promos")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def admin_promo_detail_kb(promo_id: int, *, is_active: bool) -> InlineKeyboardMarkup:
     toggle = "⏸ Отключить" if is_active else "✅ Включить"
     toggle_data = f"adm:promo:toggle:{promo_id}"

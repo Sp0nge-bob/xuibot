@@ -37,6 +37,7 @@ from services.subscription_sync import (
     get_primary_paid_subscription_for_ui,
     get_primary_subscription_for_ui,
 )
+from services.grant_promo import redeem_grant_promo
 from services.trial import claim_trial, get_trial_button_visible
 from services.xui import build_sub_link
 from .fulfillment_delivery import deliver_fulfillment
@@ -71,6 +72,7 @@ from .messages import (
     pending_payment_text,
     promo_enter_text,
     promo_applied_text,
+    grant_promo_enter_text,
     trial_offer_text,
 )
 from .states import UserStates
@@ -92,6 +94,10 @@ async def _checkout_quote(
 async def _clear_promo_input_state(state: FSMContext) -> None:
     await state.set_state(None)
     await state.update_data(promo_plan_id=None, promo_extend=None)
+
+
+async def _clear_grant_promo_state(state: FSMContext) -> None:
+    await state.set_state(None)
 
 
 def _message_command(text: str) -> str | None:
@@ -139,9 +145,18 @@ async def cmd_start(message: Message, state: FSMContext):
     await _show_main_menu(message, state=state)
 
 
+@router.callback_query(F.data == "grant_promo_enter")
+async def cb_grant_promo_enter(cb: CallbackQuery, state: FSMContext):
+    await _clear_grant_promo_state(state)
+    await state.set_state(UserStates.waiting_grant_promo_code)
+    await safe_cb_answer(cb)
+    await send_or_edit(cb, grant_promo_enter_text(), back_to_main_kb())
+
+
 @router.callback_query(F.data == "main_menu")
 async def cb_main_menu(cb: CallbackQuery, state: FSMContext):
     await _clear_promo_input_state(state)
+    await _clear_grant_promo_state(state)
     await state.update_data(promo_code=None)
     await _show_main_menu(cb, edit=True, state=state)
 
@@ -161,7 +176,7 @@ async def cb_trial_confirm(cb: CallbackQuery):
     await safe_cb_answer(cb, "Активируем пробный период…")
     await send_or_edit(cb, "⏳ Создаём пробную подписку…")
     try:
-        text, photo = await claim_trial(cb.from_user.id)
+        result = await claim_trial(cb.from_user.id)
     except ValueError as e:
         await send_or_edit(cb, f"❌ {e}", back_to_main_kb())
         return
@@ -170,14 +185,19 @@ async def cb_trial_confirm(cb: CallbackQuery):
         await send_or_edit(cb, "❌ Не удалось активировать пробный период. Попробуйте позже.", back_to_main_kb())
         return
 
-    if photo:
-        try:
-            await cb.message.delete()
-        except Exception:
-            pass
-        await cb.message.answer_photo(photo, caption=text, reply_markup=back_to_main_kb())
-    else:
-        await send_or_edit(cb, text, back_to_main_kb())
+    try:
+        await cb.message.delete()
+    except Exception:
+        pass
+    await deliver_fulfillment(
+        cb.message.bot,
+        cb.message.chat.id,
+        text=result.text,
+        photo=result.photo,
+        setup_text=result.setup_text,
+        setup_photos=result.setup_photos or None,
+        reply_markup=back_to_main_kb(),
+    )
 
 
 @router.callback_query(F.data == "tariffs")
@@ -842,6 +862,56 @@ async def cb_promo_clear(cb: CallbackQuery, state: FSMContext):
             quote=quote,
         ),
         payment_methods_kb(plan_id, extend=extend, quote=quote),
+    )
+
+
+@router.message(UserStates.waiting_grant_promo_code)
+async def msg_grant_promo_code(message: Message, state: FSMContext):
+    await _clear_grant_promo_state(state)
+
+    cmd = _message_command(message.text or "")
+    if cmd == "/admin":
+        from bot.admin import cmd_admin
+        await cmd_admin(message, state)
+        return
+    if cmd == "/start":
+        await state.clear()
+        await _show_main_menu(message, state=state)
+        return
+    if cmd:
+        await message.answer("Ввод промокода отменён.", reply_markup=back_to_main_kb())
+        return
+
+    code = (message.text or "").strip()
+    if not code:
+        await message.answer(
+            "Промокод не введён. Нажмите «Промокод» в главном меню и попробуйте снова.",
+            reply_markup=back_to_main_kb(),
+        )
+        return
+
+    await message.answer("⏳ Проверяем промокод…")
+    try:
+        result = await redeem_grant_promo(message.from_user.id, code)
+    except ValueError as e:
+        await message.answer(f"❌ {e}", reply_markup=back_to_main_kb())
+        return
+    except Exception as e:
+        logger.exception("Grant promo error: {}", e)
+        await message.answer(
+            "❌ Не удалось активировать промокод. Попробуйте позже.",
+            reply_markup=back_to_main_kb(),
+        )
+        return
+
+    await deliver_fulfillment(
+        message.bot,
+        message.chat.id,
+        text=result.text,
+        photo=result.photo,
+        setup_text=result.setup_text,
+        setup_photos=result.setup_photos or None,
+        reply_markup=back_to_main_kb(),
     )
 
 

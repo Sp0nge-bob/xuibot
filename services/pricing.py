@@ -3,9 +3,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional
 
-from config.plans import Plan
+from config.plans import Plan, get_plan
 from db.plan_prices import get_all_effective_plans, get_effective_plan
 from db import promo_codes as promo_db
+from db.promo_codes import is_grant_promo
 
 
 @dataclass
@@ -82,6 +83,37 @@ async def get_plan_quote(
     )
 
 
+async def _validate_promo_common(
+    promo: dict,
+    *,
+    tg_id: int,
+) -> Optional[str]:
+    if not promo.get("is_active"):
+        return "Промокод отключён"
+
+    valid_until = promo.get("valid_until")
+    if valid_until:
+        try:
+            if datetime.fromisoformat(valid_until.replace("Z", "")) < datetime.utcnow():
+                return "Срок действия промокода истёк"
+        except ValueError:
+            pass
+
+    max_uses = promo.get("max_uses")
+    if max_uses is not None and (promo.get("used_count") or 0) >= max_uses:
+        return "Промокод исчерпан"
+
+    per_user = promo.get("per_user_limit")
+    if per_user and per_user > 0:
+        user_uses = await promo_db.count_user_promo_uses(promo["id"], tg_id)
+        if user_uses >= per_user:
+            if per_user == 1:
+                return "Вы уже использовали этот промокод"
+            return f"Лимит промокода для вас исчерпан ({per_user} раз)"
+
+    return None
+
+
 async def validate_promo(
     code: str,
     *,
@@ -91,34 +123,43 @@ async def validate_promo(
     promo = await promo_db.get_promo_by_code(code)
     if not promo:
         return None, "Промокод не найден"
-    if not promo.get("is_active"):
-        return None, "Промокод отключён"
+    if is_grant_promo(promo):
+        return None, (
+            "Этот промокод выдаёт тариф бесплатно.\n"
+            "Активируйте его в главном меню → «Промокод»."
+        )
 
-    valid_until = promo.get("valid_until")
-    if valid_until:
-        try:
-            if datetime.fromisoformat(valid_until.replace("Z", "")) < datetime.utcnow():
-                return None, "Срок действия промокода истёк"
-        except ValueError:
-            pass
-
-    max_uses = promo.get("max_uses")
-    if max_uses is not None and (promo.get("used_count") or 0) >= max_uses:
-        return None, "Промокод исчерпан"
-
-    per_user = promo.get("per_user_limit")
-    if per_user and per_user > 0:
-        user_uses = await promo_db.count_user_promo_uses(promo["id"], tg_id)
-        if user_uses >= per_user:
-            if per_user == 1:
-                return None, "Вы уже использовали этот промокод"
-            return None, f"Лимит промокода для вас исчерпан ({per_user} раз)"
+    err = await _validate_promo_common(promo, tg_id=tg_id)
+    if err:
+        return None, err
 
     allowed_raw = (promo.get("plan_ids") or "").strip()
     if allowed_raw:
         allowed = {x.strip() for x in allowed_raw.split(",") if x.strip()}
         if plan_id not in allowed:
             return None, "Промокод не действует на этот тариф"
+
+    return promo, None
+
+
+async def validate_grant_promo(
+    code: str,
+    *,
+    tg_id: int,
+) -> tuple[Optional[dict], Optional[str]]:
+    promo = await promo_db.get_promo_by_code(code)
+    if not promo:
+        return None, "Промокод не найден"
+    if not is_grant_promo(promo):
+        return None, "Этот промокод даёт скидку при оплате — примените его при выборе тарифа"
+
+    err = await _validate_promo_common(promo, tg_id=tg_id)
+    if err:
+        return None, err
+
+    plan_id = promo_db.grant_plan_id(promo)
+    if not plan_id or not get_plan(plan_id):
+        return None, "Тариф промокода не настроен"
 
     return promo, None
 
@@ -134,6 +175,6 @@ async def apply_promo_on_paid_order(order: dict) -> None:
     if await promo_db.has_order_promo_use(order["id"]):
         return
     promo = await promo_db.get_promo_by_code(promo_code)
-    if not promo:
+    if not promo or is_grant_promo(promo):
         return
     await promo_db.record_promo_use(promo["id"], order["tg_id"], order["id"])

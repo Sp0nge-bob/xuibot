@@ -1,8 +1,6 @@
 """Выдача и админский сброс пробной подписки."""
 from datetime import datetime, timedelta
-from typing import Optional, Tuple
 
-from aiogram.types import BufferedInputFile
 from loguru import logger
 
 from config.trial import (
@@ -13,7 +11,13 @@ from config.trial import (
 )
 from db import database as db
 from db import trial_grants as trial_db
-from services.fulfillment import make_qr_photo
+from db.bot_settings import get_subscription_inbound_count
+from services.fulfillment import (
+    FulfillmentResult,
+    load_happ_setup_photos,
+    make_qr_photo,
+)
+from services.fulfillment_text import happ_setup_text, qr_and_sync_footer
 from services.node_sync import schedule_secondary_sync
 from services.subscription_admin import admin_reset_all_trials, admin_reset_trial_for_user
 from services.xui import provision_client
@@ -24,7 +28,7 @@ async def get_trial_button_visible(tg_id: int) -> bool:
     return ok
 
 
-async def claim_trial(tg_id: int) -> Tuple[str, Optional[BufferedInputFile]]:
+async def claim_trial(tg_id: int) -> FulfillmentResult:
     ok, reason = await trial_db.can_claim_trial(tg_id)
     if not ok:
         raise ValueError(reason)
@@ -50,6 +54,7 @@ async def claim_trial(tg_id: int) -> Tuple[str, Optional[BufferedInputFile]]:
     await trial_db.record_trial_grant(tg_id, sub_db_id)
     schedule_secondary_sync(sub_db_id)
 
+    inbound_count = await get_subscription_inbound_count()
     end_date = (datetime.utcnow() + timedelta(days=TRIAL_DAYS)).strftime("%d.%m.%Y")
     lines = [
         "✅ <b>Пробный период активирован!</b>",
@@ -63,17 +68,19 @@ async def claim_trial(tg_id: int) -> Tuple[str, Optional[BufferedInputFile]]:
         lines += [f"🔗 <b>Ссылка:</b>", f"<code>{sub_link}</code>", ""]
     lines += [
         f"👤 Клиент: <code>{email}</code>",
+        qr_and_sync_footer(inbound_count),
         "",
-        "Скопируйте ссылку или отсканируйте QR-код ниже.",
-        "",
-        "⏳ <i>Спустя 1–2 минуты после активации панель может не сразу синхронизироваться. "
-        "Пожалуйста, обновите подписку в клиенте через 2 минуты.</i>",
         f"<i>Повторно — не раньше чем через {TRIAL_COOLDOWN_DAYS} дн.</i>",
     ]
 
     photo = make_qr_photo(sub_link or email, "trial_vpn.png")
     logger.info("Trial granted for tg_id={} sub_id={}", tg_id, sub_db_id)
-    return "\n".join(lines), photo
+    return FulfillmentResult(
+        text="\n".join(lines),
+        photo=photo,
+        setup_text=happ_setup_text(),
+        setup_photos=load_happ_setup_photos(),
+    )
 
 
 async def admin_reset_trial(tg_id: int) -> dict:

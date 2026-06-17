@@ -400,6 +400,16 @@ def pending_payment_text(
     return "\n".join(lines)
 
 
+def grant_promo_enter_text() -> str:
+    return (
+        "🎟 <b>Промокод на бесплатный тариф</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        "Отправьте код в следующем сообщении.\n"
+        "Если промокод действует — тариф активируется сразу, без оплаты.\n\n"
+        "Для отмены: /start или «Главное меню»."
+    )
+
+
 def promo_enter_text(plan_name: str) -> str:
     return (
         "🎟 <b>Промокод</b>\n"
@@ -433,6 +443,17 @@ def admin_plans_text(plans: list) -> str:
     return "\n".join(lines)
 
 
+def _promo_admin_summary(p: dict) -> str:
+    from db.promo_codes import grant_plan_id, is_grant_promo
+
+    if is_grant_promo(p):
+        plan_id = grant_plan_id(p) or "?"
+        return f"🎁 тариф <code>{plan_id}</code>"
+    if p["discount_type"] == "percent":
+        return f"{p['discount_value']}%"
+    return f"{p['discount_value']} ₽"
+
+
 def admin_promos_text(promos: list) -> str:
     if not promos:
         return (
@@ -450,11 +471,7 @@ def admin_promos_text(promos: list) -> str:
     ]
     for p in promos:
         status = "✅" if p.get("is_active") else "⏸"
-        disc = (
-            f"{p['discount_value']}%"
-            if p["discount_type"] == "percent"
-            else f"{p['discount_value']} ₽"
-        )
+        disc = _promo_admin_summary(p)
         uses = p.get("used_count") or 0
         max_u = p.get("max_uses")
         uses_str = f"{uses}/{max_u}" if max_u else f"{uses}/∞"
@@ -468,11 +485,9 @@ def admin_promos_text(promos: list) -> str:
 
 
 def admin_promo_detail_text(p: dict) -> str:
-    disc = (
-        f"{p['discount_value']}%"
-        if p["discount_type"] == "percent"
-        else f"{p['discount_value']} ₽"
-    )
+    from config.plans import get_plan
+    from db.promo_codes import grant_plan_id, is_grant_promo
+
     uses = p.get("used_count") or 0
     max_u = p.get("max_uses")
     uses_str = f"{uses} / {max_u}" if max_u else f"{uses} / ∞ всего"
@@ -480,15 +495,24 @@ def admin_promo_detail_text(p: dict) -> str:
     per_user_str = "∞" if not per_user else str(per_user)
     valid = p.get("valid_until")
     valid_str = valid[:10] if valid else "без срока"
-    plans = (p.get("plan_ids") or "").strip() or "все тарифы"
     status = "активен" if p.get("is_active") else "отключён"
+
+    if is_grant_promo(p):
+        plan_id = grant_plan_id(p) or "—"
+        plan = get_plan(plan_id)
+        plan_line = f"<b>{plan['name']}</b> (<code>{plan_id}</code>)" if plan else f"<code>{plan_id}</code>"
+        kind_line = f"Тип: <b>бесплатный тариф</b>\nТариф: {plan_line}"
+    else:
+        disc = _promo_admin_summary(p)
+        plans = (p.get("plan_ids") or "").strip() or "все тарифы"
+        kind_line = f"Тип: <b>скидка при оплате</b>\nСкидка: <b>{disc}</b>\nТарифы: <code>{plans}</code>"
+
     return (
         f"🎟 <b>Промокод {p['code']}</b>\n"
         "━━━━━━━━━━━━━━━━\n\n"
-        f"Скидка: <b>{disc}</b>\n"
+        f"{kind_line}\n"
         f"Статус: {status}\n"
         f"Использований: {uses_str}\n"
         f"На пользователя: <b>{per_user_str}</b> раз\n"
-        f"Действует до: {valid_str}\n"
-        f"Тарифы: <code>{plans}</code>"
+        f"Действует до: {valid_str}"
     )

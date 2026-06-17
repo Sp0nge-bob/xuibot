@@ -5,7 +5,19 @@ def panel_sync_notice_text(inbound_count: int) -> str:
     return (
         "⏳ <i>Синхронизация клиента на серверах может занять пару минут. "
         "Обновите подписку через 2 минуты, чтобы увидеть остальные серверы. "
-        f"Количество подключений: <b>{inbound_count}</b></i>"
+        f"Количество серверов на подписке: <b>{inbound_count}</b></i>"
+    )
+
+
+def qr_and_sync_footer(inbound_count: int) -> str:
+    """Общий блок под QR: подсказка + синхронизация (платная и пробная подписка)."""
+    return "\n".join(
+        [
+            "",
+            "Скопируйте ссылку или отсканируйте QR-код ниже.",
+            "",
+            panel_sync_notice_text(inbound_count),
+        ]
     )
 
 

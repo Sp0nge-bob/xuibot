@@ -9,7 +9,7 @@ import qrcode
 from aiogram.types import BufferedInputFile, FSInputFile
 from loguru import logger
 
-from services.fulfillment_text import happ_setup_text, panel_sync_notice_text
+from services.fulfillment_text import happ_setup_text, qr_and_sync_footer
 from config.plans import Plan, get_plan
 from config.trial import is_trial_email
 from db import database as db
@@ -37,25 +37,41 @@ class FulfillmentResult:
 
 
 async def fulfill_paid_order(order: dict) -> FulfillmentResult:
-    """
-    Обрабатывает оплаченный заказ: создаёт или продлевает подписку.
-    """
+    """Обрабатывает оплаченный заказ: создаёт или продлевает подписку."""
     await apply_promo_on_paid_order(order)
     plan = get_plan(order["plan_id"])
     if not plan:
         raise ValueError(f"План {order['plan_id']} не найден")
 
-    tg_id = order["tg_id"]
-    order_type = order.get("order_type") or "new"
     is_test = order["platega_tx_id"].startswith("test-")
+    return await fulfill_plan_for_tg(
+        order["tg_id"],
+        plan,
+        order_id=order.get("id"),
+        order_type=order.get("order_type") or "new",
+        is_test=is_test,
+        title_new="Оплата прошла успешно!",
+        log_context=f"Order {order['id']}",
+    )
+
+
+async def fulfill_plan_for_tg(
+    tg_id: int,
+    plan: Plan,
+    *,
+    order_id: Optional[int] = None,
+    order_type: str = "new",
+    is_test: bool = False,
+    title_new: str = "Оплата прошла успешно!",
+    title_extend: str = "Подписка продлена!",
+    log_context: str = "",
+) -> FulfillmentResult:
     existing_sub = await db.get_primary_subscription(tg_id)
     if existing_sub and is_trial_email(existing_sub.get("client_email")):
         existing_sub = None
 
-    # Повторная покупка при активной подписке = продление
     if order_type == "extend" or existing_sub:
         if existing_sub:
-            # Сначала продлеваем в БД (надёжный источник даты), затем пушим на панель
             new_end_iso = await db.extend_subscription_record(
                 existing_sub["id"], plan["days"],
             )
@@ -87,7 +103,7 @@ async def fulfill_paid_order(order: dict) -> FulfillmentResult:
                 await build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
             )
             schedule_secondary_sync(existing_sub["id"])
-            title = "Подписка продлена!"
+            title = title_extend
             end_date = new_end_iso[:10]
         else:
             email, sub_id, sub_link = await provision_client(
@@ -98,7 +114,7 @@ async def fulfill_paid_order(order: dict) -> FulfillmentResult:
             end_date = (datetime.utcnow() + timedelta(days=plan["days"])).strftime("%Y-%m-%d")
             sub_db_id = await db.create_subscription(
                 tg_id=tg_id,
-                order_id=order["id"],
+                order_id=order_id,
                 inbound_id=0,
                 client_email=email,
                 client_uuid=sub_id,
@@ -107,7 +123,7 @@ async def fulfill_paid_order(order: dict) -> FulfillmentResult:
                 traffic_gb=plan["traffic_gb"],
             )
             schedule_secondary_sync(sub_db_id)
-            title = "Подписка продлена!"
+            title = title_extend
 
         inbound_count = await get_subscription_inbound_count()
         text = _success_text(
@@ -120,7 +136,8 @@ async def fulfill_paid_order(order: dict) -> FulfillmentResult:
             inbound_count=inbound_count,
         )
         photo = make_qr_photo(sub_link or email, "vpn_extend.png")
-        logger.success("Order {} extended for tg_id={}", order["id"], tg_id)
+        if log_context:
+            logger.success("{} extended for tg_id={}", log_context, tg_id)
         return FulfillmentResult(text=text, photo=photo)
 
     email, sub_id, sub_link = await provision_client(
@@ -132,7 +149,7 @@ async def fulfill_paid_order(order: dict) -> FulfillmentResult:
     end_date = (datetime.utcnow() + timedelta(days=plan["days"])).strftime("%Y-%m-%d")
     sub_db_id = await db.create_subscription(
         tg_id=tg_id,
-        order_id=order["id"],
+        order_id=order_id,
         inbound_id=0,
         client_email=email,
         client_uuid=sub_id,
@@ -143,7 +160,7 @@ async def fulfill_paid_order(order: dict) -> FulfillmentResult:
     schedule_secondary_sync(sub_db_id)
     inbound_count = await get_subscription_inbound_count()
     text = _success_text(
-        title="Оплата прошла успешно!",
+        title=title_new,
         plan=plan,
         end_date=end_date,
         sub_link=sub_link,
@@ -154,7 +171,8 @@ async def fulfill_paid_order(order: dict) -> FulfillmentResult:
     photo = make_qr_photo(sub_link or email, "vpn.png")
     setup_photos = load_happ_setup_photos()
     setup_text = happ_setup_text()
-    logger.success("Order {} fulfilled for tg_id={}", order["id"], tg_id)
+    if log_context:
+        logger.success("{} fulfilled for tg_id={}", log_context, tg_id)
     return FulfillmentResult(
         text=text,
         photo=photo,
@@ -187,12 +205,7 @@ def _success_text(
     lines.append(f"👤 Клиент: <code>{client_email}</code>")
     if is_test:
         lines += ["", "⚠️ <i>Тестовый режим — оплата симулирована</i>"]
-    lines += [
-        "",
-        "Скопируйте ссылку или отсканируйте QR-код ниже.",
-        "",
-        panel_sync_notice_text(inbound_count),
-    ]
+    lines.append(qr_and_sync_footer(inbound_count))
     return "\n".join(lines)
 
 

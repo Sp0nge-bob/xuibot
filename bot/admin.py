@@ -10,6 +10,7 @@ from config.settings import settings
 from db import database as db
 from db import xui_nodes as nodes_db
 from db import promo_codes as promo_db
+from db.promo_codes import PROMO_TYPE_GRANT
 from db.plan_prices import set_plan_price
 from services.pricing import list_plans
 from config.plans import get_plan
@@ -41,6 +42,8 @@ from .admin_keyboards import (
     admin_plans_kb,
     admin_promos_kb,
     admin_promo_detail_kb,
+    admin_promo_type_kb,
+    admin_promo_grant_plans_kb,
     admin_users_kb,
     admin_users_menu_kb,
     admin_users_search_kb,
@@ -603,7 +606,7 @@ async def cb_admin_promo_create(cb: CallbackQuery, state: FSMContext):
     await send_or_edit(
         cb,
         "➕ <b>Новый промокод</b>\n\n"
-        "Шаг 1/5. Отправьте код (латиница/цифры).\n"
+        "Шаг 1. Отправьте код (латиница/цифры).\n"
         "Пример: <code>SALE20</code>\n\n"
         "Для отмены: /admin",
         admin_back_kb(),
@@ -622,11 +625,70 @@ async def msg_promo_code_step(message: Message, state: FSMContext):
         await message.answer("❌ Такой промокод уже есть.")
         return
     await state.update_data(new_promo_code=code)
-    await state.set_state(AdminPricingStates.waiting_promo_discount)
     await message.answer(
-        f"Шаг 2/5. Скидка для <code>{code}</code>:\n"
+        f"Шаг 2. Тип промокода <code>{code}</code>:",
+        reply_markup=admin_promo_type_kb(),
+    )
+
+
+@router.callback_query(F.data == "adm:promo:type:discount")
+async def cb_admin_promo_type_discount(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    data = await state.get_data()
+    code = data.get("new_promo_code")
+    if not code:
+        await safe_cb_answer(cb, "Сессия истекла", show_alert=True)
+        return
+    await state.update_data(new_promo_type="discount")
+    await state.set_state(AdminPricingStates.waiting_promo_discount)
+    await safe_cb_answer(cb)
+    await send_or_edit(
+        cb,
+        f"Шаг 3. Скидка для <code>{code}</code>:\n"
         "• <code>20%</code> — процент\n"
-        "• <code>100</code> — 100 ₽ фиксированно"
+        "• <code>100</code> — 100 ₽ фиксированно",
+        admin_back_kb(),
+    )
+
+
+@router.callback_query(F.data == "adm:promo:type:grant")
+async def cb_admin_promo_type_grant(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    data = await state.get_data()
+    code = data.get("new_promo_code")
+    if not code:
+        await safe_cb_answer(cb, "Сессия истекла", show_alert=True)
+        return
+    plans = await list_plans()
+    await state.update_data(new_promo_type=PROMO_TYPE_GRANT)
+    await safe_cb_answer(cb)
+    await send_or_edit(
+        cb,
+        f"Шаг 3. Выберите тариф для <code>{code}</code>:\n"
+        "Пользователь получит его бесплатно при активации промокода.",
+        admin_promo_grant_plans_kb(plans),
+    )
+
+
+@router.callback_query(F.data.startswith("adm:promo:grant_plan:"))
+async def cb_admin_promo_grant_plan(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    plan_id = cb.data.split(":", 3)[3]
+    if not get_plan(plan_id):
+        await safe_cb_answer(cb, "Тариф не найден", show_alert=True)
+        return
+    await state.update_data(new_promo_grant_plan_id=plan_id)
+    await state.set_state(AdminPricingStates.waiting_promo_max_uses)
+    await safe_cb_answer(cb)
+    await send_or_edit(
+        cb,
+        f"Шаг 4. Общий лимит для тарифа <code>{plan_id}</code>.\n"
+        "• <code>0</code> — безлимит\n"
+        "• <code>50</code> — не больше 50 активаций всего",
+        admin_back_kb(),
     )
 
 
@@ -658,7 +720,7 @@ async def msg_promo_discount_step(message: Message, state: FSMContext):
     )
     await state.set_state(AdminPricingStates.waiting_promo_max_uses)
     await message.answer(
-        "Шаг 3/5. Общий лимит (все пользователи).\n"
+        "Шаг 4. Общий лимит (все пользователи).\n"
         "• <code>0</code> — безлимит\n"
         "• <code>50</code> — не больше 50 раз всего"
     )
@@ -676,7 +738,7 @@ async def msg_promo_max_uses_step(message: Message, state: FSMContext):
     await state.update_data(new_promo_max_uses=None if max_uses == 0 else max_uses)
     await state.set_state(AdminPricingStates.waiting_promo_per_user)
     await message.answer(
-        "Шаг 4/5. Лимит на одного пользователя.\n"
+        "Шаг 5. Лимит на одного пользователя.\n"
         "• <code>1</code> — один раз на человека\n"
         "• <code>3</code> — каждый может применить до 3 раз\n"
         "• <code>0</code> — безлимит на пользователя"
@@ -695,7 +757,7 @@ async def msg_promo_per_user_step(message: Message, state: FSMContext):
     await state.update_data(new_promo_per_user=per_user)
     await state.set_state(AdminPricingStates.waiting_promo_valid_days)
     await message.answer(
-        "Шаг 5/5. Срок действия в днях.\n"
+        "Шаг 6. Срок действия в днях.\n"
         "• <code>0</code> — без срока\n"
         "• <code>30</code> — 30 дней"
     )
@@ -711,15 +773,29 @@ async def msg_promo_valid_days_step(message: Message, state: FSMContext):
         return
     valid_days = int(raw)
     data = await state.get_data()
+    promo_type = data.get("new_promo_type", "discount")
     try:
-        promo = await promo_db.create_promo_code(
-            code=data["new_promo_code"],
-            discount_type=data["new_promo_discount_type"],
-            discount_value=data["new_promo_discount_value"],
-            max_uses=data.get("new_promo_max_uses"),
-            per_user_limit=data.get("new_promo_per_user", 1),
-            valid_days=valid_days or None,
-        )
+        if promo_type == PROMO_TYPE_GRANT:
+            promo = await promo_db.create_promo_code(
+                code=data["new_promo_code"],
+                discount_type="grant",
+                discount_value=0,
+                max_uses=data.get("new_promo_max_uses"),
+                per_user_limit=data.get("new_promo_per_user", 1),
+                valid_days=valid_days or None,
+                plan_ids=[data["new_promo_grant_plan_id"]],
+                promo_type=PROMO_TYPE_GRANT,
+            )
+        else:
+            promo = await promo_db.create_promo_code(
+                code=data["new_promo_code"],
+                discount_type=data["new_promo_discount_type"],
+                discount_value=data["new_promo_discount_value"],
+                max_uses=data.get("new_promo_max_uses"),
+                per_user_limit=data.get("new_promo_per_user", 1),
+                valid_days=valid_days or None,
+                promo_type="discount",
+            )
     except ValueError as e:
         await message.answer(f"❌ {e}")
         return

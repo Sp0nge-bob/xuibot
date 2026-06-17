@@ -15,6 +15,7 @@ def main_menu_kb(*, trial_available: bool = False) -> InlineKeyboardMarkup:
         )])
     rows += [
         [InlineKeyboardButton(text="📦 Тарифы", callback_data="tariffs")],
+        [InlineKeyboardButton(text="🎟 Промокод", callback_data="grant_promo_enter")],
         [InlineKeyboardButton(text="⚙️ Управление подпиской", callback_data="manage_sub")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
