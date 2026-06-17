@@ -8,8 +8,30 @@ DB_PATH = os.getenv("DB_PATH", "data/bot.db")
 
 os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
 
+
+async def _apply_pragmas(db: aiosqlite.Connection) -> None:
+    await db.execute("PRAGMA journal_mode=WAL")
+    await db.execute("PRAGMA busy_timeout=5000")
+    await db.execute("PRAGMA foreign_keys=ON")
+
+
+async def _create_indexes(db: aiosqlite.Connection) -> None:
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_subscriptions_tg_active "
+        "ON subscriptions(tg_id, is_active)"
+    )
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_subscriptions_active_end "
+        "ON subscriptions(is_active, end_date DESC)"
+    )
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_orders_tg_status ON orders(tg_id, status)"
+    )
+
+
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
+        await _apply_pragmas(db)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 tg_id INTEGER PRIMARY KEY,
@@ -83,6 +105,7 @@ async def init_db():
                 FOREIGN KEY(order_id) REFERENCES orders(id)
             )
         """)
+        await _create_indexes(db)
         await db.commit()
 
     from db.bot_settings import init_bot_settings
@@ -136,11 +159,25 @@ async def create_order(
 
 async def update_order_status(platega_tx_id: str, status: str):
     async with aiosqlite.connect(DB_PATH) as db:
+        await _apply_pragmas(db)
         await db.execute(
             "UPDATE orders SET status = ?, paid_at = ? WHERE platega_tx_id = ?",
             (status, datetime.utcnow().isoformat() if status == "paid" else None, platega_tx_id)
         )
         await db.commit()
+
+
+async def mark_order_paid_if_pending(platega_tx_id: str) -> bool:
+    """Атомарно pending → paid. False если уже paid или не pending."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await _apply_pragmas(db)
+        cur = await db.execute(
+            """UPDATE orders SET status = 'paid', paid_at = ?
+               WHERE platega_tx_id = ? AND status = 'pending'""",
+            (datetime.utcnow().isoformat(), platega_tx_id),
+        )
+        await db.commit()
+        return cur.rowcount > 0
 
 async def get_order_by_platega_tx(tx_id: str) -> Optional[Dict[str, Any]]:
     async with aiosqlite.connect(DB_PATH) as db:
@@ -174,16 +211,35 @@ async def create_subscription(
         return cursor.lastrowid
 
 async def get_primary_subscription(tg_id: int) -> Optional[Dict[str, Any]]:
-    subs = await get_active_subscriptions(tg_id)
-    return subs[0] if subs else None
+    async with aiosqlite.connect(DB_PATH) as db:
+        await _apply_pragmas(db)
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT * FROM subscriptions
+               WHERE tg_id = ? AND is_active = 1
+               ORDER BY CASE WHEN client_email LIKE 'tgfree%' THEN 1 ELSE 0 END,
+                        end_date DESC
+               LIMIT 1""",
+            (tg_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
 
 
 async def get_primary_paid_subscription(tg_id: int) -> Optional[Dict[str, Any]]:
-    subs = await get_active_subscriptions(tg_id)
-    for sub in subs:
-        if not (sub.get("client_email") or "").startswith("tgfree"):
-            return sub
-    return None
+    async with aiosqlite.connect(DB_PATH) as db:
+        await _apply_pragmas(db)
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT * FROM subscriptions
+               WHERE tg_id = ? AND is_active = 1
+                 AND client_email NOT LIKE 'tgfree%'
+               ORDER BY end_date DESC
+               LIMIT 1""",
+            (tg_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
 
 
 async def get_subscription_by_id(sub_id: int) -> Optional[Dict[str, Any]]:
@@ -255,14 +311,33 @@ async def get_active_subscriptions(tg_id: int) -> List[Dict[str, Any]]:
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
 
+_SYNC_SUB_COLS = (
+    "id, tg_id, order_id, client_email, client_uuid, sub_id, "
+    "start_date, end_date, traffic_limit_gb, is_active"
+)
+
+
 async def get_all_active_subscriptions() -> List[Dict[str, Any]]:
     async with aiosqlite.connect(DB_PATH) as db:
+        await _apply_pragmas(db)
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            "SELECT * FROM subscriptions WHERE is_active = 1 ORDER BY end_date DESC"
+            f"SELECT {_SYNC_SUB_COLS} FROM subscriptions "
+            "WHERE is_active = 1 ORDER BY end_date DESC"
         ) as cur:
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
+
+
+async def count_active_trial_subscriptions() -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await _apply_pragmas(db)
+        async with db.execute(
+            """SELECT COUNT(*) FROM subscriptions
+               WHERE is_active = 1 AND client_email LIKE 'tgfree%'"""
+        ) as cur:
+            row = await cur.fetchone()
+            return int(row[0]) if row else 0
 
 
 async def get_expired_subscriptions() -> List[Dict[str, Any]]:

@@ -784,8 +784,7 @@ async def cb_admin_promo_delete(cb: CallbackQuery):
 
 
 async def _active_trial_count() -> int:
-    subs = await db.get_all_active_subscriptions()
-    return sum(1 for s in subs if is_trial_email(s.get("client_email")))
+    return await db.count_active_trial_subscriptions()
 
 
 @router.callback_query(F.data == "adm:trial")

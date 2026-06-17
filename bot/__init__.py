@@ -7,12 +7,13 @@ from aiogram.client.default import DefaultBotProperties
 from loguru import logger
 
 from config.settings import settings
+from services.node_sync import start_secondary_sync_workers
 from services.xui import ensure_bot_group, log_inbound_port_conflicts
 from .handlers import router as main_router
 from .admin import router as admin_router
 from .admin_nodes import router as admin_nodes_router
 from .middlewares import ActionLockMiddleware
-from .scheduler import start_scheduler
+from .scheduler import start_scheduler, stop_scheduler
 from .sender import send_message
 
 bot = Bot(
@@ -32,9 +33,12 @@ dp.include_router(admin_nodes_router)
 
 async def start_bot():
     """Запуск бота с проверкой токена и polling."""
+    import asyncio
+
     logger.info("Бот запускается…")
 
     start_scheduler()
+    await start_secondary_sync_workers()
 
     try:
         import asyncio as _asyncio
@@ -68,9 +72,30 @@ async def start_bot():
         logger.debug("DEBUG-логи aiogram и aiohttp включены")
 
     logger.info("Polling started")
-    await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+    try:
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+    except asyncio.CancelledError:
+        logger.info("Polling cancelled")
+        raise
 
 
 async def stop_bot():
+    """Корректная остановка: polling → scheduler → HTTP-сессия."""
+    import asyncio
+
     logger.info("Бот останавливается…")
-    await bot.session.close()
+    try:
+        await asyncio.wait_for(dp.stop_polling(), timeout=3.0)
+    except asyncio.TimeoutError:
+        logger.warning("stop_polling timeout — принудительное завершение")
+    except Exception as e:
+        logger.debug("stop_polling: {}", e)
+
+    stop_scheduler()
+
+    try:
+        await bot.session.close()
+    except Exception as e:
+        logger.debug("bot.session.close: {}", e)
+
+    logger.info("Бот остановлен")

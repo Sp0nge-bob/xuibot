@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     XUI_PANEL_CONCURRENCY: int = 5
     XUI_INBOUND_CACHE_TTL: int = 180
     XUI_REQUEST_DELAY_MS: int = 20
+    XUI_SECONDARY_SYNC_WORKERS: int = 3
+
+    # Полная синхронизация нод — отдельный процесс run_sync.py
+    FULL_SYNC_INTERVAL_HOURS: int = 24
 
     # Пока бот настроен на одну ноду.
     # Если хочешь раздавать клиентов по 3 нодам — скажи, добавлю выбор ноды / балансировку.

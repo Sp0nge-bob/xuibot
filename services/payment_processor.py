@@ -74,7 +74,8 @@ async def handle_platega_status(
         return PaymentProcessResult(handled=True, already_paid=True)
 
     if status == "CONFIRMED":
-        await db.update_order_status(tx_id, "paid")
+        if not await db.mark_order_paid_if_pending(tx_id):
+            return PaymentProcessResult(handled=True, already_paid=True)
         try:
             fresh_order = await db.get_order_by_platega_tx(tx_id) or order
             text, photo = await fulfill_paid_order(fresh_order)

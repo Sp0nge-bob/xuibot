@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from datetime import datetime
 from typing import Any
 
@@ -11,37 +10,31 @@ from loguru import logger
 from config.settings import settings
 from db import database as db
 from db import xui_nodes as nodes_db
-from services.panel_cache import panel_cache
 from services.xui import (
     _client_needs_replica_update,
     _dedupe_nodes_by_host,
     _unified_get_client_info,
     _unified_update_client,
     ensure_bot_group_on_node,
+    ensure_client_absent_on_primary,
     get_api,
     get_api_for_node,
     list_bot_client_emails_on_panel,
     provision_client,
-    recreate_client_from_db_state,
+    purge_client_on_secondaries,
     remove_bot_client_on_panel,
-    get_missing_required_inbounds,
     sub_desired_state_from_db,
     sync_client_state_on_node,
-    verify_client_inbounds_stable,
 )
-
-# recreate не чинит same-port drift — не крутить в цикле
-_BROKEN_INBOUNDS_COOLDOWN_UNTIL: dict[str, float] = {}
-BROKEN_RECREATE_COOLDOWN_SEC = 600
-
-
-async def _recreate_subscription_on_primary(sub: dict[str, Any]) -> None:
-    """clients/del на всех нодах → clients/add на основной (inboundIds + expiryTime из БД)."""
-    await recreate_client_from_db_state(sub)
 
 
 async def ensure_subscription_on_primary(sub: dict[str, Any]) -> str:
-    """Фаза 1: активная подписка из БД должна быть на основной панели."""
+    """
+    Фаза 1: БД → основная нода.
+    - Клиент есть на основной → выровнять expiry и трафик.
+    - Клиента нет на основной → призраки на вторичных, очистка основной, один clients/add.
+    Inbounds не перепривязываем — панель сама схлопывает за 1–2 мин.
+    """
     state = sub_desired_state_from_db(sub)
     email = sub["client_email"]
     api = await get_api()
@@ -49,60 +42,30 @@ async def ensure_subscription_on_primary(sub: dict[str, Any]) -> str:
 
     info = await _unified_get_client_info(api, email)
     if info is None:
-        traffic_gb = int(sub.get("traffic_limit_gb") or 0)
-        await provision_client(
-            tg_id=sub["tg_id"],
-            plan_days=1,
-            traffic_gb=traffic_gb,
-            sub_id=sub.get("sub_id"),
-            target_expiry_ms=state["expiry_ms"],
-            client_email=email,
-        )
-        logger.info("Sync primary: создан {} из БД", email)
-        return "created"
-
-    missing = await get_missing_required_inbounds(
-        api, email, sub_id=state["sub_id"] or sub.get("sub_id") or "",
-    )
-    if missing:
-        sub_id = state["sub_id"] or sub.get("sub_id") or ""
-        key = email.lower()
-        now = time.monotonic()
-        if now < _BROKEN_INBOUNDS_COOLDOWN_UNTIL.get(key, 0):
-            left = int(_BROKEN_INBOUNDS_COOLDOWN_UNTIL[key] - now)
-            logger.warning(
-                "Sync primary: {} inbounds битые — recreate недавно не помог, "
-                "пропуск (повтор через {} с, same-port drift панели)",
-                email, left,
+        ghost_nodes = await purge_client_on_secondaries(email)
+        if ghost_nodes:
+            logger.info(
+                "Sync primary: {} нет на основной — удалены призраки на {}",
+                email, ", ".join(ghost_nodes),
             )
-            return "skipped_broken"
+        await ensure_client_absent_on_primary(email)
 
-        logger.warning(
-            "Sync primary: {} не хватает inbounds {} — удаление на всех нодах и пересоздание",
-            email, missing,
-        )
-        await _recreate_subscription_on_primary(sub)
-        panel_cache.invalidate()
-        ok, still_missing = await verify_client_inbounds_stable(
-            await get_api(), email, sub_id=sub_id, settle_sec=5.0,
-        )
-        if ok:
-            _BROKEN_INBOUNDS_COOLDOWN_UNTIL.pop(key, None)
-            logger.info("Sync primary: {} пересоздан, inbounds стабильны (subLinks OK)", email)
-            return "recreated"
-
-        _BROKEN_INBOUNDS_COOLDOWN_UNTIL[key] = now + BROKEN_RECREATE_COOLDOWN_SEC
-        logger.error(
-            "Sync primary: {} после пересоздания inbounds всё ещё битые: {} — "
-            "инбаунды на одном порту, recreate не помогает (пауза {} мин)",
-            email, still_missing, BROKEN_RECREATE_COOLDOWN_SEC // 60,
-        )
-        return "recreated_broken"
-
-    info = await _unified_get_client_info(api, email)
-    if info is None:
-        await _recreate_subscription_on_primary(sub)
-        return "recreated"
+        traffic_gb = int(sub.get("traffic_limit_gb") or 0)
+        try:
+            await provision_client(
+                tg_id=sub["tg_id"],
+                plan_days=1,
+                traffic_gb=traffic_gb,
+                sub_id=sub.get("sub_id"),
+                target_expiry_ms=state["expiry_ms"],
+                client_email=email,
+                skip_preclean=True,
+            )
+        except ValueError as e:
+            logger.error("Sync primary: не удалось создать {}: {}", email, e)
+            return "failed"
+        logger.info("Sync primary: создан {} на основной из БД", email)
+        return "created"
 
     client, _, _ = info
     if _client_needs_replica_update(
@@ -120,22 +83,15 @@ async def ensure_subscription_on_primary(sub: dict[str, Any]) -> str:
             subId=state["sub_id"] or client.sub_id or "",
             enable=state["enable"],
         )
-        logger.info("Sync primary: обновлён {}", email)
+        logger.info("Sync primary: обновлён {} (expiry/трафик)", email)
         return "updated"
 
-    from db.bot_settings import get_subscription_inbound_ids
-
-    required = await get_subscription_inbound_ids()
-    _, unified_ids, _ = info
-    logger.info(
-        "Sync primary: {} skipped (unified={}, required={})",
-        email, sorted(set(unified_ids or [])), required,
-    )
+    logger.info("Sync primary: {} skipped (expiry/трафик совпадают)", email)
     return "skipped"
 
 
 async def sync_subscription_to_node(sub: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
-    """Фаза 2: синхронизация состояния на вторичной (без создания)."""
+    """Фаза 2: основная → вторичная — только expiry/трафик, без создания."""
     node_id = node["id"]
     email = sub["client_email"]
     try:
@@ -162,7 +118,6 @@ async def sync_subscription_to_node(sub: dict[str, Any], node: dict[str, Any]) -
 async def _sync_primary_from_db(subs: list[dict[str, Any]]) -> dict[str, int]:
     stats = {
         "subs": len(subs), "created": 0, "updated": 0,
-        "recreated": 0, "recreated_broken": 0, "skipped_broken": 0,
         "skipped": 0, "failed": 0,
     }
     sem = asyncio.Semaphore(settings.XUI_PANEL_CONCURRENCY)
@@ -180,23 +135,17 @@ async def _sync_primary_from_db(subs: list[dict[str, Any]]) -> dict[str, int]:
     return stats
 
 
-def _allowed_subscription_emails(subs: list[dict[str, Any]]) -> set[str]:
-    return {
-        (sub.get("client_email") or "").strip().lower()
-        for sub in subs
-        if (sub.get("client_email") or "").strip()
-    }
-
-
 async def _sync_secondaries_vs_primary(
     subs: list[dict[str, Any]],
+    *,
+    primary_emails: set[str],
 ) -> dict[str, int]:
+    """Фаза 2: вторичные ↔ основная — призраки и expiry/трафик."""
     nodes = _dedupe_nodes_by_host(await nodes_db.get_secondary_nodes(healthy_only=True))
     stats = {"nodes": len(nodes), "synced": 0, "missing": 0, "purged": 0, "failed": 0}
     if not nodes:
         return stats
 
-    allowed_emails = _allowed_subscription_emails(subs)
     sem = asyncio.Semaphore(settings.XUI_PANEL_CONCURRENCY)
     stats_lock = asyncio.Lock()
 
@@ -209,18 +158,18 @@ async def _sync_secondaries_vs_primary(
         try:
             api = await get_api_for_node(node)
             secondary_emails = await list_bot_client_emails_on_panel(api)
-            excess = secondary_emails - allowed_emails
+            ghosts = secondary_emails - primary_emails
             logger.info(
-                "Sync secondary {}: на панели {} tg, в БД {}, лишних {}",
-                node.get("name"), len(secondary_emails), len(allowed_emails), len(excess),
+                "Sync secondary {}: {} tg на ноде, {} на основной, призраков {}",
+                node.get("name"), len(secondary_emails), len(primary_emails), len(ghosts),
             )
-            for email in sorted(excess):
+            for email in sorted(ghosts):
                 async with sem:
                     try:
                         await remove_bot_client_on_panel(api, email)
                         node_purged += 1
                         logger.info(
-                            "Sync secondary {}: удалён лишний {} (нет в активных подписках БД)",
+                            "Sync secondary {}: удалён призрак {} (нет на основной)",
                             node.get("name"), email,
                         )
                     except Exception as e:
@@ -230,17 +179,19 @@ async def _sync_secondaries_vs_primary(
                             node.get("name"), email, e,
                         )
 
-            for sub in subs:
+            async def _sync_one_sub(sub: dict) -> None:
+                nonlocal node_synced, node_missing, node_failed
                 async with sem:
                     r = await sync_subscription_to_node(sub, node)
                     if not r.get("ok"):
                         node_failed += 1
-                        continue
-                    action = r.get("action")
-                    if action == "missing":
+                        return
+                    if r.get("action") == "missing":
                         node_missing += 1
                     else:
                         node_synced += 1
+
+            await asyncio.gather(*[_sync_one_sub(s) for s in subs])
 
             await nodes_db.update_node(
                 node_id,
@@ -265,9 +216,9 @@ async def _sync_secondaries_vs_primary(
 
 async def run_full_nodes_sync() -> dict[str, Any]:
     """
-    Полная синхронизация (кнопка в админке):
-    1) БД ↔ основная — восстановить/обновить клиентов
-    2) Основная ↔ вторичные — синк состояния, удалить лишних tg на вторичных
+    Полная синхронизация:
+    1) БД → основная
+    2) Основная → вторичные (призраки + expiry/трафик)
     """
     subs = await db.get_all_active_subscriptions()
     logger.info("Full nodes sync: {} active subscriptions", len(subs))
@@ -281,18 +232,17 @@ async def run_full_nodes_sync() -> dict[str, Any]:
 
     api_primary = await get_api_for_node(primary)
     primary_emails = await list_bot_client_emails_on_panel(api_primary)
-    allowed = _allowed_subscription_emails(subs)
     logger.info(
         "Full nodes sync: {} tg on primary, {} active subs in DB",
-        len(primary_emails), len(allowed),
+        len(primary_emails), len(subs),
     )
 
-    phase2 = await _sync_secondaries_vs_primary(subs)
+    phase2 = await _sync_secondaries_vs_primary(subs, primary_emails=primary_emails)
 
     logger.info(
-        "Full nodes sync done: primary created={} updated={} recreated={} failed={}; "
+        "Full nodes sync done: primary created={} updated={} failed={}; "
         "secondary purged={} synced={} failed={}",
-        phase1["created"], phase1["updated"], phase1.get("recreated", 0), phase1["failed"],
+        phase1["created"], phase1["updated"], phase1["failed"],
         phase2["purged"], phase2["synced"], phase2["failed"],
     )
     return {"phase1": phase1, "phase2": phase2}
@@ -309,9 +259,6 @@ async def sync_all_secondary_nodes() -> dict[str, int]:
         "failed": p1["failed"] + p2["failed"],
         "primary_created": p1["created"],
         "primary_updated": p1["updated"],
-        "primary_recreated": p1.get("recreated", 0),
-        "primary_recreated_broken": p1.get("recreated_broken", 0),
-        "primary_skipped_broken": p1.get("skipped_broken", 0),
         "primary_failed": p1["failed"],
         "secondary_failed": p2["failed"],
         "purged": p2["purged"],
@@ -319,35 +266,70 @@ async def sync_all_secondary_nodes() -> dict[str, int]:
     }
 
 
+_secondary_queue: asyncio.Queue[int] | None = None
+_secondary_workers_started = False
+
+
+def _secondary_queue() -> asyncio.Queue[int]:
+    global _secondary_queue
+    if _secondary_queue is None:
+        _secondary_queue = asyncio.Queue()
+    return _secondary_queue
+
+
 async def sync_subscription_to_secondaries(sub_id: int) -> list[dict[str, Any]]:
-    """Быстрый синк одной подписки после оплаты (без purge всех нод)."""
+    """После оплаты: только вторичные (основная уже обновлена при provision/extend)."""
     sub = await db.get_subscription_by_id(sub_id)
     if not sub or not sub.get("is_active"):
         return []
-    try:
-        await ensure_subscription_on_primary(sub)
-    except Exception as e:
-        logger.error("Post-pay primary ensure failed for #{}: {}", sub_id, e)
 
     nodes = await nodes_db.get_secondary_nodes(healthy_only=True)
     if not nodes:
         return []
-    results = []
-    for node in nodes:
-        results.append(await sync_subscription_to_node(sub, node))
-        if results[-1].get("ok"):
-            await nodes_db.update_node(
-                node["id"],
-                last_sync_at=datetime.utcnow().isoformat(),
-                last_sync_error=None,
-            )
-    return results
+
+    sem = asyncio.Semaphore(settings.XUI_SECONDARY_SYNC_WORKERS)
+
+    async def _one(node: dict) -> dict[str, Any]:
+        async with sem:
+            r = await sync_subscription_to_node(sub, node)
+            if r.get("ok"):
+                await nodes_db.update_node(
+                    node["id"],
+                    last_sync_at=datetime.utcnow().isoformat(),
+                    last_sync_error=None,
+                )
+            return r
+
+    return list(await asyncio.gather(*[_one(n) for n in nodes]))
+
+
+async def _secondary_sync_worker() -> None:
+    q = _secondary_queue()
+    while True:
+        sub_id = await q.get()
+        try:
+            await sync_subscription_to_secondaries(sub_id)
+        except Exception as e:
+            logger.error("Secondary sync worker failed for #{}: {}", sub_id, e)
+        finally:
+            q.task_done()
+
+
+async def start_secondary_sync_workers() -> None:
+    global _secondary_workers_started
+    if _secondary_workers_started:
+        return
+    _secondary_workers_started = True
+    workers = max(1, settings.XUI_SECONDARY_SYNC_WORKERS)
+    for _ in range(workers):
+        asyncio.create_task(_secondary_sync_worker())
+    logger.info("Secondary sync workers started ({})", workers)
 
 
 def schedule_secondary_sync(sub_id: int) -> None:
-    """Fire-and-forget после оплаты/пробного."""
+    """Очередь после оплаты/пробного — не блокирует бота."""
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(sync_subscription_to_secondaries(sub_id))
+        loop.create_task(_secondary_queue().put(sub_id))
     except RuntimeError:
         pass

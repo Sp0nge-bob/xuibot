@@ -12,7 +12,11 @@ from db.bot_settings import (
     set_subscription_inbound_ids,
 )
 from services.node_health import check_all_nodes_health, check_node_health
-from services.node_sync import sync_all_secondary_nodes
+from services.sync_store import (
+    format_sync_report_text,
+    get_sync_report,
+    request_manual_sync,
+)
 from services.xui import invalidate_api_cache, normalize_xui_host
 from .admin_auth import is_admin
 from .admin_keyboards import admin_inbounds_kb
@@ -77,6 +81,9 @@ async def nodes_list_text() -> str:
             )
         if len(nodes) > 15:
             lines.append(f"… и ещё <b>{len(nodes) - 15}</b> записей в БД")
+    lines += ["", "━━━━━━━━━━━━━━━━", ""]
+    report = await get_sync_report()
+    lines.append(format_sync_report_text(report))
     return "\n".join(lines)
 
 
@@ -584,30 +591,21 @@ async def cb_nodes_health_all(cb: CallbackQuery):
 async def cb_nodes_sync(cb: CallbackQuery):
     if not is_admin(cb.from_user.id):
         return
-    await safe_cb_answer(cb, "Синхронизация…")
-    await send_or_edit(cb, "⏳ Синхронизация…\n1/2 БД ↔ основная\n2/2 Основная ↔ вторичные")
-    try:
-        stats = await sync_all_secondary_nodes()
-        text = (
-            "✅ <b>Синхронизация завершена</b>\n\n"
-            f"<b>Фаза 1</b> (БД → основная)\n"
-            f"Подписок: {stats['subs']}\n"
-            f"Создано: {stats.get('primary_created', 0)}\n"
-            f"Обновлено: {stats.get('primary_updated', 0)}\n"
-            f"Пересоздано (inbounds): {stats.get('primary_recreated', 0)}\n"
-            f"Пересоздано, но битые: {stats.get('primary_recreated_broken', 0)}\n"
-            f"Пропуск (same-port): {stats.get('primary_skipped_broken', 0)}\n"
-            f"Ошибок: {stats.get('primary_failed', 0)}\n\n"
-            f"<b>Фаза 2</b> (основная → вторичные)\n"
-            f"Нод: {stats['nodes']}\n"
-            f"Синхронизировано: {stats['ok']}\n"
-            f"Удалено лишних tg (не в БД): {stats.get('purged', 0)}\n"
-            f"Нет на ноде (ожидается sync панели): {stats.get('secondary_missing', 0)}\n"
-            f"Ошибок: {stats.get('secondary_failed', 0)}"
-        )
-    except Exception as e:
-        logger.exception("Manual sync failed: {}", e)
-        text = f"❌ Ошибка синхронизации: <code>{str(e)[:120]}</code>"
+    report = await get_sync_report()
+    if report.get("status") == "running":
+        await safe_cb_answer(cb, "Синхронизация уже выполняется", show_alert=True)
+        nodes = await nodes_db.list_nodes()
+        await send_or_edit(cb, await nodes_list_text(), nodes_list_kb(nodes))
+        return
+
+    await request_manual_sync()
+    await safe_cb_answer(cb, "Запрос отправлен в фон")
+    text = (
+        "📋 <b>Синхронизация поставлена в очередь</b>\n\n"
+        "Тяжёлая синхронизация выполняется отдельным процессом "
+        "<code>run_sync.py</code> и не блокирует бота.\n\n"
+        "Обновите список нод через минуту — появится результат последнего прогона."
+    )
     nodes = await nodes_db.list_nodes()
     await send_or_edit(cb, text, nodes_list_kb(nodes))
 
