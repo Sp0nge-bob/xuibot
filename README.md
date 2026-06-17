@@ -27,12 +27,20 @@ cp .env.example .env && nano .env
 | `PUBLIC_WEBHOOK_URL` | HTTPS URL + `/platega-webhook` |
 | `ALLOW_DEBUG_ADMIN` | `false` |
 
-**Два процесса:**
+**Запуск одной командой** (webhook + Telegram, два процесса):
+
+```bash
+python run_all.py
+```
+
+Или в двух терминалах / через systemd:
 
 ```bash
 python app.py       # webhook Platega + очередь выдачи
 python run_bot.py   # Telegram polling + планировщик
 ```
+
+Для отладки в одном процессе: `START_BOT_IN_WEBAPP=true` в `.env`, затем `python app.py`.
 
 Проверка webhook: `curl https://your-domain.com/health` → `{"status":"ok"}`
 
@@ -61,6 +69,7 @@ python run_bot.py   # Telegram polling + планировщик
 
 | Путь | Назначение |
 |------|------------|
+| `run_all.py` | Запуск webhook + Telegram одной командой |
 | `app.py` | FastAPI: webhook Platega, очередь fulfillment |
 | `run_bot.py` | Telegram-бот (polling) |
 | `bot/` | aiogram: меню, админка, тикеты |

@@ -1,18 +1,14 @@
 """
-Прямой запуск Telegram-бота (polling).
+Запуск Telegram-бота (polling) — отдельный процесс от webhook.
 
-Рекомендуется для надёжности, особенно когда используешь polling.
+Продакшен (два процесса):
+    python app.py        # FastAPI + webhook Platega
+    python run_bot.py    # Telegram polling + планировщик
 
-Запуск:
-    python run_bot.py
+Локальная разработка — то же самое. Одна команда (два процесса):
+    python run_all.py
 
-Или через screen на VPS:
-    screen -S bot
-    python run_bot.py
-    # Ctrl+A, D — чтобы отсоединиться
-
-Этот способ избегает сложностей с FastAPI lifespan + asyncio.create_task
-для долгоживущего polling-цикла.
+Монолит в одном процессе: START_BOT_IN_WEBAPP=true в .env, затем python app.py
 """
 import asyncio
 
@@ -31,7 +27,7 @@ async def _main() -> None:
 
 
 if __name__ == "__main__":
-    print("Starting Telegram bot (polling mode)...")
+    print("Starting Telegram bot (polling)...")
     try:
         asyncio.run(_main())
     except KeyboardInterrupt:

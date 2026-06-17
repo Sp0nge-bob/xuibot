@@ -6,7 +6,7 @@
 
 ## Бот не отвечает в Telegram
 
-- Запущен ли `run_bot.py`?
+- Запущен ли бот? (`python run_all.py` или отдельно `python run_bot.py`)
 - В логах: `Подключён @username` и `Polling started`
 - Верный `BOT_TOKEN`?
 

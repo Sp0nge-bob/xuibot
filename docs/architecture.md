@@ -22,7 +22,13 @@ flowchart LR
 | Webhook | `python app.py` | Приём callback Platega, rate limit, идемпотентность, очередь выдачи ключей |
 | Бот | `python run_bot.py` | Меню, оплата, админка, планировщик (истечение подписок, sync нод) |
 
-`START_BOT_IN_WEBAPP=true` объединяет оба в одном процессе — удобно для отладки, **не рекомендуется** для прода.
+**Способы запуска:**
+
+| Команда | Когда использовать |
+|---------|-------------------|
+| `python run_all.py` | Локально и на VPS без systemd — одна команда, два процесса |
+| `python app.py` + `python run_bot.py` | Продакшен с systemd (два unit-файла) |
+| `START_BOT_IN_WEBAPP=true` → `python app.py` | Отладка в одном процессе, **не для прода** |
 
 ---
 

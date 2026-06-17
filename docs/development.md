@@ -14,7 +14,10 @@ ALLOW_DEBUG_ADMIN=true
 LOG_LEVEL=DEBUG
 ```
 
-Запуск: `python run_bot.py` (webhook не обязателен для теста покупки через симулятор).
+Запуск:
+
+- `python run_all.py` — webhook + Telegram (полный цикл)
+- `python run_bot.py` — только бот (webhook не нужен для симулятора Platega в TEST_MODE)
 
 Перед продом: `TEST_MODE=false`, реальные credentials Platega.
 

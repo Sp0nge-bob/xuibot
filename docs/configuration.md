@@ -37,9 +37,17 @@
 | Переменная | Продакшен | Разработка |
 |------------|-----------|------------|
 | `TEST_MODE` | `false` | `true` (симулятор Platega) |
-| `START_BOT_IN_WEBAPP` | `false` | `false` или `true` |
+| `START_BOT_IN_WEBAPP` | `false` | `false` или `true` (один процесс) |
 | `ALLOW_DEBUG_ADMIN` | `false` | `true` (сброс БД в админке) |
 | `LOG_LEVEL` | `INFO` | `DEBUG` при отладке |
+
+**Запуск** (не переменные `.env`, а команды):
+
+| Команда | Описание |
+|---------|----------|
+| `python run_all.py` | Webhook + Telegram, два процесса, одна команда |
+| `python app.py` + `python run_bot.py` | То же, но отдельно (systemd в проде) |
+| `START_BOT_IN_WEBAPP=true` + `python app.py` | Всё в одном процессе |
 
 ---
 

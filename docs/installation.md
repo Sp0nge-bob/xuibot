@@ -15,12 +15,22 @@ pip install -e .
 cp .env.example .env
 ```
 
-Заполните `.env` (см. [Конфигурация](configuration.md)), затем:
+Заполните `.env` (см. [Конфигурация](configuration.md)), затем запустите бота.
+
+**Одна команда** (webhook + Telegram, два процесса):
 
 ```bash
-python app.py       # терминал 1
-python run_bot.py   # терминал 2
+python run_all.py
 ```
+
+Или в двух терминалах:
+
+```bash
+python app.py       # терминал 1 — webhook Platega
+python run_bot.py   # терминал 2 — Telegram polling
+```
+
+Для отладки в одном процессе: `START_BOT_IN_WEBAPP=true` в `.env`, затем `python app.py`.
 
 ## systemd (пример)
 
