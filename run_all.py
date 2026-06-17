@@ -51,8 +51,11 @@ def main() -> None:
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
-    _PROCS.append(_start("app.py"))
+    # Сначала run_bot — он инициализирует SQLite. Одновременный старт даёт database is locked.
     _PROCS.append(_start("run_bot.py"))
+    print("Waiting for DB init (5s)...")
+    time.sleep(5)
+    _PROCS.append(_start("app.py"))
     print("Both processes started. Press Ctrl+C to stop.")
 
     try:
