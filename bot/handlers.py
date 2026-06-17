@@ -13,6 +13,7 @@ from db import promo_codes as promo_db
 from db import promo_pending as pending_db
 from db import trial_grants as trial_db
 from db import bot_settings as settings_db
+from .telegram_html import safe_html_fragment
 from services import platega_simulator as platega_sim
 from services.payment_pending import (
     expires_in_from_order_created,
@@ -120,6 +121,8 @@ async def _show_main_menu(target: Message | CallbackQuery, *, edit: bool = False
             pending_promo = promo
             pending_expires = pending["expires_at"]
     announcement = await settings_db.get_start_announcement()
+    if announcement:
+        announcement = safe_html_fragment(announcement)
     text = main_menu_text(
         user.first_name,
         user.username,

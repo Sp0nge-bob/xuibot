@@ -11,11 +11,13 @@ from .admin_keyboards import (
     admin_back_kb,
     admin_debug_entry_confirm_kb,
     admin_debug_kb,
+    admin_debug_orders_reset_confirm_kb,
     admin_debug_promo_reset_confirm_kb,
 )
 from .messages import (
     admin_debug_entry_confirm_text,
     admin_debug_menu_text,
+    admin_debug_orders_reset_confirm_text,
     admin_debug_promo_reset_confirm_text,
 )
 from .ui_helpers import safe_cb_answer, send_or_edit
@@ -27,12 +29,14 @@ async def _show_debug_menu(cb: CallbackQuery) -> None:
     trial_count = await db.count_active_trial_subscriptions()
     promo_uses = await promo_db.count_promo_uses()
     promo_pending = await pending_db.count_pending_discounts()
+    orders_count = await db.count_orders()
     await send_or_edit(
         cb,
         admin_debug_menu_text(
             trial_count=trial_count,
             promo_uses=promo_uses,
             promo_pending=promo_pending,
+            orders_count=orders_count,
         ),
         admin_debug_kb(),
     )
@@ -94,5 +98,44 @@ async def cb_admin_debug_promos_reset(cb: CallbackQuery):
         f"Удалено promo_uses: <b>{result['uses_deleted']}</b>\n"
         f"Удалено pending: <b>{result['pending_deleted']}</b>\n"
         "Счётчики <code>used_count</code> обнулены."
+    )
+    await send_or_edit(cb, text, admin_debug_kb())
+
+
+@router.callback_query(F.data == "adm:debug:orders_reset")
+async def cb_admin_debug_orders_reset_confirm(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+
+    orders_count = await db.count_orders()
+    await safe_cb_answer(cb)
+    await send_or_edit(
+        cb,
+        admin_debug_orders_reset_confirm_text(orders_count=orders_count),
+        admin_debug_orders_reset_confirm_kb(),
+    )
+
+
+@router.callback_query(F.data == "adm:debug:orders_reset:confirm")
+async def cb_admin_debug_orders_reset(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+
+    await safe_cb_answer(cb, "Удаляем…")
+    try:
+        result = await db.reset_all_orders()
+    except Exception as e:
+        logger.exception("Orders reset error: {}", e)
+        await send_or_edit(
+            cb,
+            f"❌ Ошибка: <code>{str(e)[:120]}</code>",
+            admin_back_kb(),
+        )
+        return
+
+    text = (
+        "✅ <b>История заказов очищена</b>\n\n"
+        f"Удалено заказов: <b>{result['orders_deleted']}</b>\n"
+        f"Тикетов отвязано от заказов: <b>{result['tickets_unlinked']}</b>"
     )
     await send_or_edit(cb, text, admin_debug_kb())

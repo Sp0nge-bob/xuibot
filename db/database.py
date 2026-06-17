@@ -202,6 +202,43 @@ async def get_order_by_id(order_id: int) -> Optional[Dict[str, Any]]:
             return dict(row) if row else None
 
 
+async def count_orders() -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await _apply_pragmas(db)
+        async with db.execute("SELECT COUNT(*) FROM orders") as cur:
+            return int((await cur.fetchone())[0])
+
+
+async def reset_all_orders() -> dict[str, int]:
+    """Удалить все заказы и отвязать ссылки (подписки, тикеты, промо)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await _apply_pragmas(db)
+        async with db.execute("SELECT COUNT(*) FROM orders") as cur:
+            orders_count = int((await cur.fetchone())[0])
+
+        await db.execute(
+            "UPDATE subscriptions SET order_id = NULL WHERE order_id IS NOT NULL"
+        )
+        cur = await db.execute(
+            "UPDATE tickets SET order_id = NULL WHERE order_id IS NOT NULL"
+        )
+        tickets_unlinked = cur.rowcount
+        await db.execute(
+            """UPDATE promo_pending_discounts SET consumed_order_id = NULL
+               WHERE consumed_order_id IS NOT NULL"""
+        )
+        await db.execute("DELETE FROM promo_uses WHERE order_id IS NOT NULL")
+        cur = await db.execute("DELETE FROM orders")
+        orders_deleted = cur.rowcount
+        await db.commit()
+
+    return {
+        "orders_deleted": orders_deleted,
+        "orders_count": orders_count,
+        "tickets_unlinked": tickets_unlinked,
+    }
+
+
 async def get_paid_orders_for_user(tg_id: int, *, limit: int = 50) -> List[Dict[str, Any]]:
     """Оплаченные заказы пользователя (новые и продления), новые первыми."""
     async with aiosqlite.connect(DB_PATH) as db:

@@ -61,7 +61,21 @@ def admin_debug_kb() -> InlineKeyboardMarkup:
             text="🎟 Очистить применения промокодов",
             callback_data="adm:debug:promos_reset",
         )],
+        [InlineKeyboardButton(
+            text="🧾 Сбросить историю заказов",
+            callback_data="adm:debug:orders_reset",
+        )],
         [InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")],
+    ])
+
+
+def admin_debug_orders_reset_confirm_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="⚠️ Подтвердить удаление",
+            callback_data="adm:debug:orders_reset:confirm",
+        )],
+        [InlineKeyboardButton(text="« Отмена", callback_data="adm:debug:enter")],
     ])
 
 

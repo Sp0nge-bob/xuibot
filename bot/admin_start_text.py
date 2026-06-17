@@ -11,6 +11,7 @@ from .admin_keyboards import (
 )
 from .messages import admin_start_text_edit_prompt_text, admin_start_text_menu_text
 from .states import AdminStates
+from .telegram_html import safe_html_fragment, validate_telegram_html
 from .ui_helpers import safe_cb_answer, send_or_edit
 
 router = Router()
@@ -18,7 +19,9 @@ router = Router()
 
 async def _show_start_text_menu(target: CallbackQuery | Message) -> None:
     announcement = await settings_db.get_start_announcement()
-    text = admin_start_text_menu_text(announcement)
+    html_invalid = bool(announcement and validate_telegram_html(announcement))
+    preview = safe_html_fragment(announcement) if announcement else None
+    text = admin_start_text_menu_text(preview, html_invalid=html_invalid)
     kb = admin_start_text_kb(has_text=bool(announcement))
     if isinstance(target, CallbackQuery):
         await send_or_edit(target, text, kb)
@@ -94,6 +97,17 @@ async def msg_admin_start_text_save(message: Message, state: FSMContext):
 
     if len(body) > 3500:
         await message.answer("❌ Слишком длинный текст (макс. 3500 символов).")
+        return
+
+    html_error = validate_telegram_html(body)
+    if html_error:
+        await message.answer(
+            "❌ <b>Ошибка HTML</b>\n\n"
+            f"{html_error}\n\n"
+            "Исправьте разметку и отправьте снова. Каждый открытый тег "
+            "(например, <code>&lt;b&gt;</code>) должен иметь парный "
+            "<code>&lt;/b&gt;</code>."
+        )
         return
 
     await settings_db.set_start_announcement(body)

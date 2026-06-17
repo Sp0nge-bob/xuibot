@@ -340,7 +340,11 @@ def _truncate_preview(text: str, limit: int = 1200) -> str:
     return text[: limit - 3] + "..."
 
 
-def admin_start_text_menu_text(announcement: Optional[str]) -> str:
+def admin_start_text_menu_text(
+    announcement: Optional[str],
+    *,
+    html_invalid: bool = False,
+) -> str:
     lines = [
         "📢 <b>Сообщение /start</b>",
         "━━━━━━━━━━━━━━━━",
@@ -354,6 +358,10 @@ def admin_start_text_menu_text(announcement: Optional[str]) -> str:
         "<b>Сейчас:</b>",
     ]
     if announcement:
+        if html_invalid:
+            lines.append(
+                "⚠️ <i>Сохранённый текст с ошибкой HTML — в меню показывается как обычный текст.</i>"
+            )
         lines.append(_truncate_preview(announcement))
     else:
         lines.append("<i>Не задано — показывается только системное меню.</i>")
@@ -366,7 +374,8 @@ def admin_start_text_edit_prompt_text() -> str:
         "━━━━━━━━━━━━━━━━\n\n"
         "Отправьте текст для блока новостей/акций.\n"
         "Поддерживается HTML: <code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, "
-        "<code>&lt;code&gt;</code> и т.д.\n\n"
+        "<code>&lt;code&gt;</code> и т.д.\n"
+        "Каждый открытый тег нужно закрывать: <code>&lt;b&gt;текст&lt;/b&gt;</code>.\n\n"
         "Для отмены: /admin"
     )
 
@@ -377,7 +386,8 @@ def admin_debug_entry_confirm_text() -> str:
         "━━━━━━━━━━━━━━━━\n\n"
         "⚠️ Здесь доступны опасные операции:\n"
         "• массовый сброс пробных подписок\n"
-        "• очистка всех применений промокодов\n\n"
+        "• очистка всех применений промокодов\n"
+        "• сброс истории всех заказов\n\n"
         "Используйте только для отладки и тестирования.\n\n"
         "Войти в раздел?"
     )
@@ -388,14 +398,30 @@ def admin_debug_menu_text(
     trial_count: int,
     promo_uses: int,
     promo_pending: int,
+    orders_count: int = 0,
 ) -> str:
     return (
         "🧪 <b>Отладка</b>\n"
         "━━━━━━━━━━━━━━━━\n\n"
         f"🎁 Активных пробных подписок: <b>{trial_count}</b>\n"
         f"🎟 Применений промокодов (promo_uses): <b>{promo_uses}</b>\n"
-        f"⏳ Ожидающих скидок (pending): <b>{promo_pending}</b>\n\n"
+        f"⏳ Ожидающих скидок (pending): <b>{promo_pending}</b>\n"
+        f"🧾 Заказов в истории: <b>{orders_count}</b>\n\n"
         "Выберите действие:"
+    )
+
+
+def admin_debug_orders_reset_confirm_text(*, orders_count: int) -> str:
+    return (
+        "🧾 <b>Сброс истории заказов</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        f"Заказов в БД: <b>{orders_count}</b>\n\n"
+        "Будет выполнено:\n"
+        "• удаление всех записей из <code>orders</code>\n"
+        "• отвязка <code>order_id</code> у подписок и тикетов\n"
+        "• очистка привязок промокодов к заказам\n\n"
+        "Подписки и пользователи останутся.\n\n"
+        "Продолжить?"
     )
 
 
