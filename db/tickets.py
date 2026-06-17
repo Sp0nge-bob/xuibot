@@ -238,6 +238,53 @@ async def get_refund_blocked_order_ids_for_subscription(subscription_id: int) ->
     return {int(row[0]) for row in rows if row[0] is not None}
 
 
+async def get_approved_refunds_pending_chargeback(tg_id: int) -> List[Dict[str, Any]]:
+    """
+    Одобрен админом, Platega ещё не подтвердила CHARGEBACKED:
+    тикет closed+approved, заказ paid, подписка активна.
+    """
+    async with get_db() as db:
+        async with db.execute(
+            _ticket_select_sql()
+            + """ WHERE t.tg_id = ? AND t.category = ?
+                  AND t.status = ? AND t.refund_decision = ?
+                  AND o.status = 'paid'
+                  AND s.is_active = 1
+                ORDER BY t.closed_at DESC, t.id DESC""",
+            (
+                tg_id,
+                CATEGORY_REFUND,
+                STATUS_CLOSED,
+                REFUND_DECISION_APPROVED,
+            ),
+        ) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+
+async def is_extend_blocked_by_pending_refund(tg_id: int) -> bool:
+    """Продление запрещено, пока ждём подтверждение возврата от Platega."""
+    pending = await get_approved_refunds_pending_chargeback(tg_id)
+    if not pending:
+        return False
+    blocked_sub_ids = {
+        int(t["subscription_id"])
+        for t in pending
+        if t.get("subscription_id")
+    }
+    if not blocked_sub_ids:
+        return True
+    from db import database as db
+    from config.trial import is_trial_email
+
+    for sub in await db.get_active_subscriptions(tg_id):
+        if is_trial_email(sub.get("client_email")):
+            continue
+        if sub["id"] in blocked_sub_ids:
+            return True
+    return False
+
+
 async def has_approved_refund_for_order(subscription_id: int, order_id: int) -> bool:
     async with get_db() as db:
         async with db.execute(

@@ -387,6 +387,7 @@ async def show_subscriptions_manage(cb: CallbackQuery, tg_id: int) -> None:
         return
 
     refund_by_sub = await tickets_db.get_open_refund_tickets_by_subscription_for_user(tg_id)
+    extend_blocked = await tickets_db.is_extend_blocked_by_pending_refund(tg_id)
     can_refund: dict[int, bool] = {}
     for sub in subs:
         if is_trial_email(sub.get("client_email")):
@@ -403,6 +404,7 @@ async def show_subscriptions_manage(cb: CallbackQuery, tg_id: int) -> None:
                 sub["id"],
                 refund_tickets=refund_by_sub.get(sub["id"], []),
                 can_request_refund=can_refund.get(sub["id"], False),
+                can_extend=not extend_blocked,
                 is_trial=is_trial_email(sub.get("client_email")),
             ),
         )
@@ -420,5 +422,6 @@ async def show_subscriptions_manage(cb: CallbackQuery, tg_id: int) -> None:
             subs,
             refund_tickets=refund_by_sub,
             can_request_refund=can_refund,
+            can_extend=not extend_blocked,
         ),
     )

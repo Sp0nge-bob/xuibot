@@ -14,6 +14,7 @@ from db import promo_codes as promo_db
 from db import promo_pending as pending_db
 from db import trial_grants as trial_db
 from db import bot_settings as settings_db
+from db import tickets as tickets_db
 from .telegram_html import safe_html_fragment
 from services import platega_simulator as platega_sim
 from services.payment_pending import (
@@ -61,6 +62,7 @@ from .keyboards import (
     trial_confirm_kb,
 )
 from .messages import (
+    EXTEND_BLOCKED_REFUND_PENDING_MSG,
     main_menu_text,
     plans_menu_text,
     plan_card_text,
@@ -125,12 +127,14 @@ async def _show_main_menu(target: Message | CallbackQuery, *, edit: bool = False
     announcement = await settings_db.get_start_announcement()
     if announcement:
         announcement = safe_html_fragment(announcement)
+    refund_pending = await tickets_db.get_approved_refunds_pending_chargeback(user.id)
     text = main_menu_text(
         user.first_name,
         user.username,
         subs,
         greeting_template=greeting_template,
         announcement=announcement,
+        refund_pending_chargeback=bool(refund_pending),
         pending_discount_promo=pending_promo,
         pending_discount_expires_at=pending_expires,
     )
@@ -217,11 +221,12 @@ async def cb_trial_confirm(cb: CallbackQuery):
 async def cb_tariffs(cb: CallbackQuery, state: FSMContext):
     await _clear_promo_input_state(state)
     sub = await get_primary_subscription_for_ui(cb.from_user.id)
+    extend_blocked = await tickets_db.is_extend_blocked_by_pending_refund(cb.from_user.id)
     plans = await list_plans()
     await safe_cb_answer(cb)
     await send_or_edit(
         cb,
-        plans_menu_text(has_active_sub=sub is not None),
+        plans_menu_text(has_active_sub=sub is not None and not extend_blocked),
         plans_kb(plans),
     )
 
@@ -234,6 +239,7 @@ async def cb_select_plan(cb: CallbackQuery, state: FSMContext):
         await safe_cb_answer(cb, "Тариф не найден", show_alert=True)
         return
     sub = await get_primary_subscription_for_ui(cb.from_user.id)
+    extend_blocked = await tickets_db.is_extend_blocked_by_pending_refund(cb.from_user.id)
     methods = await pay_methods_db.get_enabled_payment_methods()
     if not methods:
         await safe_cb_answer(cb, "Способы оплаты временно недоступны", show_alert=True)
@@ -241,13 +247,20 @@ async def cb_select_plan(cb: CallbackQuery, state: FSMContext):
     await safe_cb_answer(cb)
     await send_or_edit(
         cb,
-        plan_card_text(quote.plan, has_active_sub=sub is not None, quote=quote),
+        plan_card_text(
+            quote.plan,
+            has_active_sub=sub is not None and not extend_blocked,
+            quote=quote,
+        ),
         payment_methods_kb(plan_id, methods=methods, quote=quote),
     )
 
 
 @router.callback_query(F.data.startswith("extend_plan:"))
 async def cb_extend_plan(cb: CallbackQuery, state: FSMContext):
+    if await tickets_db.is_extend_blocked_by_pending_refund(cb.from_user.id):
+        await safe_cb_answer(cb, EXTEND_BLOCKED_REFUND_PENDING_MSG, show_alert=True)
+        return
     plan_id = cb.data.split(":", 1)[1]
     quote = await _checkout_quote(state, plan_id, cb.from_user.id)
     if not quote:
@@ -273,6 +286,9 @@ async def cb_pay(cb: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("pay_extend:"))
 async def cb_pay_extend(cb: CallbackQuery, state: FSMContext):
+    if await tickets_db.is_extend_blocked_by_pending_refund(cb.from_user.id):
+        await safe_cb_answer(cb, EXTEND_BLOCKED_REFUND_PENDING_MSG, show_alert=True)
+        return
     _, plan_id, method_key = cb.data.split(":", 2)
     sub = await get_primary_subscription_for_ui(cb.from_user.id)
     if not sub:
@@ -314,9 +330,16 @@ async def _start_payment(
 
     plan = quote.plan
 
-    await safe_cb_answer(cb)
     extend = order_type == "extend"
     existing_sub = await db.get_primary_subscription(cb.from_user.id)
+    if extend or (
+        existing_sub and not is_trial_email(existing_sub.get("client_email"))
+    ):
+        if await tickets_db.is_extend_blocked_by_pending_refund(cb.from_user.id):
+            await safe_cb_answer(cb, EXTEND_BLOCKED_REFUND_PENDING_MSG, show_alert=True)
+            return
+
+    await safe_cb_answer(cb)
     has_active_sub = existing_sub is not None and not extend
 
     bot_username = (await cb.bot.get_me()).username
@@ -413,6 +436,9 @@ async def cb_test_scenario(cb: CallbackQuery, state: FSMContext):
     _, plan_id, method_key, scenario, ext_flag = cb.data.split(":", 4)
     order_type = "extend" if ext_flag == "1" else "new"
     if order_type == "extend":
+        if await tickets_db.is_extend_blocked_by_pending_refund(cb.from_user.id):
+            await safe_cb_answer(cb, EXTEND_BLOCKED_REFUND_PENDING_MSG, show_alert=True)
+            return
         sub = await get_primary_subscription_for_ui(cb.from_user.id)
         if not sub:
             await safe_cb_answer(cb, "Нет активной подписки", show_alert=True)
@@ -441,6 +467,12 @@ async def _apply_test_scenario(
     plan = quote.plan
     extend = order_type == "extend"
     existing_sub = await db.get_primary_subscription(cb.from_user.id)
+    if extend or (
+        existing_sub and not is_trial_email(existing_sub.get("client_email"))
+    ):
+        if await tickets_db.is_extend_blocked_by_pending_refund(cb.from_user.id):
+            await safe_cb_answer(cb, EXTEND_BLOCKED_REFUND_PENDING_MSG, show_alert=True)
+            return
     has_active_sub = existing_sub is not None and not extend
 
     if scenario == platega_sim.SCENARIO_CREATE_ERROR:
@@ -803,6 +835,9 @@ async def cb_manage_sub(cb: CallbackQuery):
 
 @router.callback_query(F.data == "extend_menu")
 async def cb_extend_menu(cb: CallbackQuery, state: FSMContext):
+    if await tickets_db.is_extend_blocked_by_pending_refund(cb.from_user.id):
+        await safe_cb_answer(cb, EXTEND_BLOCKED_REFUND_PENDING_MSG, show_alert=True)
+        return
     sub = await get_primary_paid_subscription_for_ui(cb.from_user.id)
     if not sub:
         await safe_cb_answer(cb, "Нет активной подписки", show_alert=True)

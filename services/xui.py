@@ -922,6 +922,41 @@ async def ensure_client_absent_on_primary(email: str) -> list[int]:
     return await _ensure_email_absent_on_panel(api, email)
 
 
+async def reactivate_client_on_primary(
+    email: str,
+    *,
+    sub_id: Optional[str] = None,
+    expiry_time: int,
+    total_gb: int = 0,
+) -> str:
+    """
+    Включить существующего клиента на основной: новый срок, трафик, enable=True.
+    Возвращает итоговый sub_id (сохраняется прежний, если был на панели).
+    """
+    api = await get_api()
+    info = await _unified_get_client_info(api, email)
+    if not info:
+        raise ValueError(f"Клиент {email} не найден на основной для реактивации")
+    client, _, _ = info
+    resolved_sub_id = (sub_id or client.sub_id or "").strip() or secrets.token_urlsafe(12)[:16]
+    await _unified_update_client(
+        api,
+        client,
+        expiryTime=expiry_time,
+        totalGB=total_gb,
+        subId=resolved_sub_id,
+        enable=True,
+    )
+    missing = await try_attach_missing_inbounds(api, email, sub_id=resolved_sub_id)
+    if missing:
+        logger.warning(
+            "После реактивации {} не хватает инбаундов {} — догонит синк нод",
+            email, missing,
+        )
+    logger.success("Reactivated {} expiry={} enable=True", email, expiry_time)
+    return resolved_sub_id
+
+
 async def provision_client(
     tg_id: int,
     plan_days: int,
@@ -933,8 +968,9 @@ async def provision_client(
     skip_preclean: bool = False,
 ) -> Tuple[str, str, Optional[str]]:
     """
-    Покупка / пробный: один clients/add на основной без обхода всех нод.
-    Полная очистка — только при duplicate email (редкий fallback).
+    Выдача / повторная покупка:
+    - клиент есть на основной → включить с новым сроком (ссылка/sub_id сохраняются);
+    - нет на основной → удалить призраков на вторичных, clients/add на основной.
     """
     api = await get_api()
     email = client_email or f"tg{tg_id}"
@@ -944,11 +980,32 @@ async def provision_client(
         raise ValueError("Нет инбаундов для создания подписки")
 
     total_gb = traffic_gb * 1024 * 1024 * 1024 if traffic_gb > 0 else 0
-    resolved_sub_id = sub_id or secrets.token_urlsafe(12)[:16]
     if target_expiry_ms is not None:
         expiry_time = target_expiry_ms
     else:
         expiry_time = int((datetime.utcnow() + timedelta(days=plan_days)).timestamp() * 1000)
+
+    if not skip_preclean:
+        info = await _unified_get_client_info(api, email)
+        if info:
+            resolved_sub_id = await reactivate_client_on_primary(
+                email,
+                sub_id=sub_id,
+                expiry_time=expiry_time,
+                total_gb=total_gb,
+            )
+            sub_link = await build_sub_link(resolved_sub_id)
+            return email, resolved_sub_id, sub_link
+
+    ghost_nodes = await purge_client_on_secondaries(email)
+    if ghost_nodes:
+        logger.info(
+            "Перед созданием {}: удалены призраки на вторичных {}",
+            email, ", ".join(ghost_nodes),
+        )
+    await ensure_client_absent_on_primary(email)
+
+    resolved_sub_id = sub_id or secrets.token_urlsafe(12)[:16]
 
     async def _add() -> None:
         await _unified_add_client(
@@ -965,8 +1022,12 @@ async def provision_client(
     except ValueError as e:
         if "duplicate email" not in str(e).lower():
             raise
-        logger.warning("Дубликат {} при покупке — полная очистка всех нод и повторный add", email)
-        await ensure_client_absent_everywhere(email)
+        logger.warning(
+            "Дубликат {} на основной — локальная очистка и повторный add",
+            email,
+        )
+        await _delete_client_by_email(api, email)
+        await asyncio.sleep(0.5)
         await _add()
 
     sub_link = await build_sub_link(resolved_sub_id)

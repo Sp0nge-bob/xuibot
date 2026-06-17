@@ -140,23 +140,39 @@ async def fulfill_plan_for_tg(
             logger.success("{} extended for tg_id={}", log_context, tg_id)
         return FulfillmentResult(text=text, photo=photo)
 
+    last_paid = await db.get_last_paid_subscription(tg_id)
     email, sub_id, sub_link = await provision_client(
         tg_id=tg_id,
         plan_days=plan["days"],
         traffic_gb=plan["traffic_gb"],
+        sub_id=last_paid.get("sub_id") if last_paid else None,
+        client_email=last_paid.get("client_email") if last_paid else None,
     )
 
-    end_date = (datetime.utcnow() + timedelta(days=plan["days"])).strftime("%Y-%m-%d")
-    sub_db_id = await db.create_subscription(
-        tg_id=tg_id,
-        order_id=order_id,
-        inbound_id=0,
-        client_email=email,
-        client_uuid=sub_id,
-        sub_id=sub_id,
-        days=plan["days"],
-        traffic_gb=plan["traffic_gb"],
-    )
+    if (
+        last_paid
+        and last_paid.get("client_email") == email
+        and not last_paid.get("is_active")
+    ):
+        end_iso = await db.reactivate_subscription_record(
+            last_paid["id"],
+            plan["days"],
+            order_id=order_id,
+        )
+        end_date = end_iso[:10]
+        sub_db_id = last_paid["id"]
+    else:
+        end_date = (datetime.utcnow() + timedelta(days=plan["days"])).strftime("%Y-%m-%d")
+        sub_db_id = await db.create_subscription(
+            tg_id=tg_id,
+            order_id=order_id,
+            inbound_id=0,
+            client_email=email,
+            client_uuid=sub_id,
+            sub_id=sub_id,
+            days=plan["days"],
+            traffic_gb=plan["traffic_gb"],
+        )
     schedule_secondary_sync(sub_db_id)
     inbound_count = await get_subscription_inbound_count()
     text = _success_text(

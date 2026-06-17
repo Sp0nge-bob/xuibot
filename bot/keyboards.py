@@ -170,6 +170,7 @@ def subscriptions_manage_kb(
     *,
     refund_tickets: dict[int, list[dict]] | None = None,
     can_request_refund: dict[int, bool] | None = None,
+    can_extend: bool = True,
 ) -> InlineKeyboardMarkup:
     refund_tickets = refund_tickets or {}
     can_request_refund = can_request_refund or {}
@@ -195,7 +196,7 @@ def subscriptions_manage_kb(
                     text=f"💸 {label} — запросить возврат",
                     callback_data=f"refund:{sub['id']}",
                 )])
-    if has_paid:
+    if has_paid and can_extend:
         rows.append([InlineKeyboardButton(text="🔄 Продлить платную", callback_data="extend_menu")])
     rows.append([InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -206,13 +207,14 @@ def subscription_manage_kb(
     *,
     refund_tickets: list[dict] | None = None,
     can_request_refund: bool = True,
+    can_extend: bool = True,
     is_trial: bool = False,
 ) -> InlineKeyboardMarkup:
     refund_tickets = refund_tickets or []
     rows = [
         [InlineKeyboardButton(text="🔗 Ссылка и QR", callback_data=f"sub_link:{sub_id}")],
     ]
-    if not is_trial:
+    if not is_trial and can_extend:
         rows.append([InlineKeyboardButton(text="🔄 Продлить подписку", callback_data="extend_menu")])
     for ticket in refund_tickets:
         order_id = ticket.get("order_id")

@@ -330,6 +330,48 @@ async def get_primary_paid_subscription(tg_id: int) -> Optional[Dict[str, Any]]:
             return dict(row) if row else None
 
 
+async def get_last_paid_subscription(tg_id: int) -> Optional[Dict[str, Any]]:
+    """Последняя платная подписка (активная или истёкшая) — для повторной покупки."""
+    async with get_db() as db:
+        await _apply_pragmas(db)
+        async with db.execute(
+            """SELECT * FROM subscriptions
+               WHERE tg_id = ? AND client_email NOT LIKE 'tgfree%'
+               ORDER BY end_date DESC
+               LIMIT 1""",
+            (tg_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
+async def reactivate_subscription_record(
+    subscription_id: int,
+    days: int,
+    *,
+    order_id: Optional[int] = None,
+) -> str:
+    """Включить истёкшую запись в БД с новым сроком от сегодня."""
+    now = datetime.utcnow()
+    end = now + timedelta(days=days)
+    end_iso = end.isoformat()
+    async with get_db() as db:
+        if order_id is not None:
+            await db.execute(
+                """UPDATE subscriptions
+                   SET end_date = ?, is_active = 1, order_id = ?
+                   WHERE id = ?""",
+                (end_iso, order_id, subscription_id),
+            )
+        else:
+            await db.execute(
+                "UPDATE subscriptions SET end_date = ?, is_active = 1 WHERE id = ?",
+                (end_iso, subscription_id),
+            )
+        await db.commit()
+    return end_iso
+
+
 async def get_subscription_by_id(sub_id: int) -> Optional[Dict[str, Any]]:
     async with get_db() as db:
 

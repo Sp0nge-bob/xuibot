@@ -52,6 +52,19 @@ def _pending_discount_menu_lines(promo: Dict[str, Any], expires_at: str) -> List
     ]
 
 
+def refund_pending_chargeback_notice() -> str:
+    return (
+        "💸 <b>Возврат средств в обработке</b>\n"
+        "Ваша подписка находится в состоянии возврата средств. "
+        "Она будет деактивирована, когда возврат подтвердится."
+    )
+
+
+EXTEND_BLOCKED_REFUND_PENDING_MSG = (
+    "Продление недоступно: ожидается подтверждение возврата средств от платёжной системы."
+)
+
+
 def main_menu_text(
     first_name: Optional[str],
     username: Optional[str],
@@ -59,6 +72,7 @@ def main_menu_text(
     *,
     greeting_template: Optional[str] = None,
     announcement: Optional[str] = None,
+    refund_pending_chargeback: bool = False,
     pending_discount_promo: Optional[Dict[str, Any]] = None,
     pending_discount_expires_at: Optional[str] = None,
 ) -> str:
@@ -66,6 +80,9 @@ def main_menu_text(
 
     if announcement:
         blocks.append(announcement)
+
+    if refund_pending_chargeback:
+        blocks.append(refund_pending_chargeback_notice())
 
     if not subscriptions:
         blocks.append(
