@@ -19,6 +19,7 @@ class PaymentProcessResult:
     photo: Optional[BufferedInputFile] = None
     setup_text: Optional[str] = None
     setup_photos: List[FSInputFile] = field(default_factory=list)
+    link_message: Optional[str] = None
     already_paid: bool = False
     amount_mismatch: bool = False
 
@@ -158,6 +159,7 @@ async def handle_platega_status(
                     handled=True,
                     user_message=fulfillment.text,
                     photo=fulfillment.photo,
+                    link_message=fulfillment.link_message,
                     setup_text=fulfillment.setup_text,
                     setup_photos=fulfillment.setup_photos,
                 )

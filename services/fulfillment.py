@@ -9,7 +9,12 @@ import qrcode
 from aiogram.types import BufferedInputFile, FSInputFile
 from loguru import logger
 
-from services.fulfillment_text import happ_setup_text, qr_and_sync_footer
+from services.fulfillment_text import (
+    happ_setup_text,
+    qr_and_sync_footer,
+    sub_link_caption_lines,
+    sub_link_standalone_message,
+)
 from config.plans import Plan, get_plan
 from config.trial import is_trial_email
 from db import database as db
@@ -32,6 +37,7 @@ _SETUP_ASSETS_DIR = _PROJECT_ROOT / "assets" / "setup"
 class FulfillmentResult:
     text: str
     photo: Optional[BufferedInputFile] = None
+    link_message: Optional[str] = None
     setup_text: Optional[str] = None
     setup_photos: List[FSInputFile] = field(default_factory=list)
 
@@ -138,7 +144,11 @@ async def fulfill_plan_for_tg(
         photo = make_qr_photo(sub_link or email, "vpn_extend.png")
         if log_context:
             logger.success("{} extended for tg_id={}", log_context, tg_id)
-        return FulfillmentResult(text=text, photo=photo)
+        return FulfillmentResult(
+            text=text,
+            photo=photo,
+            link_message=sub_link_standalone_message(sub_link),
+        )
 
     last_paid = await db.get_last_paid_subscription(tg_id)
     email, sub_id, sub_link = await provision_client(
@@ -192,6 +202,7 @@ async def fulfill_plan_for_tg(
     return FulfillmentResult(
         text=text,
         photo=photo,
+        link_message=sub_link_standalone_message(sub_link),
         setup_text=setup_text,
         setup_photos=setup_photos,
     )
@@ -214,8 +225,7 @@ def _success_text(
         f"📅 Действует до: <b>{end_date}</b>",
         f"📊 Трафик: {traffic_label(plan['traffic_gb'])}",
     ]
-    if sub_link:
-        details += ["", "🔗 <b>Ссылка на подписку:</b>", f"<code>{sub_link}</code>"]
+    details += sub_link_caption_lines(sub_link)
     details.append(f"👤 Клиент: <code>{client_email}</code>")
     footer = "⚠️ <i>Тестовый режим — оплата симулирована</i>" if is_test else None
     text = screen(f"✅ <b>{title}</b>", "\n".join(details), footer=footer)

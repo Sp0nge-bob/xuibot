@@ -249,6 +249,7 @@ async def cb_trial_confirm(cb: CallbackQuery):
         cb.message.chat.id,
         text=result.text,
         photo=result.photo,
+        link_message=result.link_message,
         setup_text=result.setup_text,
         setup_photos=result.setup_photos or None,
         reply_markup=back_to_main_kb(),
@@ -638,6 +639,7 @@ async def _apply_test_scenario(
             cb.message.chat.id,
             text=result.user_message,
             photo=result.photo,
+            link_message=result.link_message,
             setup_text=result.setup_text,
             setup_photos=result.setup_photos or None,
             reply_markup=back_to_main_kb(),
@@ -726,6 +728,7 @@ async def _respond_payment_flow(cb: CallbackQuery, order: dict, tx_id: str, flow
             cb.message.chat.id,
             text=result.user_message,
             photo=result.photo,
+            link_message=result.link_message,
             setup_text=result.setup_text,
             setup_photos=result.setup_photos or None,
             reply_markup=back_to_main_kb(),
@@ -946,6 +949,7 @@ async def msg_promo_code(message: Message, state: FSMContext):
             message.chat.id,
             text=result.fulfillment.text,
             photo=result.fulfillment.photo,
+            link_message=result.fulfillment.link_message,
             setup_text=result.fulfillment.setup_text,
             setup_photos=result.fulfillment.setup_photos or None,
             reply_markup=back_to_main_kb(),
@@ -974,13 +978,28 @@ async def cb_sub_link(cb: CallbackQuery):
         return
 
     from services.fulfillment import make_qr_photo
+    from services.fulfillment_text import (
+        sub_link_needs_separate_message,
+        sub_link_standalone_message,
+    )
+
     kind = "🎁 Пробная" if is_trial_email(sub.get("client_email")) else "✅ Платная"
     photo = make_qr_photo(link, "vpn_link.png")
     await safe_cb_answer(cb)
-    await cb.message.answer_photo(
-        photo,
-        caption=f"🔗 <b>{kind} подписка</b>\n\n<code>{link}</code>",
-        reply_markup=back_to_main_kb(),
-    )
+    kb = back_to_main_kb()
+    if sub_link_needs_separate_message(link):
+        await cb.message.answer_photo(
+            photo,
+            caption=f"🔗 <b>{kind} подписка</b>\n\nОтсканируйте QR или скопируйте ссылку ниже 👇",
+        )
+        followup = sub_link_standalone_message(link)
+        if followup:
+            await cb.message.answer(followup, reply_markup=kb)
+    else:
+        await cb.message.answer_photo(
+            photo,
+            caption=f"🔗 <b>{kind} подписка</b>\n\n<code>{link}</code>",
+            reply_markup=kb,
+        )
 
 

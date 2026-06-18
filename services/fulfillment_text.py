@@ -1,5 +1,36 @@
 """Тексты сообщений после успешной выдачи подписки."""
+from __future__ import annotations
+
 from ui.theme import screen
+
+# Лимит Telegram для caption у фото
+TELEGRAM_PHOTO_CAPTION_MAX = 1024
+
+
+def sub_link_needs_separate_message(sub_link: str | None) -> bool:
+    """happ://crypt* не влезает в caption вместе с остальным текстом."""
+    if not sub_link:
+        return False
+    if sub_link.startswith("happ://crypt"):
+        return True
+    return len(sub_link) > 350
+
+
+def sub_link_caption_lines(sub_link: str | None) -> list[str]:
+    if not sub_link:
+        return []
+    if sub_link_needs_separate_message(sub_link):
+        return ["", "🔗 <b>Ссылка на подписку</b> — в следующем сообщении 👇"]
+    return ["", "🔗 <b>Ссылка на подписку:</b>", f"<code>{sub_link}</code>"]
+
+
+def sub_link_standalone_message(sub_link: str | None) -> str | None:
+    if not sub_link or not sub_link_needs_separate_message(sub_link):
+        return None
+    return (
+        "🔗 <b>Скопируйте ссылку</b> (или отсканируйте QR выше):\n\n"
+        f"<code>{sub_link}</code>"
+    )
 
 
 def panel_sync_notice_text(inbound_count: int) -> str:

@@ -30,6 +30,12 @@
 - Проверьте `XUI_TOKEN` и secret path
 - `LOG_LEVEL=DEBUG` для деталей API
 
+## `message caption is too long` при выдаче ключа / trial
+
+- При `crypt4_local` / `crypt5` ссылка `happ://crypt…` ~700 символов — не влезает в caption фото (лимит Telegram **1024**).
+- Бот выносит длинную ссылку в **отдельное сообщение** после QR (обновление после `69e3cb7`).
+- Если ошибка остаётся — `git pull` и перезапуск бота.
+
 ## Happ: вместо `happ://crypt…` отдаётся обычная ссылка
 
 - В логах: `Happ crypto … failed` — смотрите причину (таймаут API, нет `cryptography`)

@@ -49,6 +49,7 @@ async def _deliver_result(tx_id: str, result: PaymentProcessResult) -> None:
                 order["tg_id"],
                 text=result.user_message,
                 photo=result.photo,
+                link_message=result.link_message,
                 setup_text=result.setup_text,
                 setup_photos=result.setup_photos or None,
                 reply_markup=back_to_main_kb(),

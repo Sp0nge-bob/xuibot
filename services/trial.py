@@ -17,7 +17,12 @@ from services.fulfillment import (
     load_happ_setup_photos,
     make_qr_photo,
 )
-from services.fulfillment_text import happ_setup_text, qr_and_sync_footer
+from services.fulfillment_text import (
+    happ_setup_text,
+    qr_and_sync_footer,
+    sub_link_caption_lines,
+    sub_link_standalone_message,
+)
 from services.node_sync import schedule_secondary_sync
 from services.subscription_admin import admin_reset_all_trials, admin_reset_trial_for_user
 from services.xui import provision_client
@@ -64,8 +69,9 @@ async def claim_trial(tg_id: int) -> FulfillmentResult:
         f"📊 Трафик: <b>{TRIAL_TRAFFIC_GB} ГБ</b>",
         "",
     ]
+    lines += sub_link_caption_lines(sub_link)
     if sub_link:
-        lines += [f"🔗 <b>Ссылка:</b>", f"<code>{sub_link}</code>", ""]
+        lines.append("")
     lines += [
         f"👤 Клиент: <code>{email}</code>",
         qr_and_sync_footer(inbound_count),
@@ -78,6 +84,7 @@ async def claim_trial(tg_id: int) -> FulfillmentResult:
     return FulfillmentResult(
         text="\n".join(lines),
         photo=photo,
+        link_message=sub_link_standalone_message(sub_link),
         setup_text=happ_setup_text(),
         setup_photos=load_happ_setup_photos(),
     )

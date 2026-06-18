@@ -11,6 +11,7 @@ async def deliver_fulfillment(
     *,
     text: str,
     photo: Optional[BufferedInputFile] = None,
+    link_message: Optional[str] = None,
     setup_text: Optional[str] = None,
     setup_photos: Optional[List[FSInputFile]] = None,
     reply_markup=None,
@@ -20,10 +21,17 @@ async def deliver_fulfillment(
             chat_id,
             photo,
             caption=text,
-            reply_markup=reply_markup,
+            reply_markup=reply_markup if not link_message else None,
         )
     else:
         await bot.send_message(chat_id, text, reply_markup=reply_markup)
+
+    if link_message:
+        await bot.send_message(
+            chat_id,
+            link_message,
+            reply_markup=reply_markup,
+        )
 
     if not setup_text and not setup_photos:
         return
