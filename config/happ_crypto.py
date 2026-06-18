@@ -9,8 +9,8 @@ HAPP_CRYPTO_CRYPT4_LOCAL: Final[str] = "crypt4_local"
 
 HAPP_CRYPTO_MODES: Final[tuple[str, ...]] = (
     HAPP_CRYPTO_NONE,
-    HAPP_CRYPTO_CRYPT5_API,
     HAPP_CRYPTO_CRYPT4_LOCAL,
+    HAPP_CRYPTO_CRYPT5_API,
 )
 
 HAPP_CRYPTO_MODE_LABELS: Final[dict[str, str]] = {
