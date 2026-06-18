@@ -210,14 +210,16 @@ async def sync_client_on_secondary_from_primary(
 
 
 async def _sync_secondaries_from_primary(
-    subs: list[dict[str, Any]],
+    _subs: list[dict[str, Any]],
     *,
     primary_emails: set[str],
 ) -> dict[str, int]:
     """
-    Быстрая проверка вторичных:
-    - призраки (нет на основной) → удалить;
-    - для клиентов с основной → expiry/трафик как на основной.
+    Вторичные ноды: только удаление призраков (tg на ноде, но нет на основной).
+
+    Параметры клиента (expiry, трафик, limitIp) панель 3x-ui разносит с основной
+    сама — бот на вторичные их не пушит. Исключение — удаление: на каждой ноде
+    отдельно (ограничение панели), это делает remove_client_everywhere и purge здесь.
     """
     nodes = _dedupe_nodes_by_host(await nodes_db.get_secondary_nodes(healthy_only=True))
     stats = {"nodes": len(nodes), "synced": 0, "missing": 0, "purged": 0, "failed": 0}
@@ -226,17 +228,10 @@ async def _sync_secondaries_from_primary(
 
     sem = asyncio.Semaphore(settings.XUI_PANEL_CONCURRENCY)
     stats_lock = asyncio.Lock()
-    subs_on_primary = [
-        s for s in subs if str(s["client_email"]).lower() in primary_emails
-    ]
-    unique_emails = {str(s["client_email"]).lower() for s in subs_on_primary}
-    primary_states = await _batch_primary_client_states(unique_emails)
 
     async def _one_node(node: dict) -> None:
         node_id = node["id"]
         node_purged = 0
-        node_synced = 0
-        node_missing = 0
         node_failed = 0
         try:
             api = await get_api_for_node(node)
@@ -262,21 +257,6 @@ async def _sync_secondaries_from_primary(
                             node.get("name"), email, e,
                         )
 
-            for sub in subs_on_primary:
-                email = sub["client_email"]
-                primary_state = primary_states.get(str(email).lower())
-                if not primary_state:
-                    continue
-                async with sem:
-                    r = await sync_client_on_secondary_from_primary(node, email, primary_state)
-                    if not r.get("ok"):
-                        node_failed += 1
-                        continue
-                    if r.get("action") == "missing":
-                        node_missing += 1
-                    elif r.get("action") == "updated":
-                        node_synced += 1
-
             await nodes_db.update_node(
                 node_id,
                 last_sync_at=datetime.utcnow().isoformat(),
@@ -290,8 +270,6 @@ async def _sync_secondaries_from_primary(
 
         async with stats_lock:
             stats["purged"] += node_purged
-            stats["synced"] += node_synced
-            stats["missing"] += node_missing
             stats["failed"] += node_failed
 
     await asyncio.gather(*[_one_node(n) for n in nodes])
@@ -300,8 +278,8 @@ async def _sync_secondaries_from_primary(
 
 async def run_full_nodes_sync() -> dict[str, Any]:
     """
-    1) Основная ↔ БД (лишние tg удалить, недостающие создать)
-    2) Вторичные ↔ основная (призраки + expiry с основной)
+    1) Основная ↔ БД (лишние tg удалить, недостающие создать/обновить)
+    2) Вторичные — только очистка призраков (параметры тянет панель с основной)
     """
     subs = await db.get_all_active_subscriptions()
     logger.info("Full nodes sync: {} active subscriptions in DB", len(subs))
@@ -378,38 +356,12 @@ async def sync_all_secondary_nodes(*, force: bool = False) -> dict[str, int]:
 
 
 async def sync_subscription_to_secondaries(sub_id: int) -> list[dict[str, Any]]:
-    """После оплаты: быстрая проверка вторичных по состоянию на основной."""
-    sub = await db.get_subscription_by_id(sub_id)
-    if not sub or not sub.get("is_active"):
-        return []
-
-    email = sub["client_email"]
-    primary_state = await _get_primary_client_state(email)
-    if not primary_state:
-        logger.debug(
-            "Post-pay sync #{}: {} ещё не на основной — пропуск вторичных",
-            sub_id, email,
-        )
-        return []
-
-    nodes = await nodes_db.get_secondary_nodes(healthy_only=True)
-    if not nodes:
-        return []
-
-    sem = asyncio.Semaphore(settings.XUI_SECONDARY_SYNC_WORKERS)
-
-    async def _one(node: dict) -> dict[str, Any]:
-        async with sem:
-            r = await sync_client_on_secondary_from_primary(node, email, primary_state)
-            if r.get("ok"):
-                await nodes_db.update_node(
-                    node["id"],
-                    last_sync_at=datetime.utcnow().isoformat(),
-                    last_sync_error=None,
-                )
-            return r
-
-    return list(await asyncio.gather(*[_one(n) for n in nodes]))
+    """После оплаты: параметры на вторичные пушит панель 3x-ui с основной."""
+    logger.debug(
+        "Post-pay secondary sync #{} skipped — panel propagates from primary",
+        sub_id,
+    )
+    return []
 
 
 async def _secondary_sync_worker() -> None:
@@ -435,22 +387,8 @@ async def _secondary_sync_worker() -> None:
 
 
 async def start_secondary_sync_workers() -> None:
-    global _secondary_workers_started, _secondary_worker_tasks
-    from db import bot_settings as bot_settings_db
-
-    if await bot_settings_db.is_sync_disabled():
-        logger.info("Secondary sync workers not started — sync disabled in admin")
-        return
-    if _secondary_workers_started:
-        return
-    _secondary_shutdown.clear()
-    _secondary_workers_started = True
-    workers = max(1, settings.XUI_SECONDARY_SYNC_WORKERS)
-    _secondary_worker_tasks = [
-        asyncio.create_task(_secondary_sync_worker(), name=f"secondary_sync_{i}")
-        for i in range(workers)
-    ]
-    logger.info("Secondary sync workers started ({})", workers)
+    """Очередь после оплаты не используется — панель синхронизирует параметры с основной."""
+    logger.debug("Secondary sync workers not started — panel propagates from primary")
 
 
 async def stop_secondary_sync_workers() -> None:

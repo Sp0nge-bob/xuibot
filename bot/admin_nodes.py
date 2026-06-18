@@ -51,9 +51,12 @@ def _autosync_status_line(*, sync_disabled: bool) -> str:
     if sync_disabled:
         return (
             "⏸ <b>Автосинк: выключен</b>\n"
-            "<i>Нет планового sync и очереди после оплаты. Выдача и продление на главной — как обычно.</i>"
+            "<i>Нет планового full sync. Выдача и продление на главной — как обычно.</i>"
         )
-    return "🔄 <b>Автосинк: включён</b> <i>(раз в сутки + после оплаты на вторичные)</i>"
+    return (
+        "🔄 <b>Автосинк: включён</b> "
+        "<i>(раз в сутки: БД↔основная + призраки на вторичных)</i>"
+    )
 
 
 async def _nodes_list_bundle() -> tuple[str, list, bool]:
@@ -662,8 +665,8 @@ async def cb_nodes_sync(cb: CallbackQuery):
             f"Основная: создано {stats.get('primary_created', 0)}, "
             f"обновлено {stats.get('primary_updated', 0)}, "
             f"лишних удалено {stats.get('primary_orphans_purged', 0)}\n"
-            f"Вторичные: нод {stats['nodes']}, expiry обновлено {stats['ok']}, "
-            f"призраков {stats.get('purged', 0)}\n"
+            f"Вторичные: нод {stats['nodes']}, "
+            f"призраков удалено {stats.get('purged', 0)}\n"
             f"Ошибок: {stats['failed']}"
             )
     except Exception as e:
