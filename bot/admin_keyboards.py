@@ -261,6 +261,8 @@ def admin_happ_crypto_kb(mode: str) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     icons = {
         "none": "🔓",
+        "crypt3_local": "🔑",
+        "crypt4_local": "🔒",
         "crypt5_api": "🌐",
     }
     for key in HAPP_CRYPTO_MODES:

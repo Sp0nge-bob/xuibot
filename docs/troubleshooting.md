@@ -32,15 +32,15 @@
 
 ## `message caption is too long` при выдаче ключа / trial
 
-- При `crypt4_local` / `crypt5` ссылка `happ://crypt…` ~700 символов — не влезает в caption фото (лимит Telegram **1024**).
+- При `crypt3_local` / `crypt4_local` / `crypt5_api` ссылка `happ://crypt…` ~700 символов — не влезает в caption фото (лимит Telegram **1024**).
 - Бот выносит длинную ссылку в **отдельное сообщение** после QR (обновление после `69e3cb7`).
 - Если ошибка остаётся — `git pull` и перезапуск бота.
 
-## Happ: «ссылка не валидна» при вставке `happ://crypt4/…`
+## Happ: «ссылка не валидна» при вставке `happ://crypt…`
 
-- Актуальные версии Happ **не принимают crypt4** — только `happ://crypt5/…`.
-- Поставьте `HAPP_CRYPTO_MODE=crypt5_api` или `/admin` → **🔐 Happ** → Crypt5.
-- Старый `crypt4_local` в `.env` бот переключит на crypt5 автоматически.
+- RSA-ключ из [документации Happ](https://www.happ.su/main/dev-docs/crypto-link) даёт префикс **`happ://crypt3/`**, не `crypt4`.
+- Если в `.env` стоит `crypt4_local`, но вы ожидали ключ из docs — переключите на **`crypt3_local`** (`/admin` → **🔐 Happ**).
+- Если crypt3/crypt4 не принимаются вашей версией Happ — **`crypt5_api`** (`happ://crypt5/…`).
 - Копируйте ссылку **целиком** из отдельного сообщения (после QR), без переносов строк.
 
 ## Happ: вместо `happ://crypt…` отдаётся обычная ссылка
