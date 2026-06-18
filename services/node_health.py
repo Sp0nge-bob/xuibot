@@ -26,7 +26,7 @@ async def check_node_health(node: dict[str, Any]) -> dict[str, Any]:
         latency_ms = int((time.monotonic() - started) * 1000)
         error = f"{type(e).__name__}: {e}"[:200]
         invalidate_api_cache(node_id)
-        logger.warning("Health check failed for node {} ({}): {}", node_id, node.get("name"), error)
+        logger.debug("Health check failed for node {} ({}): {}", node_id, node.get("name"), error)
 
     if node_id:
         await nodes_db.record_health_check(node_id, ok=ok, latency_ms=latency_ms, error=error)
@@ -63,6 +63,13 @@ async def check_all_nodes_health() -> list[dict[str, Any]]:
                 }
 
     results = list(await asyncio.gather(*[_one(n) for n in nodes]))
-    healthy = sum(1 for r in results if r.get("ok"))
-    logger.info("Node health: {}/{} healthy", healthy, len(results))
+    for r in results:
+        if r.get("ok"):
+            continue
+        logger.warning(
+            "Node {} ({}) unhealthy: {}",
+            r.get("node_id"),
+            r.get("name"),
+            r.get("error") or "unknown",
+        )
     return results

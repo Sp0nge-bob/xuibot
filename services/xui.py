@@ -26,6 +26,7 @@ from services.panel_inbounds import fetch_inbound_by_id, fetch_inbounds_list
 
 _apis: dict[int, AsyncApi] = {}
 _bot_group_ensured: set[int] = set()
+_connect_logged: set[int] = set()
 _BOT_CLIENT_EMAIL = re.compile(r"^tg(?:free)?\d+$")
 
 
@@ -92,6 +93,7 @@ async def build_sub_link(sub_id: str) -> str:
 def invalidate_api_cache(node_id: int) -> None:
     _apis.pop(node_id, None)
     _bot_group_ensured.discard(node_id)
+    _connect_logged.discard(node_id)
 
 
 async def _probe_panel_read_api(api: AsyncApi) -> bool:
@@ -145,7 +147,12 @@ async def get_api_for_node(node: dict, *, force_new: bool = False) -> AsyncApi:
                 )
 
         _apis[node_id] = api
-        logger.info("Connected to 3x-ui [{}] at {}", node.get("name") or node_id, host)
+        name = node.get("name") or node_id
+        if node_id not in _connect_logged:
+            _connect_logged.add(node_id)
+            logger.info("Connected to 3x-ui [{}] at {}", name, host)
+        else:
+            logger.debug("Reconnected to 3x-ui [{}] at {}", name, host)
     return _apis[node_id]
 
 
