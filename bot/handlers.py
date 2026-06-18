@@ -908,6 +908,12 @@ async def msg_promo_code(message: Message, state: FSMContext):
 
         await show_subscriptions_manage(message, message.from_user.id)
         return
+    if cmd == "/faq":
+        await _clear_promo_input_state(state)
+        from .faq import show_faq_menu_message
+
+        await show_faq_menu_message(message)
+        return
     if cmd:
         await message.answer("Ввод промокода отменён.", reply_markup=back_to_main_kb())
         return

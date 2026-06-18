@@ -19,6 +19,12 @@ class AdminStates(StatesGroup):
     waiting_node_inbounds = State()
     waiting_start_announcement = State()
     waiting_start_greeting = State()
+    waiting_faq_title = State()
+    waiting_faq_body = State()
+    waiting_faq_photos = State()
+    waiting_faq_edit_title = State()
+    waiting_faq_edit_body = State()
+    waiting_faq_add_photos = State()
 
 
 class AdminPricingStates(StatesGroup):

@@ -8,6 +8,7 @@ from loguru import logger
 USER_COMMANDS: tuple[BotCommand, ...] = (
     BotCommand(command="start", description="Главное меню"),
     BotCommand(command="subscription", description="Моя подписка"),
+    BotCommand(command="faq", description="Частые вопросы"),
 )
 
 

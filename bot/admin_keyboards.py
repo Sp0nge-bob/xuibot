@@ -24,9 +24,10 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📡 Inbounds", callback_data="adm:inbounds"),
         ],
         [
-            InlineKeyboardButton(text="📢 Экран /start", callback_data="adm:start_text"),
-            InlineKeyboardButton(text="💾 Бэкап", callback_data="adm:backup"),
+            InlineKeyboardButton(text="❓ FAQ", callback_data="adm:faq"),
+            InlineKeyboardButton(text="📢 /start", callback_data="adm:start_text"),
         ],
+        [InlineKeyboardButton(text="💾 Бэкап", callback_data="adm:backup")],
     ]
     if settings.ALLOW_DEBUG_ADMIN:
         rows.append([InlineKeyboardButton(text="🧪 Отладка", callback_data="adm:debug")])
@@ -70,6 +71,86 @@ def admin_start_text_clear_confirm_kb() -> InlineKeyboardMarkup:
         )],
         [InlineKeyboardButton(text="« Отмена", callback_data="adm:start_text")],
     ])
+
+
+def _faq_admin_title(title: str, *, max_len: int = 36) -> str:
+    t = (title or "").strip()
+    if len(t) <= max_len:
+        return t
+    return t[: max_len - 1] + "…"
+
+
+def admin_faq_menu_kb(articles: list) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = [
+        [InlineKeyboardButton(text="➕ Новая статья", callback_data="adm:faq:create")],
+    ]
+    for a in articles:
+        status = "✅" if a.get("is_published") else "⏸"
+        rows.append([InlineKeyboardButton(
+            text=f"{status} {_faq_admin_title(a.get('title') or '')}",
+            callback_data=f"adm:faq:{a['id']}",
+        )])
+    rows.append([InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_faq_detail_kb(article_id: int, *, is_published: bool) -> InlineKeyboardMarkup:
+    toggle = "⏸ Скрыть" if is_published else "✅ Опубликовать"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✏️ Заголовок", callback_data=f"adm:faq:{article_id}:title"),
+            InlineKeyboardButton(text="📝 Текст", callback_data=f"adm:faq:{article_id}:body"),
+        ],
+        [
+            InlineKeyboardButton(text="🖼 Добавить фото", callback_data=f"adm:faq:{article_id}:photos"),
+            InlineKeyboardButton(text="👁 Превью", callback_data=f"adm:faq:{article_id}:preview"),
+        ],
+        [InlineKeyboardButton(text=toggle, callback_data=f"adm:faq:{article_id}:toggle")],
+        [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"adm:faq:{article_id}:del")],
+        [
+            InlineKeyboardButton(text="« К FAQ", callback_data="adm:faq"),
+            InlineKeyboardButton(text="« Админ", callback_data="adm:menu"),
+        ],
+    ])
+
+
+def admin_faq_photos_kb(*, create_mode: bool = False) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(text="✅ Готово", callback_data="adm:faq:photos:done"),
+            InlineKeyboardButton(text="⏭ Пропустить", callback_data="adm:faq:photos:skip"),
+        ],
+    ]
+    if not create_mode:
+        rows.append([InlineKeyboardButton(text="« Отмена", callback_data="adm:faq:photos:cancel")])
+    else:
+        rows.append([InlineKeyboardButton(text="« Отмена", callback_data="adm:faq")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_faq_delete_confirm_kb(article_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="⚠️ Да, удалить",
+            callback_data=f"adm:faq:{article_id}:del:confirm",
+        )],
+        [InlineKeyboardButton(text="« Отмена", callback_data=f"adm:faq:{article_id}")],
+    ])
+
+
+def admin_faq_photos_manage_kb(article_id: int, photos: list) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for p in photos:
+        rows.append([InlineKeyboardButton(
+            text=f"🗑 Удалить фото #{p['id']}",
+            callback_data=f"adm:faq:{article_id}:photo_del:{p['id']}",
+        )])
+    rows.append([InlineKeyboardButton(
+        text="🖼 Добавить ещё",
+        callback_data=f"adm:faq:{article_id}:photos",
+    )])
+    rows.append([InlineKeyboardButton(text="« К статье", callback_data=f"adm:faq:{article_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def admin_backup_kb(

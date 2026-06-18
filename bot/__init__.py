@@ -18,6 +18,8 @@ from .admin_start_text import router as admin_start_text_router
 from .admin_nodes import router as admin_nodes_router
 from .admin_payments import router as admin_payments_router
 from .admin_backup import router as admin_backup_router
+from .admin_faq import router as admin_faq_router
+from .faq import router as faq_router
 from .middlewares import ActionLockMiddleware
 from .scheduler import run_full_nodes_sync, start_scheduler
 from .sender import send_message
@@ -42,6 +44,8 @@ dp.include_router(admin_start_text_router)
 dp.include_router(admin_nodes_router)
 dp.include_router(admin_payments_router)
 dp.include_router(admin_backup_router)
+dp.include_router(admin_faq_router)
+dp.include_router(faq_router)
 
 
 async def start_bot():

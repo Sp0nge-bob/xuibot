@@ -116,6 +116,35 @@ def main_menu_text(
     )
 
 
+def faq_menu_text(count: int) -> str:
+    return screen(
+        "❓ <b>FAQ</b>",
+        f"Ответы на частые вопросы — <b>{count}</b> "
+        f"{_ru_articles_word(count)}.",
+        hint="Выберите тему ниже 👇",
+    )
+
+
+def faq_empty_text() -> str:
+    return screen(
+        "❓ <b>FAQ</b>",
+        "Пока нет опубликованных статей.",
+        hint="Загляните позже или напишите в поддержку.",
+    )
+
+
+def _ru_articles_word(n: int) -> str:
+    n = abs(int(n)) % 100
+    if 11 <= n <= 14:
+        return "статей"
+    last = n % 10
+    if last == 1:
+        return "статья"
+    if 2 <= last <= 4:
+        return "статьи"
+    return "статей"
+
+
 def plans_menu_text(*, has_active_sub: bool = False) -> str:
     hint = renewal_hint(has_active_sub=has_active_sub) or None
     return screen(
@@ -403,6 +432,80 @@ def admin_start_text_edit_prompt_text() -> str:
         "<code>&lt;code&gt;</code> и т.д.\n"
         "Каждый открытый тег нужно закрывать: <code>&lt;b&gt;текст&lt;/b&gt;</code>.\n\n"
         "Для отмены: /admin"
+    )
+
+
+def admin_faq_menu_text(articles: list[dict]) -> str:
+    published = sum(1 for a in articles if a.get("is_published"))
+    lines = [
+        "❓ <b>FAQ</b>",
+        "━━━━━━━━━━━━━━━━",
+        "",
+        f"Всего статей: <b>{len(articles)}</b> · опубликовано: <b>{published}</b>",
+        "",
+        "Создавайте короткие статьи с заголовком, текстом и фото.",
+        "Клиенты увидят их в разделе «FAQ» в главном меню.",
+    ]
+    if articles:
+        lines.append("")
+        lines.append("<b>Статьи:</b>")
+        for a in articles[:12]:
+            status = "✅" if a.get("is_published") else "⏸"
+            title = (a.get("title") or "")[:48]
+            lines.append(f"  {status} <code>#{a['id']}</code> {title}")
+        if len(articles) > 12:
+            lines.append(f"  … и ещё {len(articles) - 12}")
+    return "\n".join(lines)
+
+
+def admin_faq_detail_text(article: dict, *, photo_count: int) -> str:
+    status = "✅ Опубликована" if article.get("is_published") else "⏸ Скрыта"
+    body = (article.get("body") or "").strip()
+    preview = body[:400] + ("…" if len(body) > 400 else "") if body else "<i>Текст не задан</i>"
+    return (
+        f"❓ <b>FAQ #{article['id']}</b>\n"
+        f"━━━━━━━━━━━━━━━━\n\n"
+        f"<b>{article.get('title') or '—'}</b>\n"
+        f"{status} · фото: <b>{photo_count}</b>\n\n"
+        f"{preview}"
+    )
+
+
+def admin_faq_title_prompt_text() -> str:
+    return (
+        "✏️ <b>Заголовок FAQ</b>\n\n"
+        "Короткое название для кнопки в списке (до 80 символов).\n\n"
+        "Отмена: /admin"
+    )
+
+
+def admin_faq_body_prompt_text(*, title: str) -> str:
+    return (
+        f"📝 <b>Текст статьи</b>\n"
+        f"Заголовок: <b>{title}</b>\n\n"
+        "Поддерживается HTML: <code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, "
+        "<code>&lt;code&gt;</code> и т.д.\n\n"
+        "Отмена: /admin"
+    )
+
+
+def admin_faq_photos_prompt_text(*, count: int) -> str:
+    return (
+        "🖼 <b>Фото к статье</b>\n\n"
+        f"Добавлено фото: <b>{count}</b> (макс. 10).\n"
+        "Отправьте изображения сообщениями в чат.\n\n"
+        "Когда закончите — нажмите «Готово» или «Пропустить»."
+    )
+
+
+def admin_faq_edit_title_prompt_text() -> str:
+    return "✏️ <b>Новый заголовок</b>\n\nОтмена: /admin"
+
+
+def admin_faq_edit_body_prompt_text() -> str:
+    return (
+        "📝 <b>Новый текст статьи</b>\n\n"
+        "HTML как в Telegram. Отмена: /admin"
     )
 
 

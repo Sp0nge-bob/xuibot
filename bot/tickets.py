@@ -354,6 +354,13 @@ async def msg_ticket_relay(message: Message, state: FSMContext):
             await state.clear()
             await show_subscriptions_manage(message, message.from_user.id)
             return
+        if cmd == "/faq":
+            clear_active_session(message.from_user.id)
+            await state.clear()
+            from .faq import show_faq_menu_message
+
+            await show_faq_menu_message(message)
+            return
         if cmd:
             return
 

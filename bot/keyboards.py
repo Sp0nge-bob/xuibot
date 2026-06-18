@@ -10,6 +10,7 @@ from ui.theme import (
     BTN_CHECK_PAY,
     BTN_HOME,
     BTN_PAY,
+    BTN_FAQ,
     BTN_PROMO,
     BTN_RESUME_PAY,
     BTN_SUBSCRIPTION,
@@ -53,10 +54,37 @@ def main_menu_kb(
         ],
         [
             InlineKeyboardButton(text=BTN_PROMO, callback_data="promo_enter"),
-            InlineKeyboardButton(text=BTN_SUPPORT_SHORT, callback_data="support"),
+            InlineKeyboardButton(text=BTN_FAQ, callback_data="faq_menu"),
         ],
+        [InlineKeyboardButton(text=BTN_SUPPORT_SHORT, callback_data="support")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _faq_button_title(title: str, *, max_len: int = 42) -> str:
+    t = (title or "").strip()
+    if len(t) <= max_len:
+        return t
+    return t[: max_len - 1] + "…"
+
+
+def faq_list_kb(articles: list[dict]) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(
+            text=_faq_button_title(a["title"]),
+            callback_data=f"faq:article:{a['id']}",
+        )]
+        for a in articles
+    ]
+    rows.append([InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def faq_article_nav_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ К списку FAQ", callback_data="faq_menu")],
+        [InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")],
+    ])
 
 
 def plans_kb(plans: list[Plan], *, extend: bool = False) -> InlineKeyboardMarkup:
