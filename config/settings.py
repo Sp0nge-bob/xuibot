@@ -45,6 +45,8 @@ class Settings(BaseSettings):
 
     # Полная синхронизация нод (как кнопка в админке) — bot/scheduler.py
     FULL_SYNC_INTERVAL_HOURS: int = 24
+    # Проверка истекших подписок (disable на панели) — bot/scheduler.py
+    EXPIRED_CHECK_INTERVAL_HOURS: int = 1
     SUBSCRIPTION_SYNC_DEBOUNCE_SEC: int = 60
 
     # Пока бот настроен на одну ноду.
@@ -84,6 +86,7 @@ class Settings(BaseSettings):
     PUBLIC_WEBHOOK_URL: str = ""
     WEBHOOK_RATE_LIMIT_PER_MIN: int = 120
     WEBHOOK_IDEMPOTENCY_TTL_SEC: int = 300
+    # Параллельная обработка webhook Platega (выдача ключей) — services/fulfillment_queue.py
     FULFILLMENT_QUEUE_WORKERS: int = 2
     FULFILLMENT_QUEUE_MAX_SIZE: int = 200
 

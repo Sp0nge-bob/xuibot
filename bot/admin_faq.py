@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from aiogram import Router, F
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from aiogram.fsm.context import FSMContext
 
 from db import faq as faq_db
@@ -14,7 +14,7 @@ from .admin_keyboards import (
     admin_faq_photos_kb,
     admin_faq_photos_manage_kb,
 )
-from .faq_delivery import send_faq_article
+from .faq_delivery import send_activation_setup_faq, send_faq_article
 from .keyboards import faq_article_nav_kb
 from .messages import (
     admin_faq_body_prompt_text,
@@ -37,6 +37,23 @@ FAQ_BODY_MAX = 4000
 FAQ_PHOTOS_MAX = 10
 
 
+def _faq_detail_kb(article: dict) -> InlineKeyboardMarkup:
+    return admin_faq_detail_kb(
+        article["id"],
+        is_published=bool(article.get("is_published")),
+        is_builtin=bool(article.get("builtin_key")),
+    )
+
+
+async def _faq_photo_count(article: dict, *, article_id: int | None = None) -> int:
+    if faq_db.is_activation_faq_article(article):
+        from services.fulfillment import load_happ_setup_photos
+
+        return len(load_happ_setup_photos())
+    aid = article_id if article_id is not None else int(article["id"])
+    return len(await faq_db.list_photos(aid))
+
+
 async def _show_faq_admin_menu(target: CallbackQuery | Message) -> None:
     articles = await faq_db.list_articles()
     text = admin_faq_menu_text(articles)
@@ -52,11 +69,11 @@ async def _show_faq_detail(cb: CallbackQuery, article_id: int) -> None:
     if not article:
         await safe_cb_answer(cb, "Статья не найдена", show_alert=True)
         return
-    photos = await faq_db.list_photos(article_id)
+    photo_count = await _faq_photo_count(article, article_id=article_id)
     await send_or_edit(
         cb,
-        admin_faq_detail_text(article, photo_count=len(photos)),
-        admin_faq_detail_kb(article_id, is_published=bool(article.get("is_published"))),
+        admin_faq_detail_text(article, photo_count=photo_count),
+        _faq_detail_kb(article),
     )
 
 
@@ -253,13 +270,13 @@ async def cb_admin_faq_preview(cb: CallbackQuery):
         return
     photos = await faq_db.list_photos(article_id)
     await safe_cb_answer(cb, "Превью отправлено")
-    await send_faq_article(
-        cb.message.bot,
-        cb.message.chat.id,
-        article,
-        photos,
-        reply_markup=faq_article_nav_kb(),
-    )
+    bot = cb.message.bot
+    chat_id = cb.message.chat.id
+    nav = faq_article_nav_kb()
+    if faq_db.is_activation_faq_article(article):
+        await send_activation_setup_faq(bot, chat_id, article, reply_markup=nav)
+    else:
+        await send_faq_article(bot, chat_id, article, photos, reply_markup=nav)
 
 
 @router.callback_query(F.data.regexp(r"^adm:faq:\d+:toggle$"))
@@ -282,6 +299,10 @@ async def cb_admin_faq_delete(cb: CallbackQuery):
     if not is_admin(cb.from_user.id):
         return
     article_id = int(cb.data.split(":")[2])
+    article = await faq_db.get_article(article_id)
+    if article and article.get("builtin_key"):
+        await safe_cb_answer(cb, "Системную статью нельзя удалить", show_alert=True)
+        return
     await safe_cb_answer(cb)
     await send_or_edit(
         cb,
@@ -295,6 +316,10 @@ async def cb_admin_faq_delete_confirm(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
         return
     article_id = int(cb.data.split(":")[2])
+    article = await faq_db.get_article(article_id)
+    if article and article.get("builtin_key"):
+        await safe_cb_answer(cb, "Системную статью нельзя удалить", show_alert=True)
+        return
     await faq_db.delete_article(article_id)
     await state.set_state(None)
     await safe_cb_answer(cb, "Удалено")
@@ -349,7 +374,8 @@ async def cb_admin_faq_edit_title(cb: CallbackQuery, state: FSMContext):
     await state.set_state(AdminStates.waiting_faq_edit_title)
     await state.update_data(faq_edit_article_id=article_id)
     await safe_cb_answer(cb)
-    await send_or_edit(cb, admin_faq_edit_title_prompt_text(), admin_faq_detail_kb(article_id, is_published=True))
+    article = await faq_db.get_article(article_id)
+    await send_or_edit(cb, admin_faq_edit_title_prompt_text(), _faq_detail_kb(article or {"id": article_id}))
 
 
 @router.message(AdminStates.waiting_faq_edit_title)
@@ -372,10 +398,10 @@ async def msg_admin_faq_edit_title(message: Message, state: FSMContext):
     await state.set_state(None)
     await message.answer("✅ Заголовок обновлён")
     article = await faq_db.get_article(article_id)
-    photos = await faq_db.list_photos(article_id)
+    photo_count = await _faq_photo_count(article, article_id=article_id)
     await message.answer(
-        admin_faq_detail_text(article, photo_count=len(photos)),
-        reply_markup=admin_faq_detail_kb(article_id, is_published=bool(article.get("is_published"))),
+        admin_faq_detail_text(article, photo_count=photo_count),
+        reply_markup=_faq_detail_kb(article),
     )
 
 
@@ -387,7 +413,8 @@ async def cb_admin_faq_edit_body(cb: CallbackQuery, state: FSMContext):
     await state.set_state(AdminStates.waiting_faq_edit_body)
     await state.update_data(faq_edit_article_id=article_id)
     await safe_cb_answer(cb)
-    await send_or_edit(cb, admin_faq_edit_body_prompt_text(), admin_faq_detail_kb(article_id, is_published=True))
+    article = await faq_db.get_article(article_id)
+    await send_or_edit(cb, admin_faq_edit_body_prompt_text(), _faq_detail_kb(article or {"id": article_id}))
 
 
 @router.message(AdminStates.waiting_faq_edit_body)
@@ -414,10 +441,10 @@ async def msg_admin_faq_edit_body(message: Message, state: FSMContext):
     await state.set_state(None)
     await message.answer("✅ Текст обновлён")
     article = await faq_db.get_article(article_id)
-    photos = await faq_db.list_photos(article_id)
+    photo_count = await _faq_photo_count(article, article_id=article_id)
     await message.answer(
-        admin_faq_detail_text(article, photo_count=len(photos)),
-        reply_markup=admin_faq_detail_kb(article_id, is_published=bool(article.get("is_published"))),
+        admin_faq_detail_text(article, photo_count=photo_count),
+        reply_markup=_faq_detail_kb(article),
     )
 
 

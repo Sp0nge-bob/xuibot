@@ -505,16 +505,23 @@ def admin_faq_menu_text(articles: list[dict]) -> str:
 
 
 def admin_faq_detail_text(article: dict, *, photo_count: int) -> str:
+    from db.faq import is_activation_faq_article
+
     status = "✅ Опубликована" if article.get("is_published") else "⏸ Скрыта"
     body = (article.get("body") or "").strip()
     preview = body[:400] + ("…" if len(body) > 400 else "") if body else "<i>Текст не задан</i>"
-    return (
-        f"❓ <b>FAQ #{article['id']}</b>\n"
-        f"━━━━━━━━━━━━━━━━\n\n"
-        f"<b>{article.get('title') or '—'}</b>\n"
-        f"{status} · фото: <b>{photo_count}</b>\n\n"
-        f"{preview}"
-    )
+    lines = [
+        f"❓ <b>FAQ #{article['id']}</b>",
+        "━━━━━━━━━━━━━━━━",
+        "",
+        f"<b>{article.get('title') or '—'}</b>",
+    ]
+    if is_activation_faq_article(article):
+        lines.append(f"{status} · 🔒 системная · скриншоты Happ: <b>{photo_count}</b>")
+    else:
+        lines.append(f"{status} · фото: <b>{photo_count}</b>")
+    lines += ["", preview]
+    return "\n".join(lines)
 
 
 def admin_faq_title_prompt_text() -> str:

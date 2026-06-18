@@ -85,7 +85,12 @@ def start_scheduler():
         hours=settings.FULL_SYNC_INTERVAL_HOURS,
         id="full_nodes_sync",
     )
-    scheduler.add_job(check_expired_subscriptions, "interval", hours=1, id="check_expired")
+    scheduler.add_job(
+        check_expired_subscriptions,
+        "interval",
+        hours=settings.EXPIRED_CHECK_INTERVAL_HOURS,
+        id="check_expired",
+    )
     scheduler.add_job(expire_stale_pending_orders_job, "interval", hours=6, id="expire_stale_pending")
     if settings.BACKUP_ENABLED:
         scheduler.add_job(
@@ -97,8 +102,9 @@ def start_scheduler():
         )
     scheduler.start()
     logger.info(
-        "Scheduler started (sync {}h, expiry 1h, stale pending 6h, backup {}:00 UTC)",
+        "Scheduler started (sync {}h, expiry {}h, stale pending 6h, backup {}:00 UTC)",
         settings.FULL_SYNC_INTERVAL_HOURS,
+        settings.EXPIRED_CHECK_INTERVAL_HOURS,
         settings.BACKUP_HOUR_UTC if settings.BACKUP_ENABLED else "off",
     )
 

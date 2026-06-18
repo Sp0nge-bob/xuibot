@@ -5,10 +5,11 @@ import html
 from typing import Any, Optional
 
 from aiogram import Bot
-from aiogram.types import InputMediaPhoto
+from aiogram.types import FSInputFile, InputMediaPhoto
 
 from bot.telegram_html import safe_html_fragment
 from bot.ui_helpers import clamp_telegram_text
+from services.fulfillment import load_happ_setup_photos
 
 
 async def send_faq_article(
@@ -59,6 +60,52 @@ async def send_faq_article(
 
     media = [InputMediaPhoto(media=file_ids[0], caption=header)]
     media.extend(InputMediaPhoto(media=fid) for fid in file_ids[1:])
+    await bot.send_media_group(chat_id, media)
+    if reply_markup:
+        await bot.send_message(chat_id, "⬆️", reply_markup=reply_markup)
+
+
+async def send_activation_setup_faq(
+    bot: Bot,
+    chat_id: int,
+    article: dict[str, Any],
+    *,
+    reply_markup=None,
+) -> None:
+    """Встроенная FAQ-статья — тот же текст и скриншоты, что после оплаты/пробного."""
+    title = html.escape((article.get("title") or "").strip())
+    body_raw = (article.get("body") or "").strip()
+    body = safe_html_fragment(body_raw) if body_raw else ""
+    header = f"<b>{title}</b>"
+    if body:
+        header = f"{header}\n\n{body}"
+    header = clamp_telegram_text(header)
+
+    photos: list[FSInputFile] = load_happ_setup_photos()
+    if not photos:
+        await bot.send_message(chat_id, header, reply_markup=reply_markup)
+        return
+
+    if len(photos) == 1:
+        if len(header) <= 1024:
+            await bot.send_photo(
+                chat_id, photos[0], caption=header, reply_markup=reply_markup,
+            )
+            return
+        await bot.send_message(chat_id, header)
+        await bot.send_photo(chat_id, photos[0], reply_markup=reply_markup)
+        return
+
+    if len(header) > 1024:
+        await bot.send_message(chat_id, header)
+        media = [InputMediaPhoto(media=p) for p in photos]
+        await bot.send_media_group(chat_id, media)
+        if reply_markup:
+            await bot.send_message(chat_id, "⬆️", reply_markup=reply_markup)
+        return
+
+    media = [InputMediaPhoto(media=photos[0], caption=header)]
+    media.extend(InputMediaPhoto(media=p) for p in photos[1:])
     await bot.send_media_group(chat_id, media)
     if reply_markup:
         await bot.send_message(chat_id, "⬆️", reply_markup=reply_markup)

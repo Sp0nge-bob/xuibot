@@ -5,7 +5,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from db import faq as faq_db
-from .faq_delivery import send_faq_article
+from .faq_delivery import send_activation_setup_faq, send_faq_article
 from .keyboards import faq_article_nav_kb, faq_list_kb
 from .messages import faq_empty_text, faq_menu_text
 from .ui_helpers import safe_cb_answer, send_or_edit
@@ -50,10 +50,10 @@ async def cb_faq_article(cb: CallbackQuery):
         await cb.message.delete()
     except Exception:
         pass
-    await send_faq_article(
-        cb.message.bot,
-        cb.message.chat.id,
-        article,
-        photos,
-        reply_markup=faq_article_nav_kb(),
-    )
+    bot = cb.message.bot
+    chat_id = cb.message.chat.id
+    nav = faq_article_nav_kb()
+    if faq_db.is_activation_faq_article(article):
+        await send_activation_setup_faq(bot, chat_id, article, reply_markup=nav)
+    else:
+        await send_faq_article(bot, chat_id, article, photos, reply_markup=nav)

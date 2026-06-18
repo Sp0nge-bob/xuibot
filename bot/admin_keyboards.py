@@ -100,24 +100,36 @@ def admin_faq_menu_kb(articles: list) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def admin_faq_detail_kb(article_id: int, *, is_published: bool) -> InlineKeyboardMarkup:
+def admin_faq_detail_kb(
+    article_id: int,
+    *,
+    is_published: bool,
+    is_builtin: bool = False,
+) -> InlineKeyboardMarkup:
     toggle = "⏸ Скрыть" if is_published else "✅ Опубликовать"
-    return InlineKeyboardMarkup(inline_keyboard=[
+    rows: list[list[InlineKeyboardButton]] = [
         [
             InlineKeyboardButton(text="✏️ Заголовок", callback_data=f"adm:faq:{article_id}:title"),
             InlineKeyboardButton(text="📝 Текст", callback_data=f"adm:faq:{article_id}:body"),
         ],
-        [
+    ]
+    if not is_builtin:
+        rows.append([
             InlineKeyboardButton(text="🖼 Добавить фото", callback_data=f"adm:faq:{article_id}:photos"),
             InlineKeyboardButton(text="👁 Превью", callback_data=f"adm:faq:{article_id}:preview"),
-        ],
-        [InlineKeyboardButton(text=toggle, callback_data=f"adm:faq:{article_id}:toggle")],
-        [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"adm:faq:{article_id}:del")],
-        [
-            InlineKeyboardButton(text="« К FAQ", callback_data="adm:faq"),
-            InlineKeyboardButton(text="« Админ", callback_data="adm:menu"),
-        ],
+        ])
+    else:
+        rows.append([
+            InlineKeyboardButton(text="👁 Превью", callback_data=f"adm:faq:{article_id}:preview"),
+        ])
+    rows.append([InlineKeyboardButton(text=toggle, callback_data=f"adm:faq:{article_id}:toggle")])
+    if not is_builtin:
+        rows.append([InlineKeyboardButton(text="🗑 Удалить", callback_data=f"adm:faq:{article_id}:del")])
+    rows.append([
+        InlineKeyboardButton(text="« К FAQ", callback_data="adm:faq"),
+        InlineKeyboardButton(text="« Админ", callback_data="adm:menu"),
     ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def admin_faq_photos_kb(*, create_mode: bool = False) -> InlineKeyboardMarkup:
