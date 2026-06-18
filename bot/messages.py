@@ -524,6 +524,30 @@ def admin_debug_entry_confirm_text() -> str:
     )
 
 
+def admin_happ_crypto_text(mode: str) -> str:
+    from config.happ_crypto import HAPP_CRYPTO_MODE_LABELS, HAPP_CRYPTO_NONE
+
+    label = HAPP_CRYPTO_MODE_LABELS.get(mode, mode)
+    lines = [
+        "🔐 <b>Шифрование ссылок Happ</b>",
+        "━━━━━━━━━━━━━━━━",
+        "",
+        f"Текущий режим: <b>{label}</b>",
+        "",
+        "🔓 <b>Без шифрования</b> — обычная HTTPS-ссылка подписки.",
+        "🌐 <b>Crypt5 (API)</b> — запрос на crypto.happ.su, ссылка <code>happ://crypt5/…</code>.",
+        "🔐 <b>Crypt4 (локально)</b> — RSA-4096 на сервере, без внешних запросов.",
+        "",
+        "<i>Зашифрованные ссылки кэшируются в памяти процесса бота.</i>",
+    ]
+    if mode != HAPP_CRYPTO_NONE:
+        lines += [
+            "",
+            "Клиент не видит и не может переслать URL подписки.",
+        ]
+    return "\n".join(lines)
+
+
 def admin_payment_methods_text(enabled: dict[str, bool]) -> str:
     from config.payments import all_payment_method_definitions
 

@@ -17,6 +17,7 @@ dependencies = [
     "qrcode[pil]>=7.4.2",
     "pillow>=10.0.0",
     "httpx>=0.27.0",
+    "cryptography>=42.0.0",
     "loguru>=0.7.0",
 ]
 
@@ -35,5 +36,5 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["bot*", "config*", "db*", "services*"]
+include = ["bot*", "config*", "db*", "services*", "ui*"]
 exclude = ["data*", "grokerrorreports*", "tests*"]

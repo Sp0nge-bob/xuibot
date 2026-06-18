@@ -57,9 +57,9 @@ class Settings(BaseSettings):
     # Тогда бот будет делать ссылки вида: https://domen.com/api/v4/{sub_id}
     SUBSCRIPTION_BASE_URL: str = ""
 
-    # Happ: шифровать ссылку подписки (happ://crypt5/…) — пользователь не видит URL
+    # Happ: шифрование ссылки подписки — none | crypt5_api | crypt4_local
     # https://www.happ.su/main/dev-docs/crypto-link
-    HAPP_CRYPTO_LINKS: bool = False
+    HAPP_CRYPTO_MODE: str = "none"
     HAPP_CRYPTO_API_URL: str = "https://crypto.happ.su/api-v2.php"
     HAPP_CRYPTO_TIMEOUT_SEC: float = 15.0
 

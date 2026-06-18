@@ -25,6 +25,9 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="❓ FAQ", callback_data="adm:faq"),
+            InlineKeyboardButton(text="🔐 Happ", callback_data="adm:happ_crypto"),
+        ],
+        [
             InlineKeyboardButton(text="📢 /start", callback_data="adm:start_text"),
         ],
         [InlineKeyboardButton(text="💾 Бэкап", callback_data="adm:backup")],
@@ -250,6 +253,27 @@ def admin_debug_promo_reset_confirm_kb() -> InlineKeyboardMarkup:
         )],
         [InlineKeyboardButton(text="« Отмена", callback_data="adm:debug:enter")],
     ])
+
+
+def admin_happ_crypto_kb(mode: str) -> InlineKeyboardMarkup:
+    from config.happ_crypto import HAPP_CRYPTO_MODES, HAPP_CRYPTO_MODE_LABELS
+
+    rows: list[list[InlineKeyboardButton]] = []
+    icons = {
+        "none": "🔓",
+        "crypt5_api": "🌐",
+        "crypt4_local": "🔐",
+    }
+    for key in HAPP_CRYPTO_MODES:
+        prefix = "✅ " if key == mode else ""
+        icon = icons.get(key, "")
+        label = HAPP_CRYPTO_MODE_LABELS.get(key, key)
+        rows.append([InlineKeyboardButton(
+            text=f"{prefix}{icon} {label}",
+            callback_data=f"adm:happ_crypto:set:{key}",
+        )])
+    rows.append([InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def admin_payment_methods_kb(enabled: dict[str, bool]) -> InlineKeyboardMarkup:

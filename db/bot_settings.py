@@ -10,6 +10,7 @@ SETTING_START_ANNOUNCEMENT = "start_announcement"
 SETTING_START_GREETING = "start_greeting"
 SETTING_SYNC_DISABLED = "sync_disabled"
 SETTING_BACKUP_DISABLED = "backup_disabled"
+SETTING_HAPP_CRYPTO_MODE = "happ_crypto_mode"
 
 _SYNC_DISABLED_TRUTHY = frozenset({"1", "true", "yes", "on"})
 
@@ -144,3 +145,26 @@ async def is_backup_disabled() -> bool:
 
 async def set_backup_disabled(disabled: bool) -> None:
     await set_setting(SETTING_BACKUP_DISABLED, "1" if disabled else "0")
+
+
+async def get_happ_crypto_mode() -> str | None:
+    """Режим из админки; None — использовать HAPP_CRYPTO_MODE из .env."""
+    from config.happ_crypto import HAPP_CRYPTO_MODES, normalize_happ_crypto_mode
+
+    raw = await get_setting(SETTING_HAPP_CRYPTO_MODE)
+    if raw is None or not str(raw).strip():
+        return None
+    mode = normalize_happ_crypto_mode(str(raw))
+    if mode not in HAPP_CRYPTO_MODES:
+        return None
+    return mode
+
+
+async def set_happ_crypto_mode(mode: str) -> str:
+    from config.happ_crypto import HAPP_CRYPTO_MODES, normalize_happ_crypto_mode
+
+    normalized = normalize_happ_crypto_mode(mode)
+    if normalized not in HAPP_CRYPTO_MODES:
+        raise ValueError(f"Неизвестный режим Happ crypto: {mode}")
+    await set_setting(SETTING_HAPP_CRYPTO_MODE, normalized)
+    return normalized

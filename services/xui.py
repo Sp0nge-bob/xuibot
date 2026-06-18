@@ -92,12 +92,10 @@ async def build_plain_sub_link(sub_id: str) -> str:
 
 
 async def build_sub_link(sub_id: str) -> str:
-    """Ссылка для клиента: plain URL или happ://crypt5/… если HAPP_CRYPTO_LINKS=true."""
-    plain = await build_plain_sub_link(sub_id)
-    if not settings.HAPP_CRYPTO_LINKS:
-        return plain
+    """Ссылка для клиента: plain или happ://crypt4|crypt5/… по настройке шифрования."""
     from services.happ_crypto import encrypt_happ_subscription_link
 
+    plain = await build_plain_sub_link(sub_id)
     return await encrypt_happ_subscription_link(plain)
 
 
