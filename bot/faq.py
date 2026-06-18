@@ -5,6 +5,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from db import faq as faq_db
+from .faq_album import clear_faq_album, set_faq_album_message_ids
 from .faq_delivery import send_activation_setup_faq, send_faq_article
 from .keyboards import faq_article_nav_kb, faq_list_kb
 from .messages import faq_empty_text, faq_menu_text
@@ -29,6 +30,7 @@ async def cmd_faq(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "faq_menu")
 async def cb_faq_menu(cb: CallbackQuery):
+    await clear_faq_album(cb.bot, cb.message.chat.id)
     await safe_cb_answer(cb)
     articles = await faq_db.list_articles(published_only=True)
     if not articles:
@@ -52,8 +54,14 @@ async def cb_faq_article(cb: CallbackQuery):
         pass
     bot = cb.message.bot
     chat_id = cb.message.chat.id
+    await clear_faq_album(bot, chat_id)
     nav = faq_article_nav_kb()
     if faq_db.is_activation_faq_article(article):
-        await send_activation_setup_faq(bot, chat_id, article, reply_markup=nav)
+        album_ids = await send_activation_setup_faq(
+            bot, chat_id, article, reply_markup=nav,
+        )
     else:
-        await send_faq_article(bot, chat_id, article, photos, reply_markup=nav)
+        album_ids = await send_faq_article(
+            bot, chat_id, article, photos, reply_markup=nav,
+        )
+    set_faq_album_message_ids(chat_id, album_ids)

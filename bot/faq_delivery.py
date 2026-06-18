@@ -31,11 +31,14 @@ async def _send_faq_header_and_photos(
     photos: list[_PhotoMedia],
     *,
     reply_markup=None,
-) -> None:
-    """Текст статьи + фото. При нескольких фото: сначала альбом, затем текст с кнопками."""
+) -> list[int]:
+    """
+    Текст статьи + фото. При нескольких фото: сначала альбом, затем текст с кнопками.
+    Возвращает message_id альбома для последующего удаления при выходе из статьи.
+    """
     if not photos:
         await bot.send_message(chat_id, header, reply_markup=reply_markup)
-        return
+        return []
 
     if len(photos) == 1:
         if len(header) <= 1024:
@@ -45,14 +48,15 @@ async def _send_faq_header_and_photos(
                 caption=header,
                 reply_markup=reply_markup,
             )
-            return
+            return []
         await bot.send_message(chat_id, header, reply_markup=reply_markup)
         await bot.send_photo(chat_id, photos[0])
-        return
+        return []
 
     media = [InputMediaPhoto(media=photo) for photo in photos[:10]]
-    await bot.send_media_group(chat_id, media)
+    album_messages = await bot.send_media_group(chat_id, media)
     await bot.send_message(chat_id, header, reply_markup=reply_markup)
+    return [msg.message_id for msg in album_messages]
 
 
 async def send_faq_article(
@@ -62,10 +66,10 @@ async def send_faq_article(
     photos: list[dict[str, Any]],
     *,
     reply_markup=None,
-) -> None:
+) -> list[int]:
     header = _build_faq_header(article)
     file_ids = [p["file_id"] for p in photos if p.get("file_id")][:10]
-    await _send_faq_header_and_photos(
+    return await _send_faq_header_and_photos(
         bot, chat_id, header, file_ids, reply_markup=reply_markup,
     )
 
@@ -76,10 +80,10 @@ async def send_activation_setup_faq(
     article: dict[str, Any],
     *,
     reply_markup=None,
-) -> None:
+) -> list[int]:
     """Встроенная FAQ-статья — тот же текст и скриншоты, что после оплаты/пробного."""
     header = _build_faq_header(article)
     photos: list[FSInputFile] = load_happ_setup_photos()
-    await _send_faq_header_and_photos(
+    return await _send_faq_header_and_photos(
         bot, chat_id, header, photos, reply_markup=reply_markup,
     )

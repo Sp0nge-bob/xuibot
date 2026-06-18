@@ -188,6 +188,9 @@ async def cb_promo_enter(cb: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "main_menu")
 async def cb_main_menu(cb: CallbackQuery, state: FSMContext):
+    from bot.faq_album import clear_faq_album
+
+    await clear_faq_album(cb.bot, cb.message.chat.id)
     await _clear_promo_input_state(state)
     await _show_main_menu(cb, edit=True, state=state)
 
