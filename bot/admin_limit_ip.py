@@ -4,6 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from db import bot_settings as bot_settings_db
+from services.limit_ip import apply_limit_ip_settings_on_primary
 from .admin_auth import is_admin
 from .admin_keyboards import admin_back_kb, admin_limit_ip_kb
 from .messages import admin_limit_ip_edit_prompt_text, admin_limit_ip_text
@@ -70,8 +71,16 @@ async def _handle_limit_ip_input(message: Message, state: FSMContext, *, kind: s
         await bot_settings_db.set_trial_limit_ip(value)
     else:
         await bot_settings_db.set_paid_limit_ip(value)
+    stats = await apply_limit_ip_settings_on_primary(kind=kind)
     await state.set_state(None)
-    await message.answer(f"✅ Сохранено: <b>{value}</b>")
+    await message.answer(
+        f"✅ Сохранено: <b>{value}</b>\n"
+        f"Основная панель: обновлено <b>{stats['updated']}</b>, "
+        f"без изменений <b>{stats['skipped']}</b>"
+        + (f", нет на панели <b>{stats['missing']}</b>" if stats["missing"] else "")
+        + (f", ошибок <b>{stats['failed']}</b>" if stats["failed"] else "")
+        + "\n<i>Вторичные ноды подтянет сама панель 3x-ui.</i>",
+    )
     trial_limit = await bot_settings_db.get_trial_limit_ip()
     paid_limit = await bot_settings_db.get_paid_limit_ip()
     await message.answer(

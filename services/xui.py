@@ -818,6 +818,22 @@ async def get_panel_client_for_sync(email: str) -> Optional[Client]:
     return await get_unified_panel_client(email)
 
 
+async def update_client_limit_ip_on_primary(email: str, limit_ip: int) -> str:
+    """Обновить limitIp на основной ноде. Возвращает updated | skipped | missing."""
+    _assert_bot_client_email(email)
+    api = await get_api()
+    info = await _unified_get_client_info(api, email)
+    if not info:
+        return "missing"
+    client, _, _ = info
+    target = max(0, int(limit_ip))
+    if (client.limit_ip or 0) == target:
+        return "skipped"
+    await _unified_update_client(api, client, limitIp=target)
+    logger.info("limitIp {} → {} on primary", email, target)
+    return "updated"
+
+
 async def repair_client_inbounds(
     email: str,
     *,
@@ -1349,13 +1365,10 @@ def _client_needs_replica_update(
     total_gb: int,
     sub_id: str,
     enable: bool,
-    limit_ip: int | None = None,
 ) -> bool:
     if client.enable != enable:
         return True
     if abs((client.total_gb or 0) - total_gb) > 1024:
-        return True
-    if limit_ip is not None and (client.limit_ip or 0) != limit_ip:
         return True
     if _client_needs_update(client, expiry_time=expiry_ms, sub_id=sub_id, enable=enable):
         return True
@@ -1371,7 +1384,6 @@ async def sync_client_state_on_node(
     expiry_ms: int,
     total_gb: int,
     enable: bool,
-    limit_ip: int | None = None,
 ) -> str:
     """
     Вторичная нода: только синхронизация существующего клиента.
@@ -1393,7 +1405,6 @@ async def sync_client_state_on_node(
         total_gb=total_gb,
         sub_id=sub_id,
         enable=enable,
-        limit_ip=limit_ip,
     ):
         return "skipped"
 
@@ -1404,7 +1415,6 @@ async def sync_client_state_on_node(
         totalGB=total_gb,
         subId=sub_id or client.sub_id or "",
         enable=enable,
-        limitIp=limit_ip if limit_ip is not None else (client.limit_ip or 0),
     )
     return "updated"
 

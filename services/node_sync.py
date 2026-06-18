@@ -48,7 +48,6 @@ def _client_state_from_info(info: tuple) -> dict[str, Any]:
         "expiry_ms": int(client.expiry_time or 0),
         "total_gb": int(client.total_gb or 0),
         "enable": bool(client.enable),
-        "limit_ip": int(client.limit_ip or 0),
     }
 
 
@@ -132,13 +131,13 @@ async def ensure_subscription_on_primary(sub: dict[str, Any]) -> str:
 
     desired_limit = await resolve_limit_ip_for_email(email)
     client, _, _ = info
-    if _client_needs_replica_update(
+    needs_limit = (client.limit_ip or 0) != desired_limit
+    if needs_limit or _client_needs_replica_update(
         client,
         expiry_ms=state["expiry_ms"],
         total_gb=state["total_gb"],
         sub_id=state["sub_id"],
         enable=state["enable"],
-        limit_ip=desired_limit,
     ):
         await _unified_update_client(
             api,
@@ -201,7 +200,6 @@ async def sync_client_on_secondary_from_primary(
             expiry_ms=primary_state["expiry_ms"],
             total_gb=primary_state["total_gb"],
             enable=primary_state["enable"],
-            limit_ip=primary_state.get("limit_ip"),
         )
         return {"node_id": node_id, "email": email, "ok": True, "action": action}
     except Exception as e:
@@ -351,11 +349,14 @@ def _sync_skipped_stats() -> dict[str, int]:
     }
 
 
-async def sync_all_secondary_nodes() -> dict[str, int]:
-    """Scheduler и админка: полный цикл синхронизации (не delete/provision/extend)."""
+async def sync_all_secondary_nodes(*, force: bool = False) -> dict[str, int]:
+    """Полный цикл синхронизации (не delete/provision/extend).
+
+    force=True — ручная кнопка в админке, игнорирует «автосинк выключен».
+    """
     from db import bot_settings as bot_settings_db
 
-    if await bot_settings_db.is_sync_disabled():
+    if not force and await bot_settings_db.is_sync_disabled():
         logger.info("Full nodes sync skipped — disabled in admin")
         return _sync_skipped_stats()
 

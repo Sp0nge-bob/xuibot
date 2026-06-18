@@ -655,16 +655,8 @@ async def cb_nodes_sync(cb: CallbackQuery):
     await safe_cb_answer(cb, "Синхронизация…")
     await send_or_edit(cb, "⏳ Синхронизация вторичных нод…")
     try:
-        stats = await sync_all_secondary_nodes()
-        if stats.get("skipped"):
-            text = (
-                "⏸ <b>Автосинк отключён</b>\n\n"
-                "Плановая синхронизация выключена.\n"
-                "Выдача и продление на главной панели работают как обычно.\n\n"
-                "Включить: /admin → Ноды → «Включить автосинк»."
-            )
-        else:
-            text = (
+        stats = await sync_all_secondary_nodes(force=True)
+        text = (
             "✅ <b>Синхронизация завершена</b>\n\n"
             f"Подписок в БД: {stats['subs']}\n"
             f"Основная: создано {stats.get('primary_created', 0)}, "
