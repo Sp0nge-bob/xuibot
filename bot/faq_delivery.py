@@ -32,7 +32,7 @@ async def _send_faq_header_and_photos(
     *,
     reply_markup=None,
 ) -> None:
-    """Текст статьи + фото. При нескольких фото кнопки — под текстом, без «⬆️»."""
+    """Текст статьи + фото. При нескольких фото: сначала альбом, затем текст с кнопками."""
     if not photos:
         await bot.send_message(chat_id, header, reply_markup=reply_markup)
         return
@@ -50,9 +50,9 @@ async def _send_faq_header_and_photos(
         await bot.send_photo(chat_id, photos[0])
         return
 
-    await bot.send_message(chat_id, header, reply_markup=reply_markup)
     media = [InputMediaPhoto(media=photo) for photo in photos[:10]]
     await bot.send_media_group(chat_id, media)
+    await bot.send_message(chat_id, header, reply_markup=reply_markup)
 
 
 async def send_faq_article(
