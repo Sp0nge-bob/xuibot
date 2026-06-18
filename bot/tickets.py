@@ -349,6 +349,11 @@ async def msg_ticket_relay(message: Message, state: FSMContext):
             from .handlers import _show_main_menu
             await _show_main_menu(message, state=state)
             return
+        if cmd == "/subscription":
+            clear_active_session(message.from_user.id)
+            await state.clear()
+            await show_subscriptions_manage(message, message.from_user.id)
+            return
         if cmd:
             return
 
@@ -376,14 +381,24 @@ async def msg_ticket_relay(message: Message, state: FSMContext):
         await message.answer("✅ Отправлено", reply_markup=ticket_session_kb(ticket_id))
 
 
-async def show_subscriptions_manage(cb: CallbackQuery, tg_id: int) -> None:
-    """Экспорт для handlers.py."""
+async def show_subscriptions_manage(
+    target: Message | CallbackQuery,
+    tg_id: int,
+) -> None:
+    """Экспорт для handlers.py — главное меню «Подписка» и /subscription."""
     from .messages import subscription_manage_text, subscriptions_manage_text
     from services.xui import build_sub_link
 
+    if isinstance(target, CallbackQuery):
+        await safe_cb_answer(target)
+
     subs = await get_active_subscriptions_for_ui(tg_id)
     if not subs:
-        await send_or_edit(cb, no_subscription_text(), no_subscription_kb())
+        text, kb = no_subscription_text(), no_subscription_kb()
+        if isinstance(target, CallbackQuery):
+            await send_or_edit(target, text, kb)
+        else:
+            await target.answer(text, reply_markup=kb)
         return
 
     refund_by_sub = await tickets_db.get_open_refund_tickets_by_subscription_for_user(tg_id)
@@ -397,17 +412,18 @@ async def show_subscriptions_manage(cb: CallbackQuery, tg_id: int) -> None:
     if len(subs) == 1:
         sub = subs[0]
         sub_link = await build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
-        await send_or_edit(
-            cb,
-            subscription_manage_text(sub, sub_link),
-            subscription_manage_kb(
-                sub["id"],
-                refund_tickets=refund_by_sub.get(sub["id"], []),
-                can_request_refund=can_refund.get(sub["id"], False),
-                can_extend=not extend_blocked,
-                is_trial=is_trial_email(sub.get("client_email")),
-            ),
+        text = subscription_manage_text(sub, sub_link)
+        kb = subscription_manage_kb(
+            sub["id"],
+            refund_tickets=refund_by_sub.get(sub["id"], []),
+            can_request_refund=can_refund.get(sub["id"], False),
+            can_extend=not extend_blocked,
+            is_trial=is_trial_email(sub.get("client_email")),
         )
+        if isinstance(target, CallbackQuery):
+            await send_or_edit(target, text, kb)
+        else:
+            await target.answer(text, reply_markup=kb)
         return
 
     sub_links = {}
@@ -415,13 +431,14 @@ async def show_subscriptions_manage(cb: CallbackQuery, tg_id: int) -> None:
         sub_links[sub["id"]] = (
             await build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
         )
-    await send_or_edit(
-        cb,
-        subscriptions_manage_text(subs, sub_links),
-        subscriptions_manage_kb(
-            subs,
-            refund_tickets=refund_by_sub,
-            can_request_refund=can_refund,
-            can_extend=not extend_blocked,
-        ),
+    text = subscriptions_manage_text(subs, sub_links)
+    kb = subscriptions_manage_kb(
+        subs,
+        refund_tickets=refund_by_sub,
+        can_request_refund=can_refund,
+        can_extend=not extend_blocked,
     )
+    if isinstance(target, CallbackQuery):
+        await send_or_edit(target, text, kb)
+    else:
+        await target.answer(text, reply_markup=kb)

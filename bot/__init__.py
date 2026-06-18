@@ -94,6 +94,9 @@ async def start_bot():
     try:
         me = await bot.get_me()
         logger.info("Подключён @{} ({})", me.username, me.id)
+        from bot.commands import setup_bot_commands
+
+        await setup_bot_commands(bot)
     except Exception as e:
         logger.error("Ошибка get_me(): {}: {}", type(e).__name__, e)
         logger.error("Проверь BOT_TOKEN в .env и перезапусти бота.")

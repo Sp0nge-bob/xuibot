@@ -1,6 +1,6 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from loguru import logger
 
@@ -162,6 +162,14 @@ async def _notify_admins(text: str):
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
     await _show_main_menu(message, state=state)
+
+
+@router.message(Command("subscription"))
+async def cmd_subscription(message: Message, state: FSMContext):
+    await _clear_promo_input_state(state)
+    from .tickets import show_subscriptions_manage
+
+    await show_subscriptions_manage(message, message.from_user.id)
 
 
 @router.callback_query(F.data == "promo_enter")
@@ -863,6 +871,12 @@ async def msg_promo_code(message: Message, state: FSMContext):
     if cmd == "/start":
         await state.clear()
         await _show_main_menu(message, state=state)
+        return
+    if cmd == "/subscription":
+        await _clear_promo_input_state(state)
+        from .tickets import show_subscriptions_manage
+
+        await show_subscriptions_manage(message, message.from_user.id)
         return
     if cmd:
         await message.answer("Ввод промокода отменён.", reply_markup=back_to_main_kb())
