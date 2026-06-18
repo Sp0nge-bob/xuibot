@@ -262,7 +262,6 @@ def admin_happ_crypto_kb(mode: str) -> InlineKeyboardMarkup:
     icons = {
         "none": "🔓",
         "crypt5_api": "🌐",
-        "crypt4_local": "🔐",
     }
     for key in HAPP_CRYPTO_MODES:
         prefix = "✅ " if key == mode else ""

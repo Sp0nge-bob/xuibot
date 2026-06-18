@@ -7,17 +7,24 @@ HAPP_CRYPTO_NONE: Final[str] = "none"
 HAPP_CRYPTO_CRYPT5_API: Final[str] = "crypt5_api"
 HAPP_CRYPTO_CRYPT4_LOCAL: Final[str] = "crypt4_local"
 
+# В админке — только рабочие режимы (crypt4 Happ больше не принимает в клиенте).
 HAPP_CRYPTO_MODES: Final[tuple[str, ...]] = (
     HAPP_CRYPTO_NONE,
-    HAPP_CRYPTO_CRYPT4_LOCAL,
     HAPP_CRYPTO_CRYPT5_API,
 )
 
 HAPP_CRYPTO_MODE_LABELS: Final[dict[str, str]] = {
     HAPP_CRYPTO_NONE: "Без шифрования",
     HAPP_CRYPTO_CRYPT5_API: "Crypt5 (API Happ)",
-    HAPP_CRYPTO_CRYPT4_LOCAL: "Crypt4 (RSA локально)",
+    HAPP_CRYPTO_CRYPT4_LOCAL: "Crypt4 (устарел)",
 }
+
+
+def effective_happ_crypto_mode(mode: str) -> str:
+    """crypt4_local → crypt5_api: приложение Happ отклоняет happ://crypt4/."""
+    if mode == HAPP_CRYPTO_CRYPT4_LOCAL:
+        return HAPP_CRYPTO_CRYPT5_API
+    return mode
 
 
 def normalize_happ_crypto_mode(raw: str | None) -> str:

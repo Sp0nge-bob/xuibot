@@ -19,8 +19,7 @@
 | Режим | Результат |
 |-------|-----------|
 | `none` | `https://sub.example.com/api/v4/GET/abc123` |
-| `crypt4_local` | `happ://crypt4/…` (RSA на VPS, **рекомендуется** при шифровании) |
-| `crypt5_api` | `happ://crypt5/…` (через API Happ; тот же смысл, но с запросом в сеть) |
+| `crypt5_api` | `happ://crypt5/…` — **единственный рабочий** зашифрованный формат в новых Happ |
 
 Переключение: `/admin` → **🔐 Happ**. При ошибке шифрования бот отдаёт plain URL (fallback).
 

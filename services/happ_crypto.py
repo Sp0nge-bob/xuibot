@@ -14,6 +14,7 @@ from config.happ_crypto import (
     HAPP_CRYPTO_CRYPT4_LOCAL,
     HAPP_CRYPTO_CRYPT5_API,
     HAPP_CRYPTO_NONE,
+    effective_happ_crypto_mode,
     normalize_happ_crypto_mode,
 )
 from config.settings import settings
@@ -41,17 +42,38 @@ _CRYPT4_MAX_PLAIN_BYTES: Final[int] = 501
 _cache: dict[tuple[str, str], str] = {}
 _cache_lock = asyncio.Lock()
 _v4_public_key = None
+_crypt4_deprecated_logged = False
 
 
 def clear_happ_crypto_cache() -> None:
     _cache.clear()
 
 
+def _warn_crypt4_deprecated() -> None:
+    global _crypt4_deprecated_logged
+    if _crypt4_deprecated_logged:
+        return
+    _crypt4_deprecated_logged = True
+    logger.warning(
+        "HAPP_CRYPTO_MODE=crypt4_local: Happ больше не принимает happ://crypt4/ "
+        "(invalid url) — используется crypt5 API. Поставьте HAPP_CRYPTO_MODE=crypt5_api"
+    )
+
+
 async def get_happ_crypto_mode() -> str:
     stored = await bot_settings_db.get_happ_crypto_mode()
     if stored is not None:
-        return stored
-    return normalize_happ_crypto_mode(settings.HAPP_CRYPTO_MODE)
+        mode = stored
+    else:
+        mode = normalize_happ_crypto_mode(settings.HAPP_CRYPTO_MODE)
+    if mode == HAPP_CRYPTO_CRYPT4_LOCAL:
+        _warn_crypt4_deprecated()
+        mode = HAPP_CRYPTO_CRYPT5_API
+        try:
+            await bot_settings_db.set_happ_crypto_mode(mode)
+        except Exception as e:
+            logger.debug("Не удалось обновить happ_crypto_mode в БД: {}", e)
+    return mode
 
 
 def _load_crypt4_public_key():
@@ -97,8 +119,7 @@ async def _encrypt_crypt5_api(plain_url: str) -> str:
 
 
 async def _encrypt_uncached(plain_url: str, mode: str) -> str:
-    if mode == HAPP_CRYPTO_CRYPT4_LOCAL:
-        return await _encrypt_crypt4_local(plain_url)
+    mode = effective_happ_crypto_mode(mode)
     if mode == HAPP_CRYPTO_CRYPT5_API:
         return await _encrypt_crypt5_api(plain_url)
     return plain_url
@@ -113,7 +134,10 @@ async def encrypt_happ_subscription_link(plain_url: str, *, mode: str | None = N
     if not url:
         return url
 
-    resolved_mode = normalize_happ_crypto_mode(mode) if mode is not None else await get_happ_crypto_mode()
+    if mode is not None:
+        resolved_mode = effective_happ_crypto_mode(normalize_happ_crypto_mode(mode))
+    else:
+        resolved_mode = await get_happ_crypto_mode()
     if resolved_mode == HAPP_CRYPTO_NONE:
         return url
 
