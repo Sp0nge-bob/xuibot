@@ -48,6 +48,7 @@ def _client_state_from_info(info: tuple) -> dict[str, Any]:
         "expiry_ms": int(client.expiry_time or 0),
         "total_gb": int(client.total_gb or 0),
         "enable": bool(client.enable),
+        "limit_ip": int(client.limit_ip or 0),
     }
 
 
@@ -127,6 +128,9 @@ async def ensure_subscription_on_primary(sub: dict[str, Any]) -> str:
         logger.info("Sync primary: создан {} на основной из БД", email)
         return "created"
 
+    from services.limit_ip import resolve_limit_ip_for_email
+
+    desired_limit = await resolve_limit_ip_for_email(email)
     client, _, _ = info
     if _client_needs_replica_update(
         client,
@@ -134,6 +138,7 @@ async def ensure_subscription_on_primary(sub: dict[str, Any]) -> str:
         total_gb=state["total_gb"],
         sub_id=state["sub_id"],
         enable=state["enable"],
+        limit_ip=desired_limit,
     ):
         await _unified_update_client(
             api,
@@ -142,6 +147,7 @@ async def ensure_subscription_on_primary(sub: dict[str, Any]) -> str:
             totalGB=state["total_gb"],
             subId=state["sub_id"] or client.sub_id or "",
             enable=state["enable"],
+            limitIp=desired_limit,
         )
         logger.info("Sync primary: обновлён {} (expiry/трафик из БД)", email)
         return "updated"
@@ -195,6 +201,7 @@ async def sync_client_on_secondary_from_primary(
             expiry_ms=primary_state["expiry_ms"],
             total_gb=primary_state["total_gb"],
             enable=primary_state["enable"],
+            limit_ip=primary_state.get("limit_ip"),
         )
         return {"node_id": node_id, "email": email, "ok": True, "action": action}
     except Exception as e:

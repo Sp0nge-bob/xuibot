@@ -23,6 +23,7 @@ from services.fulfillment_text import (
     sub_link_caption_lines,
     sub_link_standalone_message,
 )
+from services.limit_ip import format_connections_limit_line, get_trial_limit_ip
 from services.node_sync import schedule_secondary_sync
 from services.subscription_admin import admin_reset_all_trials, admin_reset_trial_for_user
 from services.xui import provision_client
@@ -60,6 +61,7 @@ async def claim_trial(tg_id: int) -> FulfillmentResult:
     schedule_secondary_sync(sub_db_id)
 
     inbound_count = await get_subscription_inbound_count()
+    limit_ip = await get_trial_limit_ip()
     end_date = (datetime.utcnow() + timedelta(days=TRIAL_DAYS)).strftime("%d.%m.%Y")
     lines = [
         "✅ <b>Пробный период активирован!</b>",
@@ -67,6 +69,7 @@ async def claim_trial(tg_id: int) -> FulfillmentResult:
         "",
         f"⏱ Срок: <b>{TRIAL_DAYS} дн.</b> (до {end_date})",
         f"📊 Трафик: <b>{TRIAL_TRAFFIC_GB} ГБ</b>",
+        format_connections_limit_line(limit_ip),
         "",
     ]
     lines += sub_link_caption_lines(sub_link)

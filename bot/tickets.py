@@ -394,6 +394,7 @@ async def show_subscriptions_manage(
 ) -> None:
     """Экспорт для handlers.py — главное меню «Подписка» и /subscription."""
     from .messages import subscription_manage_text, subscriptions_manage_text
+    from services.limit_ip import resolve_limit_ip_for_email
     from services.xui import build_sub_link
 
     if isinstance(target, CallbackQuery):
@@ -416,10 +417,14 @@ async def show_subscriptions_manage(
             continue
         _, can_refund[sub["id"]] = await _refund_ui_state(tg_id, sub["id"])
 
+    limit_ips: dict[int, int] = {}
+    for sub in subs:
+        limit_ips[sub["id"]] = await resolve_limit_ip_for_email(sub.get("client_email") or "")
+
     if len(subs) == 1:
         sub = subs[0]
         sub_link = await build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
-        text = subscription_manage_text(sub, sub_link)
+        text = subscription_manage_text(sub, sub_link, limit_ip=limit_ips.get(sub["id"]))
         kb = subscription_manage_kb(
             sub["id"],
             refund_tickets=refund_by_sub.get(sub["id"], []),
@@ -438,7 +443,7 @@ async def show_subscriptions_manage(
         sub_links[sub["id"]] = (
             await build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
         )
-    text = subscriptions_manage_text(subs, sub_links)
+    text = subscriptions_manage_text(subs, sub_links, limit_ips=limit_ips)
     kb = subscriptions_manage_kb(
         subs,
         refund_tickets=refund_by_sub,

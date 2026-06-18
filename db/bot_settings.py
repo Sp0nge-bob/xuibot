@@ -11,6 +11,8 @@ SETTING_START_GREETING = "start_greeting"
 SETTING_SYNC_DISABLED = "sync_disabled"
 SETTING_BACKUP_DISABLED = "backup_disabled"
 SETTING_HAPP_CRYPTO_MODE = "happ_crypto_mode"
+SETTING_TRIAL_LIMIT_IP = "trial_limit_ip"
+SETTING_PAID_LIMIT_IP = "paid_limit_ip"
 
 _SYNC_DISABLED_TRUTHY = frozenset({"1", "true", "yes", "on"})
 
@@ -168,3 +170,38 @@ async def set_happ_crypto_mode(mode: str) -> str:
         raise ValueError(f"Неизвестный режим Happ crypto: {mode}")
     await set_setting(SETTING_HAPP_CRYPTO_MODE, normalized)
     return normalized
+
+
+def _parse_limit_ip(raw: str | None, *, default: int) -> int:
+    if raw is None or not str(raw).strip():
+        return default
+    try:
+        return max(0, int(str(raw).strip()))
+    except ValueError:
+        return default
+
+
+async def get_trial_limit_ip() -> int:
+    raw = await get_setting(SETTING_TRIAL_LIMIT_IP)
+    if raw is None:
+        return max(0, int(settings.TRIAL_LIMIT_IP))
+    return _parse_limit_ip(raw, default=max(0, int(settings.TRIAL_LIMIT_IP)))
+
+
+async def get_paid_limit_ip() -> int:
+    raw = await get_setting(SETTING_PAID_LIMIT_IP)
+    if raw is None:
+        return max(0, int(settings.PAID_LIMIT_IP))
+    return _parse_limit_ip(raw, default=max(0, int(settings.PAID_LIMIT_IP)))
+
+
+async def set_trial_limit_ip(value: int) -> int:
+    val = max(0, int(value))
+    await set_setting(SETTING_TRIAL_LIMIT_IP, str(val))
+    return val
+
+
+async def set_paid_limit_ip(value: int) -> int:
+    val = max(0, int(value))
+    await set_setting(SETTING_PAID_LIMIT_IP, str(val))
+    return val

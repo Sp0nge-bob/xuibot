@@ -25,6 +25,8 @@ class AdminStates(StatesGroup):
     waiting_faq_edit_title = State()
     waiting_faq_edit_body = State()
     waiting_faq_add_photos = State()
+    waiting_trial_limit_ip = State()
+    waiting_paid_limit_ip = State()
 
 
 class AdminPricingStates(StatesGroup):

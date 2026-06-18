@@ -28,6 +28,9 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🔐 Happ", callback_data="adm:happ_crypto"),
         ],
         [
+            InlineKeyboardButton(text="📱 Лимит IP", callback_data="adm:limit_ip"),
+        ],
+        [
             InlineKeyboardButton(text="📢 /start", callback_data="adm:start_text"),
         ],
         [InlineKeyboardButton(text="💾 Бэкап", callback_data="adm:backup")],
@@ -274,6 +277,14 @@ def admin_happ_crypto_kb(mode: str) -> InlineKeyboardMarkup:
         )])
     rows.append([InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_limit_ip_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎁 Пробная", callback_data="adm:limit_ip:edit:trial")],
+        [InlineKeyboardButton(text="✅ Платная", callback_data="adm:limit_ip:edit:paid")],
+        [InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")],
+    ])
 
 
 def admin_payment_methods_kb(enabled: dict[str, bool]) -> InlineKeyboardMarkup:

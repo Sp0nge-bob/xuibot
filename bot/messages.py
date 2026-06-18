@@ -257,7 +257,14 @@ def test_scenario_result_text(scenario: str, tx_id: str | None = None) -> str:
     return screen("🧪 <b>Симуляция Platega</b>", block)
 
 
-def _subscription_detail_block(sub: Dict[str, Any], sub_link: Optional[str]) -> str:
+def _subscription_detail_block(
+    sub: Dict[str, Any],
+    sub_link: Optional[str],
+    *,
+    limit_ip: int | None = None,
+) -> str:
+    from services.limit_ip import format_connections_limit_line
+
     end = format_date(sub["end_date"])
     left = days_left(sub["end_date"])
     traffic = traffic_label(sub.get("traffic_limit_gb", 0))
@@ -265,17 +272,24 @@ def _subscription_detail_block(sub: Dict[str, Any], sub_link: Optional[str]) -> 
         f"<b>{_sub_kind_label(sub)}</b>",
         f"📅 Действует до: <b>{end}</b> ({left} дн.)",
         f"📊 Трафик: {traffic}",
-        f"👤 Клиент: <code>{sub['client_email']}</code>",
     ]
+    if limit_ip is not None:
+        lines.append(format_connections_limit_line(limit_ip))
+    lines.append(f"👤 Клиент: <code>{sub['client_email']}</code>")
     if sub_link:
         lines += [f"🔗 <b>Ссылка:</b>", f"<code>{sub_link}</code>"]
     return "\n".join(lines)
 
 
-def subscription_manage_text(sub: Dict[str, Any], sub_link: Optional[str]) -> str:
+def subscription_manage_text(
+    sub: Dict[str, Any],
+    sub_link: Optional[str],
+    *,
+    limit_ip: int | None = None,
+) -> str:
     return screen(
         "⚙️ <b>Подписка</b>",
-        _subscription_detail_block(sub, sub_link),
+        _subscription_detail_block(sub, sub_link, limit_ip=limit_ip),
         hint="Что хотите сделать?",
     )
 
@@ -283,12 +297,18 @@ def subscription_manage_text(sub: Dict[str, Any], sub_link: Optional[str]) -> st
 def subscriptions_manage_text(
     subs: List[Dict[str, Any]],
     sub_links: Dict[int, Optional[str]],
+    *,
+    limit_ips: Dict[int, int] | None = None,
 ) -> str:
     blocks: list[str] = []
     for i, sub in enumerate(subs):
         if i > 0:
             blocks.append("──────────────")
-        blocks.append(_subscription_detail_block(sub, sub_links.get(sub["id"])))
+        blocks.append(_subscription_detail_block(
+            sub,
+            sub_links.get(sub["id"]),
+            limit_ip=(limit_ips or {}).get(sub["id"]),
+        ))
     return screen("⚙️ <b>Подписки</b>", *blocks, hint="Что хотите сделать?")
 
 
@@ -300,12 +320,15 @@ def no_subscription_text() -> str:
     )
 
 
-def trial_offer_text() -> str:
+def trial_offer_text(*, limit_ip: int) -> str:
+    from services.limit_ip import format_connections_limit_line
+
     return screen(
         "🎁 <b>Пробный период</b>",
         "\n".join([
             f"⏱ Срок: <b>{TRIAL_DAYS} дн.</b>",
             f"📊 Трафик: <b>{TRIAL_TRAFFIC_GB} ГБ</b>",
+            format_connections_limit_line(limit_ip),
             f"👤 Клиент: <code>tgfree…</code>",
         ]),
         f"Доступен <b>1 раз в {TRIAL_COOLDOWN_DAYS} дн.</b> на аккаунт Telegram.\n"
@@ -521,6 +544,34 @@ def admin_debug_entry_confirm_text() -> str:
         "• сброс учёта пользователей\n\n"
         "Используйте только для отладки и тестирования.\n\n"
         "Войти в раздел?"
+    )
+
+
+def admin_limit_ip_text(*, trial_limit: int, paid_limit: int) -> str:
+    from services.limit_ip import format_connections_limit_line
+
+    return "\n".join([
+        "📱 <b>Лимит одновременных подключений</b>",
+        "━━━━━━━━━━━━━━━━",
+        "",
+        "Параметр <code>limitIp</code> в 3x-ui — сколько уникальных IP могут "
+        "одновременно пользоваться одной подпиской.",
+        "",
+        f"🎁 Пробная: {format_connections_limit_line(trial_limit)}",
+        f"✅ Платная: {format_connections_limit_line(paid_limit)}",
+        "",
+        "<i>Новые и обновляемые клиенты получают эти значения. "
+        "При синхронизации с панелью лимит тоже выравнивается.</i>",
+    ])
+
+
+def admin_limit_ip_edit_prompt_text(*, kind: str, current: int) -> str:
+    label = "пробной" if kind == "trial" else "платной"
+    return (
+        f"✏️ <b>Лимит {label} подписки</b>\n\n"
+        f"Сейчас: <b>{current}</b>\n\n"
+        "Отправьте целое число (0 — без лимита).\n"
+        "Для отмены: /admin"
     )
 
 

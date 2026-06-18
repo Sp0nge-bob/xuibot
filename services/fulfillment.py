@@ -15,6 +15,7 @@ from services.fulfillment_text import (
     sub_link_caption_lines,
     sub_link_standalone_message,
 )
+from services.limit_ip import format_connections_limit_line, get_paid_limit_ip
 from config.plans import Plan, get_plan
 from config.trial import is_trial_email
 from db import database as db
@@ -132,6 +133,7 @@ async def fulfill_plan_for_tg(
             title = title_extend
 
         inbound_count = await get_subscription_inbound_count()
+        limit_ip = await get_paid_limit_ip()
         text = _success_text(
             title=title,
             plan=plan,
@@ -140,6 +142,7 @@ async def fulfill_plan_for_tg(
             client_email=email,
             is_test=is_test,
             inbound_count=inbound_count,
+            limit_ip=limit_ip,
         )
         photo = make_qr_photo(sub_link or email, "vpn_extend.png")
         if log_context:
@@ -185,6 +188,7 @@ async def fulfill_plan_for_tg(
         )
     schedule_secondary_sync(sub_db_id)
     inbound_count = await get_subscription_inbound_count()
+    limit_ip = await get_paid_limit_ip()
     text = _success_text(
         title=title_new,
         plan=plan,
@@ -193,6 +197,7 @@ async def fulfill_plan_for_tg(
         client_email=email,
         is_test=is_test,
         inbound_count=inbound_count,
+        limit_ip=limit_ip,
     )
     photo = make_qr_photo(sub_link or email, "vpn.png")
     setup_photos = load_happ_setup_photos()
@@ -217,6 +222,7 @@ def _success_text(
     client_email: str,
     is_test: bool,
     inbound_count: int,
+    limit_ip: int,
 ) -> str:
     from ui.theme import screen, traffic_label
 
@@ -224,6 +230,7 @@ def _success_text(
         f"📦 Тариф: <b>{plan['name']}</b>",
         f"📅 Действует до: <b>{end_date}</b>",
         f"📊 Трафик: {traffic_label(plan['traffic_gb'])}",
+        format_connections_limit_line(limit_ip),
     ]
     details += sub_link_caption_lines(sub_link)
     details.append(f"👤 Клиент: <code>{client_email}</code>")

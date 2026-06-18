@@ -342,6 +342,7 @@ async def _unified_add_client(
     total_gb: int,
     inbound_ids: list[int],
     enable: bool = True,
+    limit_ip: int = 0,
 ) -> Client:
     _assert_bot_client_email(email)
     payload = _unified_add_client_body(
@@ -350,6 +351,7 @@ async def _unified_add_client(
         total_gb=total_gb,
         sub_id=sub_id,
         enable=enable,
+        limit_ip=limit_ip,
     )
     url = api.client._url("panel/api/clients/add")
     await _throttle()
@@ -370,11 +372,15 @@ async def _unified_update_client(api: AsyncApi, client: Client, **overrides: Any
     _assert_bot_client_email(client.email)
     expiry = overrides.get("expiryTime", overrides.get("expiry_time", client.expiry_time or 0))
     sub = overrides.get("subId", overrides.get("sub_id", client.sub_id or ""))
+    limit_ip = overrides.get("limitIp", overrides.get("limit_ip"))
+    if limit_ip is None:
+        limit_ip = client.limit_ip or 0
     data: dict[str, Any] = {
         "email": client.email,
         "totalGB": int(overrides.get("totalGB", overrides.get("total_gb", client.total_gb or 0))),
         "expiryTime": int(expiry),
         "tgId": _tg_id_from_email(client.email),
+        "limitIp": int(limit_ip),
         "enable": bool(overrides.get("enable", client.enable)),
     }
     if sub:
@@ -393,13 +399,23 @@ async def _unified_update_client(api: AsyncApi, client: Client, **overrides: Any
 
 async def _set_client_expiry_on_panel(
     api: AsyncApi, email: str, expiry_time: int, sub_id: str,
+    *,
+    limit_ip: int | None = None,
 ) -> None:
+    from services.limit_ip import resolve_limit_ip_for_email
+
     info = await _unified_get_client_info(api, email)
     if not info:
         raise ValueError(f"Клиент {email} не найден для обновления expiry")
     client, _, _ = info
+    resolved_limit = limit_ip if limit_ip is not None else await resolve_limit_ip_for_email(email)
     await _unified_update_client(
-        api, client, expiryTime=expiry_time, subId=sub_id or client.sub_id or "", enable=True,
+        api,
+        client,
+        expiryTime=expiry_time,
+        subId=sub_id or client.sub_id or "",
+        enable=True,
+        limitIp=resolved_limit,
     )
     logger.success("clients/update {} expiry={}", email, expiry_time)
 
@@ -809,9 +825,13 @@ async def repair_client_inbounds(
     expiry_time: int,
     total_gb: int = 0,
     attach_only: bool = False,
+    limit_ip: int | None = None,
 ) -> dict[str, int]:
+    from services.limit_ip import resolve_limit_ip_for_email
+
     api = await get_api()
     inbound_ids = await get_subscription_inbound_ids()
+    resolved_limit = limit_ip if limit_ip is not None else await resolve_limit_ip_for_email(email)
 
     if attach_only:
         logger.debug("Attach-only пропущен для {} — не используем attach-циклы", email)
@@ -827,6 +847,7 @@ async def repair_client_inbounds(
                 expiry_time=expiry_time,
                 total_gb=total_gb,
                 inbound_ids=inbound_ids,
+                limit_ip=resolved_limit,
             )
         except ValueError as e:
             if "duplicate email" not in str(e).lower():
@@ -840,6 +861,7 @@ async def repair_client_inbounds(
                 expiry_time=expiry_time,
                 total_gb=total_gb,
                 inbound_ids=inbound_ids,
+                limit_ip=resolved_limit,
             )
         return {"skip": 0, "update": 0, "create": len(inbound_ids), "purge": 0}
 
@@ -850,8 +872,12 @@ async def repair_client_inbounds(
         return {"skip": 0, "update": 0, "create": 0, "purge": len(extra)}
 
     client, _, _ = info
-    if _client_needs_update(client, expiry_time=expiry_time, sub_id=sub_id):
-        await _set_client_expiry_on_panel(api, email, expiry_time, sub_id)
+    if _client_needs_update(client, expiry_time=expiry_time, sub_id=sub_id) or (
+        (client.limit_ip or 0) != resolved_limit
+    ):
+        await _set_client_expiry_on_panel(
+            api, email, expiry_time, sub_id, limit_ip=resolved_limit,
+        )
         return {"skip": 0, "update": len(inbound_ids), "create": 0, "purge": 0}
 
     return {"skip": len(inbound_ids), "update": 0, "create": 0, "purge": 0}
@@ -944,6 +970,7 @@ async def reactivate_client_on_primary(
     sub_id: Optional[str] = None,
     expiry_time: int,
     total_gb: int = 0,
+    limit_ip: int | None = None,
 ) -> str:
     """
     Включить существующего клиента на основной: новый срок, трафик, enable=True.
@@ -953,8 +980,11 @@ async def reactivate_client_on_primary(
     info = await _unified_get_client_info(api, email)
     if not info:
         raise ValueError(f"Клиент {email} не найден на основной для реактивации")
+    from services.limit_ip import resolve_limit_ip_for_email
+
     client, _, _ = info
     resolved_sub_id = (sub_id or client.sub_id or "").strip() or secrets.token_urlsafe(12)[:16]
+    resolved_limit = limit_ip if limit_ip is not None else await resolve_limit_ip_for_email(email)
     await _unified_update_client(
         api,
         client,
@@ -962,6 +992,7 @@ async def reactivate_client_on_primary(
         totalGB=total_gb,
         subId=resolved_sub_id,
         enable=True,
+        limitIp=resolved_limit,
     )
     missing = await try_attach_missing_inbounds(api, email, sub_id=resolved_sub_id)
     if missing:
@@ -1001,6 +1032,10 @@ async def provision_client(
     else:
         expiry_time = int((datetime.utcnow() + timedelta(days=plan_days)).timestamp() * 1000)
 
+    from services.limit_ip import resolve_limit_ip_for_email
+
+    limit_ip = await resolve_limit_ip_for_email(email)
+
     if not skip_preclean:
         info = await _unified_get_client_info(api, email)
         if info:
@@ -1009,6 +1044,7 @@ async def provision_client(
                 sub_id=sub_id,
                 expiry_time=expiry_time,
                 total_gb=total_gb,
+                limit_ip=limit_ip,
             )
             sub_link = await build_sub_link(resolved_sub_id)
             return email, resolved_sub_id, sub_link
@@ -1031,6 +1067,7 @@ async def provision_client(
             expiry_time=expiry_time,
             total_gb=total_gb,
             inbound_ids=inbound_ids,
+            limit_ip=limit_ip,
         )
 
     try:
@@ -1079,8 +1116,11 @@ async def extend_client(
             base_ms = min_base_ms
         new_expiry = base_ms + additional_days * 24 * 60 * 60 * 1000
 
+    from services.limit_ip import resolve_limit_ip_for_email
+
+    limit_ip = await resolve_limit_ip_for_email(email)
     logger.info("Продление {}: expiry {} ms", email, new_expiry)
-    await _set_client_expiry_on_panel(api, email, new_expiry, sub_id)
+    await _set_client_expiry_on_panel(api, email, new_expiry, sub_id, limit_ip=limit_ip)
     return new_expiry
 
 
@@ -1309,10 +1349,13 @@ def _client_needs_replica_update(
     total_gb: int,
     sub_id: str,
     enable: bool,
+    limit_ip: int | None = None,
 ) -> bool:
     if client.enable != enable:
         return True
     if abs((client.total_gb or 0) - total_gb) > 1024:
+        return True
+    if limit_ip is not None and (client.limit_ip or 0) != limit_ip:
         return True
     if _client_needs_update(client, expiry_time=expiry_ms, sub_id=sub_id, enable=enable):
         return True
@@ -1328,6 +1371,7 @@ async def sync_client_state_on_node(
     expiry_ms: int,
     total_gb: int,
     enable: bool,
+    limit_ip: int | None = None,
 ) -> str:
     """
     Вторичная нода: только синхронизация существующего клиента.
@@ -1344,7 +1388,12 @@ async def sync_client_state_on_node(
 
     client, _, _ = info
     if not _client_needs_replica_update(
-        client, expiry_ms=expiry_ms, total_gb=total_gb, sub_id=sub_id, enable=enable,
+        client,
+        expiry_ms=expiry_ms,
+        total_gb=total_gb,
+        sub_id=sub_id,
+        enable=enable,
+        limit_ip=limit_ip,
     ):
         return "skipped"
 
@@ -1355,6 +1404,7 @@ async def sync_client_state_on_node(
         totalGB=total_gb,
         subId=sub_id or client.sub_id or "",
         enable=enable,
+        limitIp=limit_ip if limit_ip is not None else (client.limit_ip or 0),
     )
     return "updated"
 

@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     HAPP_CRYPTO_API_URL: str = "https://crypto.happ.su/api-v2.php"
     HAPP_CRYPTO_TIMEOUT_SEC: float = 15.0
 
+    # 3x-ui limitIp: одновременные уникальные IP (0 = без лимита)
+    TRIAL_LIMIT_IP: int = 3
+    PAID_LIMIT_IP: int = 5
+
     # Список ID инбаундов (через запятую), которые будут включены в дефолтную подписку.
     # Это позволяет указывать по 1 инбаунду с каждой ноды (как у тебя сейчас).
     # Пример: 5,12,23

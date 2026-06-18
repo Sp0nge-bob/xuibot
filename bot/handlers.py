@@ -223,7 +223,10 @@ async def cb_trial_offer(cb: CallbackQuery):
         await safe_cb_answer(cb, reason, show_alert=True)
         return
     await safe_cb_answer(cb)
-    await send_or_edit(cb, trial_offer_text(), trial_confirm_kb())
+    from services.limit_ip import get_trial_limit_ip
+
+    limit_ip = await get_trial_limit_ip()
+    await send_or_edit(cb, trial_offer_text(limit_ip=limit_ip), trial_confirm_kb())
 
 
 @router.callback_query(F.data == "trial_confirm")
