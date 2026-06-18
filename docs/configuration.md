@@ -32,6 +32,24 @@
 | `DEFAULT_SUBSCRIPTION_INBOUNDS` | ID инбаундов через запятую |
 | `XUI_CLIENT_GROUP` | Группа клиентов в 3x-ui |
 
+## Happ — шифрование ссылки подписки
+
+Клиентам выдаётся ссылка для импорта в [Happ](https://www.happ.su). По умолчанию — обычный HTTPS URL; можно включить шифрование, чтобы пользователь не видел и не пересылал адрес подписки.
+
+| Переменная | Значения | Описание |
+|------------|----------|----------|
+| `HAPP_CRYPTO_MODE` | `none` (по умолчанию) | Без шифрования — `https://…/{sub_id}` |
+| | `crypt5_api` | Запрос на `crypto.happ.su` → `happ://crypt5/…` |
+| | `crypt4_local` | RSA-4096 на сервере бота → `happ://crypt4/…`, без внешнего API |
+| `HAPP_CRYPTO_API_URL` | URL | Endpoint Crypt5 (по умолчанию `https://crypto.happ.su/api-v2.php`) |
+| `HAPP_CRYPTO_TIMEOUT_SEC` | секунды | Таймаут запроса Crypt5 API |
+
+Режим можно переключить в `/admin` → **🔐 Happ** (сохраняется в БД и перекрывает `.env`). Зашифрованные ссылки кэшируются в памяти процесса бота.
+
+**Рекомендация для прода:** `crypt4_local` — не зависит от доступности Happ API. Crypt4 deprecated у Happ, но работает; Crypt5 — новый формат, но нужен внешний запрос.
+
+Документация Happ: [crypto-link](https://www.happ.su/main/dev-docs/crypto-link)
+
 ## Режимы
 
 | Переменная | Продакшен | Разработка |

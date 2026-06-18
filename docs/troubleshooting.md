@@ -30,6 +30,14 @@
 - Проверьте `XUI_TOKEN` и secret path
 - `LOG_LEVEL=DEBUG` для деталей API
 
+## Happ: вместо `happ://crypt…` отдаётся обычная ссылка
+
+- В логах: `Happ crypto … failed` — смотрите причину (таймаут API, нет `cryptography`)
+- Режим **Crypt5 API**: нужен доступ VPS → `crypto.happ.su`
+- Режим **Crypt4 локально**: `pip install cryptography` (зависимость в `requirements.txt`)
+- Слишком длинный `SUBSCRIPTION_BASE_URL` (>501 байт) — Crypt4 не сработает, будет fallback
+- Сменили режим в `/admin` → **🔐 Happ** — кэш сбрасывается автоматически
+
 ## Дубли нод
 
 ```bash
