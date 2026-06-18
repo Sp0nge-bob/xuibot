@@ -20,6 +20,7 @@ from services import platega_simulator as platega_sim
 from services.payment_pending import (
     expires_in_from_order_created,
     fetch_pending_expires_in,
+    get_resumable_pending_order,
     is_payment_window_expired,
 )
 from services.platega_client import (
@@ -128,6 +129,7 @@ async def _show_main_menu(target: Message | CallbackQuery, *, edit: bool = False
     if announcement:
         announcement = safe_html_fragment(announcement)
     refund_pending = await tickets_db.get_approved_refunds_pending_chargeback(user.id)
+    pending_order = await get_resumable_pending_order(user.id)
     text = main_menu_text(
         user.first_name,
         user.username,
@@ -137,8 +139,12 @@ async def _show_main_menu(target: Message | CallbackQuery, *, edit: bool = False
         refund_pending_chargeback=bool(refund_pending),
         pending_discount_promo=pending_promo,
         pending_discount_expires_at=pending_expires,
+        pending_payment_plan_name=pending_order.get("plan_name") if pending_order else None,
     )
-    kb = main_menu_kb(trial_available=trial_available)
+    kb = main_menu_kb(
+        trial_available=trial_available,
+        pending_tx_id=pending_order.get("platega_tx_id") if pending_order else None,
+    )
 
     if isinstance(target, CallbackQuery):
         if edit:
@@ -184,6 +190,30 @@ async def cb_promo_enter(cb: CallbackQuery, state: FSMContext):
 async def cb_main_menu(cb: CallbackQuery, state: FSMContext):
     await _clear_promo_input_state(state)
     await _show_main_menu(cb, edit=True, state=state)
+
+
+@router.callback_query(F.data.startswith("resume_pay:"))
+async def cb_resume_pay(cb: CallbackQuery, state: FSMContext):
+    await _clear_promo_input_state(state)
+    tx_id = cb.data.split(":", 1)[1]
+    order = await _guard_payment_order(cb, tx_id)
+    if not order:
+        return
+    expires_in = await fetch_pending_expires_in(tx_id, order)
+    if is_payment_window_expired(expires_in):
+        await safe_cb_answer(
+            cb,
+            "Время оплаты истекло — выберите тариф заново",
+            show_alert=True,
+        )
+        await _show_main_menu(cb, edit=True, state=state)
+        return
+    pending_text, pending_kb = await _pending_payment_view(order, tx_id)
+    if not pending_text or not pending_kb:
+        await safe_cb_answer(cb, "Не удалось восстановить оплату", show_alert=True)
+        return
+    await safe_cb_answer(cb)
+    await send_or_edit(cb, pending_text, pending_kb)
 
 
 @router.callback_query(F.data == "trial_offer")

@@ -75,6 +75,7 @@ def main_menu_text(
     refund_pending_chargeback: bool = False,
     pending_discount_promo: Optional[Dict[str, Any]] = None,
     pending_discount_expires_at: Optional[str] = None,
+    pending_payment_plan_name: Optional[str] = None,
 ) -> str:
     blocks: list[str] = [user_chip(first_name, username, template=greeting_template)]
 
@@ -99,6 +100,12 @@ def main_menu_text(
         blocks.append("\n".join(_pending_discount_menu_lines(
             pending_discount_promo, pending_discount_expires_at,
         )))
+
+    if pending_payment_plan_name:
+        blocks.append(
+            f"⏳ <b>Незавершённая оплата</b>\n"
+            f"   └ Тариф: <b>{pending_payment_plan_name}</b> — нажмите «Вернуться к оплате»"
+        )
 
     footer = "⚠️ <i>Тестовый режим включён</i>" if settings.TEST_MODE else None
     return screen(

@@ -76,3 +76,26 @@ async def fetch_pending_expires_in(tx_id: str, order: dict[str, Any]) -> str | N
 
 def is_payment_window_expired(expires_in: str | None) -> bool:
     return expires_in == "00:00:00"
+
+
+async def get_resumable_pending_order(tg_id: int) -> dict[str, Any] | None:
+    """Активный pending-заказ, к которому можно вернуться с главного меню."""
+    from config.plans import get_plan
+    from db import database as db
+
+    order = await db.get_pending_order(tg_id)
+    if not order:
+        return None
+    if not get_plan(order.get("plan_id") or ""):
+        return None
+    tx_id = (order.get("platega_tx_id") or "").strip()
+    if not tx_id:
+        return None
+    redirect = (order.get("payment_redirect") or "").strip()
+    is_test = settings.TEST_MODE and tx_id.startswith("test-")
+    if not redirect and not is_test:
+        return None
+    expires_in = expires_in_from_order_created(order.get("created_at"))
+    if is_payment_window_expired(expires_in):
+        return None
+    return order

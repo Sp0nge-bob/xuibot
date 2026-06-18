@@ -22,6 +22,7 @@ BTN_TARIFFS = "📦 Тарифы"
 BTN_SUBSCRIPTION = "⚙️ Подписка"
 BTN_PROMO = "🎟 Промокод"
 BTN_SUPPORT_SHORT = "💬 Поддержка"
+BTN_RESUME_PAY = "💳 Вернуться к оплате"
 
 
 def screen(

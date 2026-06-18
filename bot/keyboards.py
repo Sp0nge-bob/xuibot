@@ -11,6 +11,7 @@ from ui.theme import (
     BTN_HOME,
     BTN_PAY,
     BTN_PROMO,
+    BTN_RESUME_PAY,
     BTN_SUBSCRIPTION,
     BTN_SUPPORT_SHORT,
     BTN_TARIFFS,
@@ -32,8 +33,17 @@ def nav_row(
     return buttons
 
 
-def main_menu_kb(*, trial_available: bool = False) -> InlineKeyboardMarkup:
+def main_menu_kb(
+    *,
+    trial_available: bool = False,
+    pending_tx_id: str | None = None,
+) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
+    if pending_tx_id:
+        rows.append([InlineKeyboardButton(
+            text=BTN_RESUME_PAY,
+            callback_data=f"resume_pay:{pending_tx_id}",
+        )])
     if trial_available:
         rows.append([InlineKeyboardButton(text=BTN_TRIAL, callback_data="trial_offer")])
     rows += [
