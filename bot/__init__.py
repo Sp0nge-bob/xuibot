@@ -7,8 +7,8 @@ from aiogram.client.default import DefaultBotProperties
 from loguru import logger
 
 from config.settings import settings
+from services.node_startup import initialize_nodes_at_startup
 from services.node_sync import start_secondary_sync_workers, stop_secondary_sync_workers
-from services.xui import ensure_bot_group, log_inbound_port_conflicts
 from .handlers import router as main_router
 from .tickets import router as tickets_router
 from .admin import router as admin_router
@@ -59,36 +59,20 @@ async def start_bot():
     register_bot_task(asyncio.current_task())
 
     start_scheduler()
+
+    try:
+        await asyncio.wait_for(initialize_nodes_at_startup(), timeout=90)
+    except asyncio.TimeoutError:
+        logger.warning("Node startup: таймаут 90s — бот продолжит без полной инициализации нод")
+    except Exception as e:
+        logger.exception("Node startup failed: {}", e)
+
+    try:
+        await run_full_nodes_sync(source="startup")
+    except Exception as e:
+        logger.exception("Стартовая синхронизация нод failed: {}", e)
+
     await start_secondary_sync_workers()
-
-    try:
-        import asyncio as _asyncio
-        group = await _asyncio.wait_for(ensure_bot_group(), timeout=20)
-        if group:
-            logger.info("Группа 3x-ui: {}", group)
-    except _asyncio.TimeoutError:
-        logger.warning("Таймаут ensure_bot_group — бот продолжит без проверки группы")
-    except Exception as e:
-        logger.warning("ensure_bot_group: {}", e)
-
-    try:
-        import asyncio as _asyncio
-        await _asyncio.wait_for(log_inbound_port_conflicts(), timeout=20)
-    except _asyncio.TimeoutError:
-        logger.warning("Таймаут проверки инбаундов — бот продолжит")
-    except Exception as e:
-        logger.warning("log_inbound_port_conflicts: {}", e)
-
-    async def _startup_sync() -> None:
-        try:
-            await run_full_nodes_sync(source="startup")
-        except asyncio.CancelledError:
-            logger.info("Стартовая синхронизация прервана")
-            raise
-        except Exception as e:
-            logger.exception("Стартовая синхронизация failed: {}", e)
-
-    asyncio.create_task(_startup_sync(), name="startup_nodes_sync")
 
     try:
         await bot.delete_webhook(drop_pending_updates=False)

@@ -5,8 +5,10 @@ if sys.platform.startswith("win"):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 """
-Основной файл приложения.
-Запускает FastAPI (для webhook Platega) + lifespan с aiogram ботом.
+Webhook-сервер Platega (FastAPI).
+
+Продакшен: python app.py  +  python run_bot.py (отдельный процесс).
+Опционально START_BOT_IN_WEBAPP=true — polling в этом же процессе.
 """
 from contextlib import asynccontextmanager
 
@@ -38,16 +40,23 @@ async def lifespan(app: FastAPI):
     logger.info("Database ready")
     await start_fulfillment_workers()
 
-    logger.info("Creating bot background task (polling will start in background)...")
-    bot_task = asyncio.create_task(start_bot(), name="telegram_bot")
-    register_bot_task(bot_task)
+    bot_task = None
+    if settings.START_BOT_IN_WEBAPP:
+        logger.info("START_BOT_IN_WEBAPP=true — polling в этом процессе")
+        bot_task = asyncio.create_task(start_bot(), name="telegram_bot")
+        register_bot_task(bot_task)
+    else:
+        logger.info(
+            "Webhook-only mode — polling в отдельном процессе (python run_bot.py)"
+        )
 
     yield
 
     logger.info("Shutting down...")
     await drain_fulfillment_queue()
     await stop_fulfillment_workers()
-    await stop_bot()
+    if bot_task is not None:
+        await stop_bot()
     await close_connection()
     logger.info("Shutdown complete")
 
@@ -90,10 +99,13 @@ async def platega_webhook(
         logger.debug("Duplicate webhook ignored: {} {}", tx_id, status)
         return JSONResponse({"ok": True})
 
-    logger.info("Platega callback received: {}", body)
-
-    if payment_method is not None:
-        logger.info("Platega callback paymentMethod={} for tx {}", payment_method, tx_id)
+    logger.debug("Platega callback body: {}", body)
+    logger.info(
+        "Platega callback: tx={} status={} method={}",
+        tx_id,
+        status,
+        payment_method,
+    )
 
     if not enqueue_webhook_job(tx_id, status, body):
         logger.error("Webhook queue saturated for tx {}", tx_id)

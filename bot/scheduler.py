@@ -2,7 +2,6 @@
 Планировщик: health нод, истечение подписок, синхронизация нод, ежедневный бэкап.
 """
 import asyncio
-from datetime import datetime
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
@@ -79,13 +78,7 @@ async def scheduled_full_nodes_sync():
 
 
 def start_scheduler():
-    scheduler.add_job(
-        check_nodes_health_job,
-        "interval",
-        minutes=5,
-        id="check_nodes_health",
-        next_run_time=datetime.now(),
-    )
+    scheduler.add_job(check_nodes_health_job, "interval", minutes=5, id="check_nodes_health")
     scheduler.add_job(
         scheduled_full_nodes_sync,
         "interval",
