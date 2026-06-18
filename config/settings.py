@@ -57,6 +57,12 @@ class Settings(BaseSettings):
     # Тогда бот будет делать ссылки вида: https://domen.com/api/v4/{sub_id}
     SUBSCRIPTION_BASE_URL: str = ""
 
+    # Happ: шифровать ссылку подписки (happ://crypt5/…) — пользователь не видит URL
+    # https://www.happ.su/main/dev-docs/crypto-link
+    HAPP_CRYPTO_LINKS: bool = False
+    HAPP_CRYPTO_API_URL: str = "https://crypto.happ.su/api-v2.php"
+    HAPP_CRYPTO_TIMEOUT_SEC: float = 15.0
+
     # Список ID инбаундов (через запятую), которые будут включены в дефолтную подписку.
     # Это позволяет указывать по 1 инбаунду с каждой ноды (как у тебя сейчас).
     # Пример: 5,12,23

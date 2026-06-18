@@ -74,7 +74,8 @@ def _dedupe_nodes_by_host(nodes: list[dict]) -> list[dict]:
     return unique
 
 
-async def build_sub_link(sub_id: str) -> str:
+async def build_plain_sub_link(sub_id: str) -> str:
+    """Обычная HTTPS-ссылка на подписку (без Happ crypto)."""
     if settings.SUBSCRIPTION_BASE_URL:
         base = settings.SUBSCRIPTION_BASE_URL.rstrip("/")
         return f"{base}/{sub_id}"
@@ -88,6 +89,16 @@ async def build_sub_link(sub_id: str) -> str:
         pass
     base = normalize_xui_host(settings.XUI_HOST).rstrip("/")
     return f"{base}/sub/{sub_id}"
+
+
+async def build_sub_link(sub_id: str) -> str:
+    """Ссылка для клиента: plain URL или happ://crypt5/… если HAPP_CRYPTO_LINKS=true."""
+    plain = await build_plain_sub_link(sub_id)
+    if not settings.HAPP_CRYPTO_LINKS:
+        return plain
+    from services.happ_crypto import encrypt_happ_subscription_link
+
+    return await encrypt_happ_subscription_link(plain)
 
 
 def invalidate_api_cache(node_id: int) -> None:
