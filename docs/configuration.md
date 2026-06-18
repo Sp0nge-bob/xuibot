@@ -40,16 +40,13 @@
 |------------|----------|----------|
 | `HAPP_CRYPTO_MODE` | `none` (по умолчанию) | Без шифрования — `https://…/{sub_id}` |
 | | `crypt3_local` | Локальный RSA — ключ из [документации Happ](https://www.happ.su/main/dev-docs/crypto-link) → `happ://crypt3/…` |
-| | `crypt4_local` | Локальный RSA — отдельный ключ v4 → `happ://crypt4/…` |
 | | `crypt5_api` | Запрос на `crypto.happ.su` → `happ://crypt5/…` |
 | `HAPP_CRYPTO_API_URL` | URL | Endpoint Crypt5 (по умолчанию `https://crypto.happ.su/api-v2.php`) |
 | `HAPP_CRYPTO_TIMEOUT_SEC` | секунды | Таймаут запроса Crypt5 API |
 
 Режим можно переключить в `/admin` → **🔐 Happ** (сохраняется в БД и перекрывает `.env`). Зашифрованные ссылки кэшируются в памяти процесса бота.
 
-**Важно:** RSA-ключ из документации Happ соответствует префиксу **`happ://crypt3/`**, не `crypt4`. Если зашифровать этим ключом, но подставить `happ://crypt4/`, Happ ответит «ссылка не валидна».
-
-**Рекомендация:** локально без API — **`crypt3_local`** (ключ из docs). Если не примется в вашей версии Happ — **`crypt5_api`** (официальный API, только crypt5).
+**Рекомендация:** локально без API — **`crypt3_local`** (ключ из docs, префикс `happ://crypt3/`). Если не примется в вашей версии Happ — **`crypt5_api`**. Старое значение `crypt4_local` в `.env` бот читает как `crypt3_local`.
 
 Документация Happ: [crypto-link](https://www.happ.su/main/dev-docs/crypto-link)
 

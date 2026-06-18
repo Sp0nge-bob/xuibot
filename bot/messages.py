@@ -536,10 +536,9 @@ def admin_happ_crypto_text(mode: str) -> str:
         "",
         "🔓 <b>Без шифрования</b> — обычная HTTPS-ссылка подписки.",
         "🔑 <b>Crypt3 RSA</b> — <code>happ://crypt3/…</code>, RSA-ключ из документации Happ.",
-        "🔒 <b>Crypt4 RSA</b> — <code>happ://crypt4/…</code>, отдельный ключ v4 (не из docs).",
         "🌐 <b>Crypt5 (API)</b> — <code>happ://crypt5/…</code>, через crypto.happ.su.",
         "",
-        "<i>Ключ из docs Happ — это crypt3, не crypt4. Неверный префикс даёт «ссылка не валидна».</i>",
+        "<i>RSA-ключ из docs Happ даёт префикс <code>happ://crypt3/</code>.</i>",
         "<i>Ссылки кэшируются в памяти; Crypt5 — после первого запроса к API без повторов.</i>",
     ]
     if mode != HAPP_CRYPTO_NONE:
