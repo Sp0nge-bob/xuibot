@@ -93,7 +93,7 @@ async def _admin_menu_text() -> str:
         f"{nodes_line}\n"
         f"★ Основная: <b>{primary_name}</b> · inbounds: <code>{primary_inbounds or '—'}</code>\n"
         f"Группа 3x-ui: <code>{settings.XUI_CLIENT_GROUP}</code>\n\n"
-        "Выберите раздел:"
+        "<i>Тарифы · оплата · клиенты · ноды · контент</i>"
     )
 
 

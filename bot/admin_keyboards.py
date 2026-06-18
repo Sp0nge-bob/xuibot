@@ -7,16 +7,26 @@ from config.trial import is_trial_email
 def admin_menu_kb() -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="📊 Статистика", callback_data="adm:stats")],
-        [InlineKeyboardButton(text="💰 Цены тарифов", callback_data="adm:plans")],
-        [InlineKeyboardButton(text="💳 Способы оплаты", callback_data="adm:payments")],
-        [InlineKeyboardButton(text="🎟 Промокоды", callback_data="adm:promos")],
-        [InlineKeyboardButton(text="👥 Пользователи", callback_data="adm:users")],
-        [InlineKeyboardButton(text="🎫 Тикеты", callback_data="adm:tickets")],
-        [InlineKeyboardButton(text="🖧 Ноды", callback_data="adm:nodes")],
-        [InlineKeyboardButton(text="📡 Inbounds подписки", callback_data="adm:inbounds")],
-        [InlineKeyboardButton(text="🎁 Пробный период", callback_data="adm:trial")],
-        [InlineKeyboardButton(text="📢 Экран /start", callback_data="adm:start_text")],
-        [InlineKeyboardButton(text="💾 Бэкап", callback_data="adm:backup")],
+        [
+            InlineKeyboardButton(text="💰 Тарифы", callback_data="adm:plans"),
+            InlineKeyboardButton(text="💳 Оплата", callback_data="adm:payments"),
+        ],
+        [
+            InlineKeyboardButton(text="🎟 Промокоды", callback_data="adm:promos"),
+            InlineKeyboardButton(text="🎁 Пробный", callback_data="adm:trial"),
+        ],
+        [
+            InlineKeyboardButton(text="👥 Клиенты", callback_data="adm:users"),
+            InlineKeyboardButton(text="🎫 Тикеты", callback_data="adm:tickets"),
+        ],
+        [
+            InlineKeyboardButton(text="🖧 Ноды", callback_data="adm:nodes"),
+            InlineKeyboardButton(text="📡 Inbounds", callback_data="adm:inbounds"),
+        ],
+        [
+            InlineKeyboardButton(text="📢 Экран /start", callback_data="adm:start_text"),
+            InlineKeyboardButton(text="💾 Бэкап", callback_data="adm:backup"),
+        ],
     ]
     if settings.ALLOW_DEBUG_ADMIN:
         rows.append([InlineKeyboardButton(text="🧪 Отладка", callback_data="adm:debug")])
@@ -93,24 +103,28 @@ def admin_debug_entry_confirm_kb() -> InlineKeyboardMarkup:
 
 def admin_debug_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="🗑 Пробные",
+                callback_data="adm:trial:reset_all",
+            ),
+            InlineKeyboardButton(
+                text="🎟 Промокоды",
+                callback_data="adm:debug:promos_reset",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text="🧾 Заказы",
+                callback_data="adm:debug:orders_reset",
+            ),
+            InlineKeyboardButton(
+                text="🎫 Тикеты",
+                callback_data="adm:debug:tickets_reset",
+            ),
+        ],
         [InlineKeyboardButton(
-            text="🗑 Сбросить все пробные",
-            callback_data="adm:trial:reset_all",
-        )],
-        [InlineKeyboardButton(
-            text="🎟 Очистить применения промокодов",
-            callback_data="adm:debug:promos_reset",
-        )],
-        [InlineKeyboardButton(
-            text="🧾 Сбросить историю заказов",
-            callback_data="adm:debug:orders_reset",
-        )],
-        [InlineKeyboardButton(
-            text="🎫 Сбросить учёт тикетов",
-            callback_data="adm:debug:tickets_reset",
-        )],
-        [InlineKeyboardButton(
-            text="👥 Сбросить учёт пользователей",
+            text="👥 Пользователи",
             callback_data="adm:debug:users_reset",
         )],
         [InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")],
@@ -187,15 +201,17 @@ def admin_inbounds_kb() -> InlineKeyboardMarkup:
 
 def admin_users_menu_kb(*, paid_count: int, trial_count: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text=f"✅ Платные ({paid_count})",
-            callback_data="adm:users:paid",
-        )],
-        [InlineKeyboardButton(
-            text=f"🎁 Пробные ({trial_count})",
-            callback_data="adm:users:trial",
-        )],
-        [InlineKeyboardButton(text="🔍 Поиск по @user или TG ID", callback_data="adm:users:search")],
+        [
+            InlineKeyboardButton(
+                text=f"✅ Платные ({paid_count})",
+                callback_data="adm:users:paid",
+            ),
+            InlineKeyboardButton(
+                text=f"🎁 Пробные ({trial_count})",
+                callback_data="adm:users:trial",
+            ),
+        ],
+        [InlineKeyboardButton(text="🔍 Поиск @user / TG ID", callback_data="adm:users:search")],
         [InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")],
     ])
 
@@ -262,16 +278,20 @@ def admin_user_detail_kb(
     else:
         back = "adm:users"
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text="🔄 Сброс пробного",
-            callback_data=f"adm:trial_reset:{tg_id}",
-        )],
-        [InlineKeyboardButton(
-            text="🗑 Удалить подписку",
-            callback_data=f"adm:del_sub:{subscription_id}",
-        )],
-        [InlineKeyboardButton(text="« К списку", callback_data=back)],
-        [InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")],
+        [
+            InlineKeyboardButton(
+                text="🔄 Сброс пробного",
+                callback_data=f"adm:trial_reset:{tg_id}",
+            ),
+            InlineKeyboardButton(
+                text="🗑 Удалить",
+                callback_data=f"adm:del_sub:{subscription_id}",
+            ),
+        ],
+        [
+            InlineKeyboardButton(text="« К списку", callback_data=back),
+            InlineKeyboardButton(text="« Админ", callback_data="adm:menu"),
+        ],
     ])
 
 
@@ -416,13 +436,17 @@ def admin_promo_grant_plans_kb(plans: list) -> InlineKeyboardMarkup:
 
 
 def admin_promo_detail_kb(promo_id: int, *, is_active: bool) -> InlineKeyboardMarkup:
-    toggle = "⏸ Отключить" if is_active else "✅ Включить"
+    toggle = "⏸ Выкл" if is_active else "✅ Вкл"
     toggle_data = f"adm:promo:toggle:{promo_id}"
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=toggle, callback_data=toggle_data)],
-        [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"adm:promo:del:{promo_id}")],
-        [InlineKeyboardButton(text="« К списку", callback_data="adm:promos")],
-        [InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")],
+        [
+            InlineKeyboardButton(text=toggle, callback_data=toggle_data),
+            InlineKeyboardButton(text="🗑 Удалить", callback_data=f"adm:promo:del:{promo_id}"),
+        ],
+        [
+            InlineKeyboardButton(text="« Промокоды", callback_data="adm:promos"),
+            InlineKeyboardButton(text="« Админ", callback_data="adm:menu"),
+        ],
     ])
 
 
