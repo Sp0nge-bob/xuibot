@@ -4,6 +4,7 @@ from config.plans import Plan
 from config.trial import is_trial_email
 from services.pricing import PriceQuote
 
+from config.legal import PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL
 from ui.theme import (
     BTN_BACK,
     BTN_BACK_TARIFFS,
@@ -11,11 +12,14 @@ from ui.theme import (
     BTN_HOME,
     BTN_PAY,
     BTN_FAQ,
+    BTN_POLICY,
+    BTN_PRIVACY_POLICY,
     BTN_PROMO,
     BTN_RESUME_PAY,
     BTN_SUBSCRIPTION,
     BTN_SUPPORT_SHORT,
     BTN_TARIFFS,
+    BTN_TERMS_OF_SERVICE,
     BTN_TRIAL,
     plan_button_label,
 )
@@ -56,9 +60,18 @@ def main_menu_kb(
             InlineKeyboardButton(text=BTN_PROMO, callback_data="promo_enter"),
             InlineKeyboardButton(text=BTN_FAQ, callback_data="faq_menu"),
         ],
+        [InlineKeyboardButton(text=BTN_POLICY, callback_data="project_policy")],
         [InlineKeyboardButton(text=BTN_SUPPORT_SHORT, callback_data="support")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def project_policy_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=BTN_PRIVACY_POLICY, url=PRIVACY_POLICY_URL)],
+        [InlineKeyboardButton(text=BTN_TERMS_OF_SERVICE, url=TERMS_OF_SERVICE_URL)],
+        [InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")],
+    ])
 
 
 def _faq_button_title(title: str, *, max_len: int = 42) -> str:

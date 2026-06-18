@@ -350,7 +350,8 @@ def _payment_metadata(cb: CallbackQuery, plan_id: str, order_type: str) -> dict:
 
 
 def _payment_description(plan_name: str, *, extend: bool) -> str:
-    return f"VPN {'продление' if extend else 'подписка'}: {plan_name}"
+    action = "Продление" if extend else "Подписка"
+    return f"{action}: {plan_name}"
 
 
 async def _start_payment(

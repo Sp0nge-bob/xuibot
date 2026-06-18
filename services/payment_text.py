@@ -61,12 +61,12 @@ def _refund_access_line(reversal: Optional[Dict[str, Any]]) -> Optional[str]:
         return None
     action = reversal.get("action")
     if action == "revoked":
-        return "🔒 <b>Доступ к VPN отключён</b> по этой оплате."
+        return "🔒 <b>Доступ к подписке отключён</b> по этой оплате."
     if action == "shortened":
         end_date = reversal.get("end_date") or "—"
         return f"📅 <b>Срок подписки сокращён</b> — действует до <b>{end_date}</b>."
     if action == "disabled":
-        return "🔒 <b>Доступ к VPN отключён</b> — оплаченный период аннулирован."
+        return "🔒 <b>Доступ к подписке отключён</b> — оплаченный период аннулирован."
     return None
 
 

@@ -23,6 +23,9 @@ BTN_SUBSCRIPTION = "⚙️ Подписка"
 BTN_PROMO = "🎟 Промокод"
 BTN_SUPPORT_SHORT = "💬 Поддержка"
 BTN_FAQ = "❓ FAQ"
+BTN_POLICY = "📋 Политика проекта"
+BTN_PRIVACY_POLICY = "📄 Политика конфиденциальности"
+BTN_TERMS_OF_SERVICE = "📜 Пользовательское соглашение"
 BTN_RESUME_PAY = "💳 Вернуться к оплате"
 
 

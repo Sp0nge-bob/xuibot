@@ -16,6 +16,7 @@ from .messages import (
     admin_start_text_menu_text,
 )
 from .states import AdminStates
+from ui.compliance import compliance_error_message
 from .telegram_html import safe_html_fragment, validate_telegram_html
 from .ui_helpers import safe_cb_answer, send_or_edit
 
@@ -170,6 +171,11 @@ async def msg_admin_start_greeting_save(message: Message, state: FSMContext):
         )
         return
 
+    compliance_error = compliance_error_message(body)
+    if compliance_error:
+        await message.answer(compliance_error)
+        return
+
     await settings_db.set_start_greeting(body)
     await state.set_state(None)
     await message.answer("✅ Приветствие сохранено.")
@@ -201,6 +207,11 @@ async def msg_admin_start_text_save(message: Message, state: FSMContext):
             "(например, <code>&lt;b&gt;</code>) должен иметь парный "
             "<code>&lt;/b&gt;</code>."
         )
+        return
+
+    compliance_error = compliance_error_message(body)
+    if compliance_error:
+        await message.answer(compliance_error)
         return
 
     await settings_db.set_start_announcement(body)

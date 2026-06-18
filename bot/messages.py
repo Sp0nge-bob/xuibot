@@ -133,6 +133,24 @@ def faq_empty_text() -> str:
     )
 
 
+def project_policy_text() -> str:
+    from ui.theme import BRAND
+
+    return screen(
+        "📋 <b>Политика проекта</b>",
+        "\n".join([
+            f"Официальные документы сервиса <b>{BRAND}</b>:",
+            "",
+            "📄 <b>Политика конфиденциальности</b>",
+            "   Какие данные собираем, как храним и защищаем.",
+            "",
+            "📜 <b>Пользовательское соглашение</b>",
+            "   Правила использования сервиса и оформления подписки.",
+        ]),
+        hint="Нажмите кнопку ниже — документ откроется в браузере 👇",
+    )
+
+
 def _ru_articles_word(n: int) -> str:
     n = abs(int(n)) % 100
     if 11 <= n <= 14:
@@ -431,6 +449,7 @@ def admin_start_text_menu_text(
 
 
 def admin_start_greeting_edit_prompt_text() -> str:
+    from ui.compliance import COMPLIANCE_HINT
     from ui.theme import DEFAULT_GREETING_TEMPLATE
 
     return (
@@ -442,11 +461,14 @@ def admin_start_greeting_edit_prompt_text() -> str:
         "• <code>{username}</code> — @ник без скобок\n"
         "• <code>{username_line}</code> — « (@ник)», если ник есть\n\n"
         f"Пример: <code>{DEFAULT_GREETING_TEMPLATE}</code>\n\n"
+        f"<i>{COMPLIANCE_HINT}</i>\n\n"
         "Поддерживается HTML. Для отмены: /admin"
     )
 
 
 def admin_start_text_edit_prompt_text() -> str:
+    from ui.compliance import COMPLIANCE_HINT
+
     return (
         "✏️ <b>Блок новостей /start</b>\n"
         "━━━━━━━━━━━━━━━━\n\n"
@@ -454,6 +476,7 @@ def admin_start_text_edit_prompt_text() -> str:
         "Поддерживается HTML: <code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, "
         "<code>&lt;code&gt;</code> и т.д.\n"
         "Каждый открытый тег нужно закрывать: <code>&lt;b&gt;текст&lt;/b&gt;</code>.\n\n"
+        f"<i>{COMPLIANCE_HINT}</i>\n\n"
         "Для отмены: /admin"
     )
 
@@ -495,19 +518,25 @@ def admin_faq_detail_text(article: dict, *, photo_count: int) -> str:
 
 
 def admin_faq_title_prompt_text() -> str:
+    from ui.compliance import COMPLIANCE_HINT
+
     return (
         "✏️ <b>Заголовок FAQ</b>\n\n"
         "Короткое название для кнопки в списке (до 80 символов).\n\n"
+        f"<i>{COMPLIANCE_HINT}</i>\n\n"
         "Отмена: /admin"
     )
 
 
 def admin_faq_body_prompt_text(*, title: str) -> str:
+    from ui.compliance import COMPLIANCE_HINT
+
     return (
         f"📝 <b>Текст статьи</b>\n"
         f"Заголовок: <b>{title}</b>\n\n"
         "Поддерживается HTML: <code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, "
         "<code>&lt;code&gt;</code> и т.д.\n\n"
+        f"<i>{COMPLIANCE_HINT}</i>\n\n"
         "Отмена: /admin"
     )
 
@@ -856,7 +885,7 @@ def refund_ticket_approved_user_text(ticket: Dict[str, Any]) -> str:
     blocks = [
         f"Тикет <code>#{ticket_id}</code> закрыт.",
         "Возврат выполняется через платёжную систему.\n"
-        "После подтверждения доступ к VPN скорректируется автоматически.\n"
+        "После подтверждения доступ к подписке скорректируется автоматически.\n"
         "Мы пришлём отдельное уведомление, когда возврат подтвердят.",
     ]
     if ticket.get("order_id"):

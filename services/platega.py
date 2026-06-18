@@ -36,7 +36,7 @@ def build_create_request(
     amount: int,
     *,
     currency: str = "RUB",
-    description: str = "VPN подписка",
+    description: str = "Подписка",
     return_url: str = "https://t.me/",
     failed_url: str = "https://t.me/",
     payload: str = "",
@@ -119,7 +119,7 @@ async def _headers() -> Dict[str, str]:
 async def create_transaction(
     amount: int,
     currency: str = "RUB",
-    description: str = "VPN подписка",
+    description: str = "Подписка",
     return_url: str = "https://t.me/",
     failed_url: str = "https://t.me/",
     payload: str = "",

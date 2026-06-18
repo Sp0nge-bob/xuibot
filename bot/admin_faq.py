@@ -26,6 +26,7 @@ from .messages import (
     admin_faq_title_prompt_text,
 )
 from .states import AdminStates
+from ui.compliance import compliance_error_message
 from .telegram_html import validate_telegram_html
 from .ui_helpers import safe_cb_answer, send_or_edit
 
@@ -117,6 +118,10 @@ async def msg_admin_faq_title(message: Message, state: FSMContext):
     if len(title) > FAQ_TITLE_MAX:
         await message.answer(f"Слишком длинный заголовок (макс. {FAQ_TITLE_MAX} символов).")
         return
+    compliance_error = compliance_error_message(title)
+    if compliance_error:
+        await message.answer(compliance_error)
+        return
     await state.update_data(faq_draft_title=title)
     await state.set_state(AdminStates.waiting_faq_body)
     await message.answer(admin_faq_body_prompt_text(title=title))
@@ -138,6 +143,10 @@ async def msg_admin_faq_body(message: Message, state: FSMContext):
     err = validate_telegram_html(body)
     if err:
         await message.answer(f"❌ HTML: {err}")
+        return
+    compliance_error = compliance_error_message(body)
+    if compliance_error:
+        await message.answer(compliance_error)
         return
     await state.update_data(faq_draft_body=body, faq_photo_ids=[])
     await state.set_state(AdminStates.waiting_faq_photos)
@@ -353,6 +362,10 @@ async def msg_admin_faq_edit_title(message: Message, state: FSMContext):
     if not title or len(title) > FAQ_TITLE_MAX:
         await message.answer(f"Нужен заголовок до {FAQ_TITLE_MAX} символов.")
         return
+    compliance_error = compliance_error_message(title)
+    if compliance_error:
+        await message.answer(compliance_error)
+        return
     data = await state.get_data()
     article_id = int(data["faq_edit_article_id"])
     await faq_db.update_article(article_id, title=title)
@@ -390,6 +403,10 @@ async def msg_admin_faq_edit_body(message: Message, state: FSMContext):
     err = validate_telegram_html(body)
     if err:
         await message.answer(f"❌ HTML: {err}")
+        return
+    compliance_error = compliance_error_message(body)
+    if compliance_error:
+        await message.answer(compliance_error)
         return
     data = await state.get_data()
     article_id = int(data["faq_edit_article_id"])
