@@ -423,7 +423,8 @@ async def show_subscriptions_manage(
     tg_id: int,
 ) -> None:
     """Экспорт для handlers.py — главное меню «Подписка» и /subscription."""
-    from .messages import subscription_manage_text, subscriptions_manage_text
+    from .messages import subscription_manage_text, subscriptions_picker_text
+    from .keyboards import subscriptions_picker_kb
     from services.limit_ip import resolve_limit_ip_for_email
     from services.xui import build_sub_link
 
@@ -439,19 +440,18 @@ async def show_subscriptions_manage(
             await target.answer(text, reply_markup=kb)
         return
 
-    refund_by_sub = await tickets_db.get_open_refund_tickets_by_subscription_for_user(tg_id)
-    extend_blocked = await tickets_db.is_extend_blocked_by_pending_refund(tg_id)
-    can_refund: dict[int, bool] = {}
-    for sub in subs:
-        if is_trial_email(sub.get("client_email")):
-            continue
-        _, can_refund[sub["id"]] = await _refund_ui_state(tg_id, sub["id"])
-
-    limit_ips: dict[int, int] = {}
-    for sub in subs:
-        limit_ips[sub["id"]] = await resolve_limit_ip_for_email(sub.get("client_email") or "")
-
     if len(subs) == 1:
+        refund_by_sub = await tickets_db.get_open_refund_tickets_by_subscription_for_user(tg_id)
+        extend_blocked = await tickets_db.is_extend_blocked_by_pending_refund(tg_id)
+        can_refund: dict[int, bool] = {}
+        for sub in subs:
+            if is_trial_email(sub.get("client_email")):
+                continue
+            _, can_refund[sub["id"]] = await _refund_ui_state(tg_id, sub["id"])
+
+        limit_ips: dict[int, int] = {}
+        for sub in subs:
+            limit_ips[sub["id"]] = await resolve_limit_ip_for_email(sub.get("client_email") or "")
         sub = subs[0]
         sub_link = await build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
         text = subscription_manage_text(sub, sub_link, limit_ip=limit_ips.get(sub["id"]))
@@ -468,18 +468,8 @@ async def show_subscriptions_manage(
             await target.answer(text, reply_markup=kb)
         return
 
-    sub_links = {}
-    for sub in subs:
-        sub_links[sub["id"]] = (
-            await build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
-        )
-    text = subscriptions_manage_text(subs, sub_links, limit_ips=limit_ips)
-    kb = subscriptions_manage_kb(
-        subs,
-        refund_tickets=refund_by_sub,
-        can_request_refund=can_refund,
-        can_extend=not extend_blocked,
-    )
+    text = subscriptions_picker_text(subs)
+    kb = subscriptions_picker_kb(subs)
     if isinstance(target, CallbackQuery):
         await send_or_edit(target, text, kb)
     else:

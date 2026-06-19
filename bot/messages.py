@@ -356,22 +356,14 @@ def subscription_manage_text(
     )
 
 
-def subscriptions_manage_text(
-    subs: List[Dict[str, Any]],
-    sub_links: Dict[int, Optional[str]],
-    *,
-    limit_ips: Dict[int, int] | None = None,
-) -> str:
-    blocks: list[str] = []
-    for i, sub in enumerate(subs):
-        if i > 0:
-            blocks.append("──────────────")
-        blocks.append(_subscription_detail_block(
-            sub,
-            sub_links.get(sub["id"]),
-            limit_ip=(limit_ips or {}).get(sub["id"]),
-        ))
-    return screen("⚙️ <b>Подписки</b>", *blocks, hint="Что хотите сделать?")
+def subscriptions_picker_text(subs: List[Dict[str, Any]]) -> str:
+    lines = [f"• {_sub_menu_line(sub)}" for sub in subs]
+    return screen(
+        "⚙️ <b>Подписки</b>",
+        f"Активных: <b>{len(subs)}</b>",
+        "\n".join(lines),
+        hint="Выберите подписку — откроются детали и действия.",
+    )
 
 
 def no_subscription_text() -> str:

@@ -240,44 +240,14 @@ def _refund_order_button_label(order: dict) -> str:
     return f"{kind} #{order['id']} · {plan} · {order.get('amount', 0)}₽"
 
 
-def subscriptions_manage_kb(
-    subs: list[dict],
-    *,
-    refund_tickets: dict[int, list[dict]] | None = None,
-    can_request_refund: dict[int, bool] | None = None,
-    can_extend: bool = True,
-) -> InlineKeyboardMarkup:
-    refund_tickets = refund_tickets or {}
-    can_request_refund = can_request_refund or {}
-    rows: list[list[InlineKeyboardButton]] = []
-    has_paid = False
-    for sub in subs:
-        label = _sub_action_label(sub)
-        if len(subs) > 1:
-            rows.append([InlineKeyboardButton(
-                text=label,
-                callback_data=f"manage_sub:{sub['id']}",
-            )])
-        rows.append([InlineKeyboardButton(
-            text=f"🔗 {label} — ссылка и QR",
-            callback_data=f"sub_link:{sub['id']}",
-        )])
-        if not is_trial_email(sub.get("client_email")):
-            has_paid = True
-            for ticket in refund_tickets.get(sub["id"], []):
-                order_id = ticket.get("order_id")
-                btn = f"💬 Возврат заказа #{order_id}" if order_id else f"💬 Возврат #{ticket['id']}"
-                rows.append([InlineKeyboardButton(
-                    text=f"{label} — {btn}",
-                    callback_data=f"ticket_view:{ticket['id']}",
-                )])
-            if can_request_refund.get(sub["id"], True):
-                rows.append([InlineKeyboardButton(
-                    text=f"💸 {label} — запросить возврат",
-                    callback_data=f"refund:{sub['id']}",
-                )])
-    if has_paid and can_extend:
-        rows.append([InlineKeyboardButton(text="🔄 Продлить подписку", callback_data="extend_menu")])
+def subscriptions_picker_kb(subs: list[dict]) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(
+            text=_sub_action_label(sub),
+            callback_data=f"manage_sub:{sub['id']}",
+        )]
+        for sub in subs
+    ]
     rows.append([InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
