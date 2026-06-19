@@ -683,7 +683,7 @@ async def search_connected_users(query: str, limit: int = 25) -> List[Dict[str, 
 
     base_sql = """
         SELECT s.id AS subscription_id, u.tg_id, u.username, u.first_name,
-               s.end_date, s.client_email, s.sub_id
+               s.end_date, s.client_email, s.sub_id, s.display_name
         FROM subscriptions s
         JOIN users u ON u.tg_id = s.tg_id
         WHERE s.is_active = 1
@@ -733,10 +733,52 @@ async def count_connected_users(*, trial_only: Optional[bool] = None) -> int:
     clause = _connected_users_trial_clause(trial_only)
     async with get_db() as db:
         async with db.execute(
-            f"""SELECT COUNT(*) FROM subscriptions s
+            f"""SELECT COUNT(DISTINCT s.tg_id) FROM subscriptions s
                 WHERE s.is_active = 1{clause}""",
         ) as cur:
             return (await cur.fetchone())[0]
+
+
+async def get_connected_tg_users(
+    limit: int = 30,
+    *,
+    trial_only: Optional[bool] = None,
+) -> List[Dict[str, Any]]:
+    clause = _connected_users_trial_clause(trial_only)
+    async with get_db() as db:
+        async with db.execute(
+            f"""SELECT u.tg_id, u.username, u.first_name,
+                      MAX(s.end_date) AS end_date,
+                      COUNT(s.id) AS sub_count
+               FROM subscriptions s
+               JOIN users u ON u.tg_id = s.tg_id
+               WHERE s.is_active = 1{clause}
+               GROUP BY u.tg_id
+               ORDER BY end_date DESC
+               LIMIT ?""",
+            (limit,),
+        ) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+
+async def get_active_subscriptions_for_tg(
+    tg_id: int,
+    *,
+    trial_only: Optional[bool] = None,
+) -> List[Dict[str, Any]]:
+    clause = _connected_users_trial_clause(trial_only)
+    async with get_db() as db:
+        async with db.execute(
+            f"""SELECT s.id AS subscription_id, s.end_date, s.client_email,
+                      s.sub_id, s.display_name
+               FROM subscriptions s
+               WHERE s.tg_id = ? AND s.is_active = 1{clause}
+               ORDER BY s.end_date DESC""",
+            (tg_id,),
+        ) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
 
 
 async def get_connected_users(
@@ -749,7 +791,7 @@ async def get_connected_users(
 
         async with db.execute(
             f"""SELECT s.id AS subscription_id, u.tg_id, u.username, u.first_name,
-                      s.end_date, s.client_email, s.sub_id
+                      s.end_date, s.client_email, s.sub_id, s.display_name
                FROM subscriptions s
                JOIN users u ON u.tg_id = s.tg_id
                WHERE s.is_active = 1{clause}

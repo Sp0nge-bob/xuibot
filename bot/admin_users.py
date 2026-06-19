@@ -1,7 +1,32 @@
-"""Хелперы списка подключённых подписок в админке."""
+"""Хелперы списка подключённых пользователей в админке."""
 from typing import Any
 
 from config.trial import is_trial_email
+from services.subscription_labels import subscription_short_label
+
+
+def group_subscriptions_by_tg(users: list[dict[str, Any]]) -> dict[int, list[dict]]:
+    by_tg: dict[int, list[dict]] = {}
+    for u in users:
+        by_tg.setdefault(u["tg_id"], []).append(u)
+    return by_tg
+
+
+def unique_tg_users_from_subs(users: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_tg = group_subscriptions_by_tg(users)
+    result: list[dict[str, Any]] = []
+    for tg_id, subs in by_tg.items():
+        subs_sorted = sorted(subs, key=lambda s: s.get("end_date") or "", reverse=True)
+        top = subs_sorted[0]
+        result.append({
+            "tg_id": tg_id,
+            "username": top.get("username"),
+            "first_name": top.get("first_name"),
+            "end_date": top["end_date"],
+            "sub_count": len(subs),
+        })
+    result.sort(key=lambda u: u.get("end_date") or "", reverse=True)
+    return result
 
 
 def split_connected_users(users: list[dict[str, Any]]) -> tuple[list[dict], list[dict]]:
@@ -15,12 +40,19 @@ def split_connected_users(users: list[dict[str, Any]]) -> tuple[list[dict], list
     return paid, trial
 
 
+def tg_user_label(u: dict[str, Any]) -> str:
+    label = u.get("username") or u.get("first_name") or str(u["tg_id"])
+    if u.get("username"):
+        label = f"@{u['username']}"
+    return label
+
+
 def admin_users_menu_text(*, paid_count: int, trial_count: int) -> str:
     return (
-        "👥 <b>Подключённые подписки</b>\n"
+        "👥 <b>Подключённые клиенты</b>\n"
         "━━━━━━━━━━━━━━━━\n\n"
-        f"✅ Платные: <b>{paid_count}</b>\n"
-        f"🎁 Пробные: <b>{trial_count}</b>\n\n"
+        f"✅ Платные: <b>{paid_count}</b> польз.\n"
+        f"🎁 Пробные: <b>{trial_count}</b> польз.\n\n"
         "Выберите категорию или воспользуйтесь поиском."
     )
 
@@ -31,48 +63,50 @@ def admin_users_category_text(
     users: list[dict],
     limit: int,
 ) -> str:
-    title = "✅ Платные подписки" if category == "paid" else "🎁 Пробные подписки"
+    title = "✅ Платные клиенты" if category == "paid" else "🎁 Пробные клиенты"
     lines = [title, "━━━━━━━━━━━━━━━━", ""]
     if not users:
-        lines.append("В этой категории активных подписок нет.")
+        lines.append("В этой категории активных клиентов нет.")
     else:
         lines.append(f"Показано: <b>{len(users)}</b> (до {limit} последних по сроку)")
     return "\n".join(lines)
 
 
-def admin_users_search_text(
-    query: str,
-    paid: list[dict],
-    trial: list[dict],
-) -> str:
-    total = len(paid) + len(trial)
+def admin_user_subs_text(*, label: str, tg_id: int, subs: list[dict]) -> str:
     lines = [
-        f"🔍 <b>Найдено: {total}</b>",
+        "👤 <b>Выбор подписки</b>",
+        "━━━━━━━━━━━━━━━━",
+        "",
+        f"Клиент: {label}",
+        f"TG ID: <code>{tg_id}</code>",
+        "",
+        f"Активных подписок: <b>{len(subs)}</b>",
+        "",
+        "Выберите подписку:",
+    ]
+    return "\n".join(lines)
+
+
+def admin_users_search_text(query: str, users: list[dict]) -> str:
+    lines = [
+        f"🔍 <b>Найдено: {len(users)}</b>",
         f"Запрос: <code>{query}</code>",
         "",
     ]
-    if paid:
-        lines += [f"✅ <b>Платные</b> — {len(paid)}:", ""]
-        for u in paid:
-            lines.append(_user_search_line(u))
-        lines.append("")
-    if trial:
-        lines += [f"🎁 <b>Пробные</b> — {len(trial)}:", ""]
-        for u in trial:
-            lines.append(_user_search_line(u))
-        lines.append("")
-    if not paid and not trial:
-        lines.append("Активных подписок не найдено.")
+    if not users:
+        lines.append("Активных клиентов не найдено.")
     else:
-        lines.append("Выберите подписку:")
-    return "\n".join(lines).rstrip()
+        lines.append("Выберите клиента:")
+    return "\n".join(lines)
 
 
-def _user_search_line(u: dict) -> str:
-    label = u.get("username") or u.get("first_name") or str(u["tg_id"])
-    if u.get("username"):
-        label = f"@{u['username']}"
-    return f"• {label} · <code>{u['client_email']}</code> · до {u['end_date'][:10]}"
+def subscription_picker_button_label(sub: dict[str, Any]) -> str:
+    end = (sub.get("end_date") or "")[:10]
+    name = subscription_short_label(sub)
+    email = sub.get("client_email") or ""
+    if len(email) > 14:
+        email = email[:11] + "..."
+    return f"{name} · {email} · {end}"
 
 
 def subscription_kind_label(client_email: str | None) -> str:

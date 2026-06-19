@@ -28,11 +28,13 @@ from services.trial import admin_reset_all_trial_subscriptions, admin_reset_tria
 from .states import AdminPricingStates, AdminStates
 from services.subscription_admin import admin_delete_subscription
 from .admin_users import (
+    admin_user_subs_text,
     admin_users_category_text,
     admin_users_menu_text,
     admin_users_search_text,
-    split_connected_users,
+    group_subscriptions_by_tg,
     subscription_kind_label,
+    unique_tg_users_from_subs,
 )
 from .admin_auth import is_admin
 from .admin_keyboards import (
@@ -46,6 +48,7 @@ from .admin_keyboards import (
     admin_users_kb,
     admin_users_menu_kb,
     admin_users_search_kb,
+    admin_user_subs_kb,
     admin_user_detail_kb,
     admin_delete_confirm_kb,
     admin_trial_kb,
@@ -140,7 +143,11 @@ _USERS_LIST_LIMIT = 25
 async def _show_admin_users_menu(cb: CallbackQuery, state: FSMContext) -> None:
     paid_count = await db.count_connected_users(trial_only=False)
     trial_count = await db.count_connected_users(trial_only=True)
-    await state.update_data(admin_user_from_search=False, admin_user_category=None)
+    await state.update_data(
+        admin_user_from_search=False,
+        admin_user_category=None,
+        admin_user_picker_tg_id=None,
+    )
     await send_or_edit(
         cb,
         admin_users_menu_text(paid_count=paid_count, trial_count=trial_count),
@@ -155,10 +162,11 @@ async def _show_admin_users_category(
     category: str,
 ) -> None:
     trial_only = category == "trial"
-    users = await db.get_connected_users(_USERS_LIST_LIMIT, trial_only=trial_only)
+    users = await db.get_connected_tg_users(_USERS_LIST_LIMIT, trial_only=trial_only)
     await state.update_data(
         admin_user_from_search=False,
         admin_user_category=category,
+        admin_user_picker_tg_id=None,
     )
     await send_or_edit(
         cb,
@@ -200,10 +208,11 @@ async def cb_admin_users_search(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
         return
     await state.set_state(AdminStates.waiting_user_search)
+    await state.update_data(admin_user_picker_tg_id=None)
     await safe_cb_answer(cb)
     await send_or_edit(
         cb,
-        "🔍 <b>Поиск подписки</b>\n"
+        "🔍 <b>Поиск клиента</b>\n"
         "━━━━━━━━━━━━━━━━\n\n"
         "Отправьте:\n"
         "• <code>@username</code> или <code>username</code>\n"
@@ -216,6 +225,101 @@ async def cb_admin_users_search(cb: CallbackQuery, state: FSMContext):
     )
 
 
+async def _show_admin_user_sub_detail(
+    target: Message | CallbackQuery,
+    state: FSMContext,
+    *,
+    sub_id: int,
+    from_search: bool = False,
+    from_picker: bool = False,
+) -> None:
+    sub = await db.get_subscription_by_id(sub_id)
+    if not sub or not sub.get("is_active"):
+        if isinstance(target, CallbackQuery):
+            await safe_cb_answer(target, "Подписка не найдена", show_alert=True)
+        else:
+            await target.answer("❌ Подписка не найдена.")
+        return
+
+    user = await db.get_or_create_user(sub["tg_id"])
+    label = _user_label(user.get("username"), user.get("first_name"), sub["tg_id"])
+    kind = subscription_kind_label(sub.get("client_email"))
+    display = (sub.get("display_name") or "").strip()
+    name_line = f"Название: <b>{display}</b>\n" if display else ""
+    text = (
+        "👤 <b>Подписка клиента</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        f"Тип: {kind}\n"
+        f"Имя: {label}\n"
+        f"TG ID: <code>{sub['tg_id']}</code>\n"
+        f"{name_line}"
+        f"Подписка: <code>#{sub_id}</code>\n"
+        f"Клиент: <code>{sub['client_email']}</code>\n"
+        f"До: <b>{sub['end_date'][:10]}</b>\n"
+        f"subId: <code>{sub.get('sub_id') or '—'}</code>"
+    )
+    category = (await state.get_data()).get("admin_user_category")
+    kb = admin_user_detail_kb(
+        sub_id,
+        sub["tg_id"],
+        from_search=from_search,
+        category=category,
+        from_picker=from_picker,
+    )
+    if isinstance(target, CallbackQuery):
+        await safe_cb_answer(target)
+        await send_or_edit(target, text, kb)
+    else:
+        await target.answer(text, reply_markup=kb)
+
+
+async def _show_admin_user_subs_picker(
+    target: Message | CallbackQuery,
+    state: FSMContext,
+    tg_id: int,
+    *,
+    subs: list | None = None,
+    from_search: bool = False,
+) -> None:
+    data = await state.get_data()
+    category = data.get("admin_user_category")
+    trial_only = category == "trial" if category in ("paid", "trial") else None
+    if subs is None:
+        subs = await db.get_active_subscriptions_for_tg(tg_id, trial_only=trial_only)
+    if not subs:
+        if isinstance(target, CallbackQuery):
+            await safe_cb_answer(target, "Активных подписок нет", show_alert=True)
+        else:
+            await target.answer("❌ У клиента нет активных подписок.")
+        return
+
+    if len(subs) == 1:
+        await _show_admin_user_sub_detail(
+            target,
+            state,
+            sub_id=subs[0]["subscription_id"],
+            from_search=from_search,
+            from_picker=False,
+        )
+        return
+
+    await state.update_data(admin_user_picker_tg_id=tg_id)
+    user = await db.get_or_create_user(tg_id)
+    label = _user_label(user.get("username"), user.get("first_name"), tg_id)
+    text = admin_user_subs_text(label=label, tg_id=tg_id, subs=subs)
+    kb = admin_user_subs_kb(
+        tg_id,
+        subs,
+        from_search=from_search,
+        category=category,
+    )
+    if isinstance(target, CallbackQuery):
+        await safe_cb_answer(target)
+        await send_or_edit(target, text, kb)
+    else:
+        await target.answer(text, reply_markup=kb)
+
+
 @router.message(AdminStates.waiting_user_search)
 async def msg_admin_user_search(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
@@ -225,43 +329,44 @@ async def msg_admin_user_search(message: Message, state: FSMContext):
         await message.answer("❌ Введите @username, TG ID или email.")
         return
 
-    users = await db.search_connected_users(query, limit=25)
+    subs = await db.search_connected_users(query, limit=50)
     await state.set_state(None)
-    await state.update_data(admin_user_from_search=True)
+    await state.update_data(admin_user_from_search=True, admin_user_category=None)
 
-    paid, trial = split_connected_users(users)
-    if not paid and not trial:
+    if not subs:
         await message.answer(
-            f"🔍 По запросу <code>{query}</code> активных подписок не найдено.",
-            reply_markup=admin_users_search_kb([], []),
+            f"🔍 По запросу <code>{query}</code> активных клиентов не найдено.",
+            reply_markup=admin_users_search_kb([]),
         )
         return
 
-    if len(users) == 1:
-        u = users[0]
-        sub_id = u["subscription_id"]
-        label = _user_label(u.get("username"), u.get("first_name"), u["tg_id"])
-        kind = subscription_kind_label(u.get("client_email"))
-        text = (
-            "🔍 <b>Найден 1 пользователь</b>\n"
-            "━━━━━━━━━━━━━━━━\n\n"
-            f"Тип: {kind}\n"
-            f"Имя: {label}\n"
-            f"TG ID: <code>{u['tg_id']}</code>\n"
-            f"Подписка: <code>#{sub_id}</code>\n"
-            f"Клиент: <code>{u['client_email']}</code>\n"
-            f"До: <b>{u['end_date'][:10]}</b>"
-        )
-        await message.answer(
-            text,
-            reply_markup=admin_user_detail_kb(sub_id, u["tg_id"], from_search=True),
+    unique_users = unique_tg_users_from_subs(subs)
+    if len(unique_users) == 1:
+        tg_id = unique_users[0]["tg_id"]
+        user_subs = group_subscriptions_by_tg(subs)[tg_id]
+        await _show_admin_user_subs_picker(
+            message,
+            state,
+            tg_id,
+            subs=user_subs,
+            from_search=True,
         )
         return
 
     await message.answer(
-        admin_users_search_text(query, paid, trial),
-        reply_markup=admin_users_search_kb(paid, trial),
+        admin_users_search_text(query, unique_users),
+        reply_markup=admin_users_search_kb(unique_users),
     )
+
+
+@router.callback_query(F.data.regexp(r"^adm:tg:\d+$"))
+async def cb_admin_tg_user(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    tg_id = int(cb.data.split(":")[2])
+    data = await state.get_data()
+    from_search = bool(data.get("admin_user_from_search"))
+    await _show_admin_user_subs_picker(cb, state, tg_id, from_search=from_search)
 
 
 @router.callback_query(F.data.startswith("adm:user:"))
@@ -276,36 +381,18 @@ async def cb_admin_user_detail(cb: CallbackQuery, state: FSMContext):
     else:
         data = await state.get_data()
         from_search = bool(data.get("admin_user_from_search"))
-    category = (await state.get_data()).get("admin_user_category")
+    data = await state.get_data()
     sub = await db.get_subscription_by_id(sub_id)
     if not sub or not sub.get("is_active"):
         await safe_cb_answer(cb, "Подписка не найдена", show_alert=True)
         return
-
-    user = await db.get_or_create_user(sub["tg_id"])
-    label = _user_label(user.get("username"), user.get("first_name"), sub["tg_id"])
-    kind = subscription_kind_label(sub.get("client_email"))
-    text = (
-        "👤 <b>Пользователь</b>\n"
-        "━━━━━━━━━━━━━━━━\n\n"
-        f"Тип: {kind}\n"
-        f"Имя: {label}\n"
-        f"TG ID: <code>{sub['tg_id']}</code>\n"
-        f"Подписка: <code>#{sub_id}</code>\n"
-        f"Клиент: <code>{sub['client_email']}</code>\n"
-        f"До: <b>{sub['end_date'][:10]}</b>\n"
-        f"subId: <code>{sub.get('sub_id') or '—'}</code>"
-    )
-    await safe_cb_answer(cb)
-    await send_or_edit(
+    from_picker = data.get("admin_user_picker_tg_id") == sub["tg_id"]
+    await _show_admin_user_sub_detail(
         cb,
-        text,
-        admin_user_detail_kb(
-            sub_id,
-            sub["tg_id"],
-            from_search=from_search,
-            category=category,
-        ),
+        state,
+        sub_id=sub_id,
+        from_search=from_search,
+        from_picker=from_picker,
     )
 
 
