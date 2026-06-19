@@ -17,6 +17,10 @@ _PLACEHOLDERS = (
     "__CLIENT_EMAIL__",
     "__CREATED_AT__",
     "__TEMPLATE_VERSION__",
+    "__NODE1_HOST__",
+    "__NODE1_WS_PATH__",
+    "__NODE2_HOST__",
+    "__NODE2_WS_PATH__",
 )
 
 
@@ -46,7 +50,11 @@ def render_template_text(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--uuid", required=True, help="VLESS UUID клиента с панели")
-    parser.add_argument("--remarks", default="VPN Bot test", help="Имя в Happ")
+    parser.add_argument("--remarks", default="VPN test", help="Имя в Happ")
+    parser.add_argument("--node1-host", default="node1.example.com", help="Подставить __NODE1_HOST__")
+    parser.add_argument("--node1-ws-path", default="/ws-path", help="Подставить __NODE1_WS_PATH__")
+    parser.add_argument("--node2-host", default="node2.example.com", help="Подставить __NODE2_HOST__")
+    parser.add_argument("--node2-ws-path", default="/ws-path", help="Подставить __NODE2_WS_PATH__")
     parser.add_argument("--user-id", default="123456789")
     parser.add_argument("--email", default="tg123456789")
     parser.add_argument("--template", type=Path, default=_DEFAULT_TEMPLATE)
@@ -54,6 +62,10 @@ def main() -> None:
     args = parser.parse_args()
 
     template = args.template.read_text(encoding="utf-8")
+    template = template.replace("__NODE1_HOST__", args.node1_host)
+    template = template.replace("__NODE2_HOST__", args.node2_host)
+    template = template.replace("__NODE1_WS_PATH__", args.node1_ws_path)
+    template = template.replace("__NODE2_WS_PATH__", args.node2_ws_path)
     rendered = render_template_text(
         template,
         uuid=args.uuid.strip(),
