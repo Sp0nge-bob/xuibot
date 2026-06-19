@@ -17,10 +17,16 @@ async def redeem_grant_promo(tg_id: int, code: str) -> FulfillmentResult:
     if not plan:
         raise ValueError("Тариф промокода не найден")
 
+    from db import database as db
+
+    existing = await db.get_primary_paid_subscription(tg_id)
     result = await fulfill_plan_for_tg(
         tg_id,
         plan,
         order_id=None,
+        order_type="extend" if existing else "new",
+        subscription_id=existing["id"] if existing else None,
+        sub_display_name=None if existing else "Промокод",
         title_new="Промокод активирован!",
         title_extend="Промокод применён — подписка продлена!",
         log_context=f"Grant promo {promo['code']}",

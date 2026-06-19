@@ -25,11 +25,19 @@ async def _resolve_subscription(order: dict[str, Any]) -> dict[str, Any] | None:
         if sub:
             return sub
 
+    if order.get("subscription_id"):
+        sub = await db.get_subscription_by_id(order["subscription_id"])
+        if sub:
+            return sub
+
     sub = await db.get_subscription_by_order_id(order["id"])
     if sub:
         return sub
 
-    return await db.get_primary_subscription(order["tg_id"])
+    if (order.get("order_type") or "new") == "new":
+        return None
+
+    return await db.get_primary_paid_subscription(order["tg_id"])
 
 
 async def apply_refund_reversal(order: dict[str, Any]) -> dict[str, Any]:

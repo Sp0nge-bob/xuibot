@@ -14,6 +14,25 @@ from .ui_helpers import safe_cb_answer, send_or_edit
 router = Router()
 
 
+async def _open_faq_article(
+    bot,
+    chat_id: int,
+    article: dict,
+) -> None:
+    photos = await faq_db.list_photos(article["id"])
+    await clear_faq_album(bot, chat_id)
+    nav = faq_article_nav_kb()
+    if faq_db.is_activation_faq_article(article):
+        album_ids = await send_activation_setup_faq(
+            bot, chat_id, article, reply_markup=nav,
+        )
+    else:
+        album_ids = await send_faq_article(
+            bot, chat_id, article, photos, reply_markup=nav,
+        )
+    set_faq_album_message_ids(chat_id, album_ids)
+
+
 async def show_faq_menu_message(message: Message) -> None:
     articles = await faq_db.list_articles(published_only=True)
     if not articles:
@@ -39,6 +58,20 @@ async def cb_faq_menu(cb: CallbackQuery):
     await send_or_edit(cb, faq_menu_text(len(articles)), faq_list_kb(articles))
 
 
+@router.callback_query(F.data == "faq:builtin:activation")
+async def cb_faq_builtin_activation(cb: CallbackQuery):
+    article = await faq_db.get_article_by_builtin(faq_db.BUILTIN_ACTIVATION_KEY)
+    if not article:
+        await safe_cb_answer(cb, "Статья не найдена", show_alert=True)
+        return
+    await safe_cb_answer(cb)
+    try:
+        await cb.message.delete()
+    except Exception:
+        pass
+    await _open_faq_article(cb.message.bot, cb.message.chat.id, article)
+
+
 @router.callback_query(F.data.startswith("faq:article:"))
 async def cb_faq_article(cb: CallbackQuery):
     article_id = int(cb.data.split(":", 2)[2])
@@ -46,22 +79,9 @@ async def cb_faq_article(cb: CallbackQuery):
     if not article or not article.get("is_published"):
         await safe_cb_answer(cb, "Статья не найдена", show_alert=True)
         return
-    photos = await faq_db.list_photos(article_id)
     await safe_cb_answer(cb)
     try:
         await cb.message.delete()
     except Exception:
         pass
-    bot = cb.message.bot
-    chat_id = cb.message.chat.id
-    await clear_faq_album(bot, chat_id)
-    nav = faq_article_nav_kb()
-    if faq_db.is_activation_faq_article(article):
-        album_ids = await send_activation_setup_faq(
-            bot, chat_id, article, reply_markup=nav,
-        )
-    else:
-        album_ids = await send_faq_article(
-            bot, chat_id, article, photos, reply_markup=nav,
-        )
-    set_faq_album_message_ids(chat_id, album_ids)
+    await _open_faq_article(cb.message.bot, cb.message.chat.id, article)

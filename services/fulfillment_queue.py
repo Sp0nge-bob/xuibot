@@ -40,7 +40,7 @@ async def _deliver_result(tx_id: str, result: PaymentProcessResult) -> None:
         return
     from bot import bot as tg_bot, send_message
     from bot.fulfillment_delivery import deliver_fulfillment
-    from bot.keyboards import back_to_main_kb
+    from bot.keyboards import fulfillment_success_kb
 
     try:
         if result.photo:
@@ -50,12 +50,14 @@ async def _deliver_result(tx_id: str, result: PaymentProcessResult) -> None:
                 text=result.user_message,
                 photo=result.photo,
                 link_message=result.link_message,
-                setup_text=result.setup_text,
-                setup_photos=result.setup_photos or None,
-                reply_markup=back_to_main_kb(),
+                reply_markup=fulfillment_success_kb(),
             )
         else:
-            await send_message(order["tg_id"], result.user_message)
+            await send_message(
+                order["tg_id"],
+                result.user_message,
+                reply_markup=fulfillment_success_kb(),
+            )
     except Exception as e:
         logger.exception("Fulfillment queue: notify failed for tx {}: {}", tx_id, e)
 

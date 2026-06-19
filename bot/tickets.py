@@ -71,13 +71,8 @@ async def _refund_ui_state(tg_id: int, sub_id: int) -> tuple[list[dict], bool]:
 
 async def _eligible_refund_orders(tg_id: int, sub_id: int) -> list[dict]:
     blocked = await tickets_db.get_refund_blocked_order_ids_for_subscription(sub_id)
-    paid = await db.get_paid_orders_for_user(tg_id)
-    return [o for o in paid if o["id"] not in blocked]
-
-
-async def _user_has_subscription(tg_id: int) -> bool:
-    subs = await get_active_subscriptions_for_ui(tg_id)
-    return bool(subs)
+    paid = await db.get_paid_orders_for_subscription(sub_id)
+    return [o for o in paid if o["tg_id"] == tg_id and o["id"] not in blocked]
 
 
 async def _enter_ticket_session(
@@ -115,10 +110,6 @@ async def _enter_ticket_session(
 @router.callback_query(F.data == "support")
 async def cb_support_menu(cb: CallbackQuery, state: FSMContext):
     await state.set_state(None)
-    if not await _user_has_subscription(cb.from_user.id):
-        await safe_cb_answer(cb)
-        await send_or_edit(cb, no_subscription_text(), no_subscription_kb())
-        return
     tickets = await tickets_db.get_user_open_tickets(cb.from_user.id)
     await safe_cb_answer(cb)
     await send_or_edit(cb, support_menu_text(tickets), support_menu_kb(tickets))
@@ -126,9 +117,6 @@ async def cb_support_menu(cb: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "ticket_create")
 async def cb_ticket_create(cb: CallbackQuery):
-    if not await _user_has_subscription(cb.from_user.id):
-        await safe_cb_answer(cb, "Нужна активная подписка", show_alert=True)
-        return
     await safe_cb_answer(cb)
     await send_or_edit(
         cb,
@@ -145,9 +133,6 @@ async def cb_ticket_new_category(cb: CallbackQuery, state: FSMContext):
         tickets_db.CATEGORY_OTHER,
     ):
         await safe_cb_answer(cb, "Неизвестная категория", show_alert=True)
-        return
-    if not await _user_has_subscription(cb.from_user.id):
-        await safe_cb_answer(cb, "Нужна активная подписка", show_alert=True)
         return
 
     ticket_id = await tickets_db.create_ticket(
@@ -386,6 +371,51 @@ async def msg_ticket_relay(message: Message, state: FSMContext):
 
     if ticket_id and get_active_session(message.from_user.id) == ticket_id:
         await message.answer("✅ Отправлено", reply_markup=ticket_session_kb(ticket_id))
+
+
+async def show_subscription_detail(
+    target: Message | CallbackQuery,
+    tg_id: int,
+    sub_id: int,
+) -> None:
+    from .messages import subscription_manage_text
+    from services.limit_ip import resolve_limit_ip_for_email
+    from services.xui import build_sub_link
+
+    sub = await db.get_subscription_by_id(sub_id)
+    if not sub or sub["tg_id"] != tg_id or not sub.get("is_active"):
+        text, kb = no_subscription_text(), no_subscription_kb()
+        if isinstance(target, CallbackQuery):
+            await safe_cb_answer(target, "Подписка не найдена", show_alert=True)
+            await send_or_edit(target, text, kb)
+        else:
+            await target.answer(text, reply_markup=kb)
+        return
+
+    if isinstance(target, CallbackQuery):
+        await safe_cb_answer(target)
+
+    refund_by_sub = await tickets_db.get_open_refund_tickets_by_subscription_for_user(tg_id)
+    extend_blocked = await tickets_db.is_extend_blocked_by_pending_refund(tg_id)
+    can_refund = False
+    if not is_trial_email(sub.get("client_email")):
+        _, can_refund = await _refund_ui_state(tg_id, sub_id)
+
+    limit_ip = await resolve_limit_ip_for_email(sub.get("client_email") or "")
+    sub_link = await build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
+    text = subscription_manage_text(sub, sub_link, limit_ip=limit_ip)
+    kb = subscription_manage_kb(
+        sub_id,
+        refund_tickets=refund_by_sub.get(sub_id, []),
+        can_request_refund=can_refund,
+        can_extend=not extend_blocked,
+        is_trial=is_trial_email(sub.get("client_email")),
+        back_callback="manage_sub",
+    )
+    if isinstance(target, CallbackQuery):
+        await send_or_edit(target, text, kb)
+    else:
+        await target.answer(text, reply_markup=kb)
 
 
 async def show_subscriptions_manage(

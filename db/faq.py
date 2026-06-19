@@ -110,6 +110,16 @@ async def get_article(article_id: int) -> Optional[dict[str, Any]]:
             return dict(row) if row else None
 
 
+async def get_article_by_builtin(builtin_key: str) -> Optional[dict[str, Any]]:
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT * FROM faq_articles WHERE builtin_key = ? AND is_published = 1",
+            (builtin_key,),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
 async def create_article(*, title: str, body: str, is_published: bool = True) -> int:
     sort_order = await _next_sort_order()
     async with get_db() as db:

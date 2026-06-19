@@ -27,7 +27,7 @@ from services.panel_inbounds import fetch_inbound_by_id, fetch_inbounds_list
 _apis: dict[int, AsyncApi] = {}
 _bot_group_ensured: set[int] = set()
 _connect_logged: set[int] = set()
-_BOT_CLIENT_EMAIL = re.compile(r"^tg(?:free)?\d+$")
+_BOT_CLIENT_EMAIL = re.compile(r"^tg(?:free)?\d+(?:_\d+)?$")
 
 
 def is_bot_client_email(email: str) -> bool:
@@ -42,11 +42,16 @@ def _assert_bot_client_email(email: str) -> None:
 def _tg_id_from_email(email: str) -> int:
     if not email:
         return 0
-    if email.startswith("tgfree"):
-        return int(email[6:])
-    if email.startswith("tg"):
-        return int(email[2:])
-    return 0
+    body = email
+    if body.startswith("tgfree"):
+        body = body[6:]
+    elif body.startswith("tg"):
+        body = body[2:]
+    else:
+        return 0
+    if "_" in body:
+        body = body.split("_", 1)[0]
+    return int(body)
 
 
 def normalize_xui_host(host: str) -> str:

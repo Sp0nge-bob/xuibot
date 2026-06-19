@@ -3,6 +3,7 @@ from config.payments import PaymentMethod
 from config.plans import Plan
 from config.trial import is_trial_email
 from services.pricing import PriceQuote
+from services.subscription_labels import subscription_short_label
 
 from config.legal import PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL
 from ui.theme import (
@@ -122,22 +123,43 @@ def payment_methods_kb(
     methods: list[PaymentMethod],
     extend: bool = False,
     quote: PriceQuote | None = None,
+    back_callback: str | None = None,
+    extend_sub_id: int | None = None,
 ) -> InlineKeyboardMarkup:
-    prefix = "pay_extend" if extend else "pay"
-    rows = [
-        [InlineKeyboardButton(
+    rows = []
+    for m in methods:
+        if extend and extend_sub_id:
+            cb_data = f"pay_extend:{plan_id}:{m['key']}:{extend_sub_id}"
+        elif extend:
+            cb_data = f"pay_extend:{plan_id}:{m['key']}"
+        else:
+            cb_data = f"pay:{plan_id}:{m['key']}"
+        rows.append([InlineKeyboardButton(
             text=f"{m['emoji']} {m['name']}",
-            callback_data=f"{prefix}:{plan_id}:{m['key']}",
-        )]
-        for m in methods
-    ]
-    back_data = "extend_menu" if extend else "tariffs"
-    rows.append(nav_row(back_data, back_text=BTN_BACK_TARIFFS if not extend else BTN_BACK))
+            callback_data=cb_data,
+        )])
+    if back_callback:
+        back_data = back_callback
+        back_text = BTN_BACK_TARIFFS
+    elif extend:
+        back_data = "extend_menu"
+        back_text = BTN_BACK
+    else:
+        back_data = "tariffs"
+        back_text = BTN_BACK_TARIFFS
+    rows.append(nav_row(back_data, back_text=back_text))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def test_scenario_kb(plan_id: str, method_key: str, *, extend: bool = False) -> InlineKeyboardMarkup:
+def test_scenario_kb(
+    plan_id: str,
+    method_key: str,
+    *,
+    extend: bool = False,
+    extend_sub_id: int | None = None,
+) -> InlineKeyboardMarkup:
     ext_flag = "1" if extend else "0"
+    sub_suffix = f":{extend_sub_id}" if extend and extend_sub_id else ""
     back_prefix = "extend_plan" if extend else "select_plan"
     scenarios = [
         ("✅ Оплачено", "CONFIRMED"),
@@ -149,7 +171,7 @@ def test_scenario_kb(plan_id: str, method_key: str, *, extend: bool = False) -> 
     rows = [
         [InlineKeyboardButton(
             text=label,
-            callback_data=f"test_scenario:{plan_id}:{method_key}:{scenario}:{ext_flag}",
+            callback_data=f"test_scenario:{plan_id}:{method_key}:{scenario}:{ext_flag}{sub_suffix}",
         )]
         for label, scenario in scenarios
     ]
@@ -205,7 +227,9 @@ def payment_kb(
 
 
 def _sub_action_label(sub: dict) -> str:
-    return "🎁 Пробная" if is_trial_email(sub.get("client_email")) else "✅ Платная"
+    if is_trial_email(sub.get("client_email")):
+        return "🎁 Пробная"
+    return subscription_short_label(sub)
 
 
 def _refund_order_button_label(order: dict) -> str:
@@ -229,6 +253,11 @@ def subscriptions_manage_kb(
     has_paid = False
     for sub in subs:
         label = _sub_action_label(sub)
+        if len(subs) > 1:
+            rows.append([InlineKeyboardButton(
+                text=label,
+                callback_data=f"manage_sub:{sub['id']}",
+            )])
         rows.append([InlineKeyboardButton(
             text=f"🔗 {label} — ссылка и QR",
             callback_data=f"sub_link:{sub['id']}",
@@ -248,7 +277,7 @@ def subscriptions_manage_kb(
                     callback_data=f"refund:{sub['id']}",
                 )])
     if has_paid and can_extend:
-        rows.append([InlineKeyboardButton(text="🔄 Продлить платную", callback_data="extend_menu")])
+        rows.append([InlineKeyboardButton(text="🔄 Продлить подписку", callback_data="extend_menu")])
     rows.append([InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -260,13 +289,22 @@ def subscription_manage_kb(
     can_request_refund: bool = True,
     can_extend: bool = True,
     is_trial: bool = False,
+    back_callback: str = "main_menu",
 ) -> InlineKeyboardMarkup:
     refund_tickets = refund_tickets or []
     rows = [
         [InlineKeyboardButton(text="🔗 Ссылка и QR", callback_data=f"sub_link:{sub_id}")],
     ]
     if not is_trial and can_extend:
-        rows.append([InlineKeyboardButton(text="🔄 Продлить подписку", callback_data="extend_menu")])
+        rows.append([InlineKeyboardButton(
+            text="🔄 Продлить подписку",
+            callback_data=f"extend_sub:{sub_id}",
+        )])
+    if not is_trial:
+        rows.append([InlineKeyboardButton(
+            text="✏️ Переименовать",
+            callback_data=f"sub_rename:{sub_id}",
+        )])
     for ticket in refund_tickets:
         order_id = ticket.get("order_id")
         label = f"💬 Возврат заказа #{order_id}" if order_id else f"💬 Возврат #{ticket['id']}"
@@ -279,7 +317,7 @@ def subscription_manage_kb(
             text="💸 Запросить возврат",
             callback_data=f"refund:{sub_id}",
         )])
-    rows.append([InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")])
+    rows.append(nav_row(back_callback))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -370,6 +408,49 @@ def refund_confirm_kb(sub_id: int, order_id: int) -> InlineKeyboardMarkup:
     ])
 
 
+def extend_sub_picker_kb(
+    subs: list[dict],
+    *,
+    plan_id: str | None = None,
+) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(
+            text=subscription_short_label(sub),
+            callback_data=(
+                f"purchase_extend_sub:{plan_id}:{sub['id']}"
+                if plan_id
+                else f"extend_sub:{sub['id']}"
+            ),
+        )]
+        for sub in subs
+    ]
+    back = f"select_plan:{plan_id}" if plan_id else "manage_sub"
+    rows.append(nav_row(back, back_text=BTN_BACK_TARIFFS if plan_id else BTN_BACK))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def purchase_action_kb(plan_id: str, *, can_extend: bool = True) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if can_extend:
+        rows.append([InlineKeyboardButton(
+            text="🔄 Продлить подписку",
+            callback_data=f"purchase_extend:{plan_id}",
+        )])
+    rows.append([InlineKeyboardButton(
+        text="➕ Купить новую",
+        callback_data=f"purchase_new:{plan_id}",
+    )])
+    rows.append(nav_row("tariffs", back_text=BTN_BACK_TARIFFS))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def sub_name_prompt_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Продолжить", callback_data="sub_name_confirm")],
+        nav_row("tariffs", back_text=BTN_BACK_TARIFFS),
+    ])
+
+
 def no_subscription_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=BTN_TARIFFS, callback_data="tariffs")],
@@ -386,5 +467,15 @@ def trial_confirm_kb() -> InlineKeyboardMarkup:
 
 def back_to_main_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")],
+    ])
+
+
+def fulfillment_success_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="📲 Как подключить подписку",
+            callback_data="faq:builtin:activation",
+        )],
         [InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")],
     ])

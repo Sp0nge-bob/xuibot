@@ -3,6 +3,8 @@ from aiogram.fsm.state import State, StatesGroup
 
 class UserStates(StatesGroup):
     waiting_promo_code = State()
+    waiting_sub_display_name = State()
+    waiting_sub_rename = State()
     in_ticket_chat = State()
 
 

@@ -112,6 +112,10 @@ async def _init_db_impl():
             await db.execute("ALTER TABLE orders ADD COLUMN discount_amount INTEGER DEFAULT 0")
         if "payment_redirect" not in cols:
             await db.execute("ALTER TABLE orders ADD COLUMN payment_redirect TEXT")
+        if "subscription_id" not in cols:
+            await db.execute("ALTER TABLE orders ADD COLUMN subscription_id INTEGER")
+        if "sub_display_name" not in cols:
+            await db.execute("ALTER TABLE orders ADD COLUMN sub_display_name TEXT")
         await db.execute("""
             CREATE TABLE IF NOT EXISTS subscriptions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -125,9 +129,14 @@ async def _init_db_impl():
                 end_date TIMESTAMP,
                 traffic_limit_gb INTEGER DEFAULT 0,
                 is_active BOOLEAN DEFAULT 1,
+                display_name TEXT,
                 FOREIGN KEY(order_id) REFERENCES orders(id)
             )
         """)
+        async with db.execute("PRAGMA table_info(subscriptions)") as cur:
+            sub_cols = {row[1] for row in await cur.fetchall()}
+        if "display_name" not in sub_cols:
+            await db.execute("ALTER TABLE subscriptions ADD COLUMN display_name TEXT")
         await _create_indexes(db)
         await db.commit()
 
@@ -182,15 +191,19 @@ async def create_order(
     original_amount: Optional[int] = None,
     discount_amount: int = 0,
     payment_redirect: Optional[str] = None,
+    subscription_id: Optional[int] = None,
+    sub_display_name: Optional[str] = None,
 ) -> int:
     async with get_db() as db:
         cursor = await db.execute(
             """INSERT INTO orders
                (tg_id, plan_id, plan_name, amount, platega_tx_id, payment_method, order_type,
-                promo_code, original_amount, discount_amount, payment_redirect, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')""",
+                promo_code, original_amount, discount_amount, payment_redirect,
+                subscription_id, sub_display_name, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')""",
             (tg_id, plan_id, plan_name, amount, platega_tx_id, payment_method, order_type,
-             promo_code, original_amount or amount, discount_amount, payment_redirect)
+             promo_code, original_amount or amount, discount_amount, payment_redirect,
+             subscription_id, sub_display_name)
         )
         await db.commit()
         return cursor.lastrowid
@@ -306,6 +319,33 @@ async def get_paid_orders_for_user(tg_id: int, *, limit: int = 50) -> List[Dict[
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
 
+
+async def get_paid_orders_for_subscription(
+    subscription_id: int,
+    *,
+    limit: int = 50,
+) -> List[Dict[str, Any]]:
+    """Оплаченные заказы, относящиеся к конкретной подписке (создание и продления)."""
+    sub = await get_subscription_by_id(subscription_id)
+    if not sub:
+        return []
+    create_order_id = sub.get("order_id")
+    async with get_db() as db:
+        async with db.execute(
+            """SELECT * FROM orders
+               WHERE status = 'paid'
+                 AND (
+                   subscription_id = ?
+                   OR (? IS NOT NULL AND id = ?)
+                 )
+               ORDER BY COALESCE(paid_at, created_at) DESC, id DESC
+               LIMIT ?""",
+            (subscription_id, create_order_id, create_order_id, limit),
+        ) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+
 async def create_subscription(
     tg_id: int,
     order_id: Optional[int],
@@ -315,6 +355,8 @@ async def create_subscription(
     sub_id: Optional[str],
     days: int,
     traffic_gb: int,
+    *,
+    display_name: Optional[str] = None,
 ) -> int:
     now = datetime.utcnow()
     end = now + timedelta(days=days)
@@ -322,13 +364,74 @@ async def create_subscription(
         cursor = await db.execute(
             """INSERT INTO subscriptions 
                (tg_id, order_id, inbound_id, client_email, client_uuid, sub_id, 
-                start_date, end_date, traffic_limit_gb, is_active)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
+                start_date, end_date, traffic_limit_gb, is_active, display_name)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)""",
             (tg_id, order_id, inbound_id, client_email, client_uuid, sub_id,
-             now.isoformat(), end.isoformat(), traffic_gb)
+             now.isoformat(), end.isoformat(), traffic_gb, display_name)
         )
         await db.commit()
         return cursor.lastrowid
+
+
+async def update_subscription_display_name(subscription_id: int, display_name: str) -> bool:
+    name = (display_name or "").strip()
+    if not name:
+        return False
+    async with get_db() as db:
+        cur = await db.execute(
+            "UPDATE subscriptions SET display_name = ? WHERE id = ?",
+            (name, subscription_id),
+        )
+        await db.commit()
+        return cur.rowcount > 0
+
+
+async def count_paid_subscriptions(tg_id: int, *, active_only: bool = False) -> int:
+    query = (
+        "SELECT COUNT(*) FROM subscriptions "
+        "WHERE tg_id = ? AND client_email NOT LIKE 'tgfree%'"
+    )
+    params: list = [tg_id]
+    if active_only:
+        query += " AND is_active = 1"
+    async with get_db() as db:
+        async with db.execute(query, params) as cur:
+            return int((await cur.fetchone())[0])
+
+
+async def suggest_subscription_display_name(tg_id: int) -> str:
+    n = await count_paid_subscriptions(tg_id) + 1
+    return "Моя подписка" if n == 1 else f"Подписка {n}"
+
+
+async def allocate_client_email(tg_id: int) -> str:
+    base = f"tg{tg_id}"
+    async with get_db() as db:
+        async with db.execute(
+            """SELECT client_email FROM subscriptions
+               WHERE tg_id = ? AND client_email NOT LIKE 'tgfree%'""",
+            (tg_id,),
+        ) as cur:
+            emails = {row[0] for row in await cur.fetchall()}
+    if base not in emails:
+        return base
+    n = 2
+    while f"{base}_{n}" in emails:
+        n += 1
+    return f"{base}_{n}"
+
+
+async def get_active_paid_subscriptions(tg_id: int) -> List[Dict[str, Any]]:
+    async with get_db() as db:
+        async with db.execute(
+            """SELECT * FROM subscriptions
+               WHERE tg_id = ? AND is_active = 1
+                 AND client_email NOT LIKE 'tgfree%'
+               ORDER BY end_date DESC""",
+            (tg_id,),
+        ) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
 
 async def get_primary_subscription(tg_id: int) -> Optional[Dict[str, Any]]:
     async with get_db() as db:

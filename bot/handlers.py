@@ -39,11 +39,8 @@ from services.payment_flow import (
 )
 from services.payment_processor import handle_platega_status
 from services.pricing import get_plan_quote, list_plans, quote_from_order
-from services.subscription_sync import (
-    get_active_subscriptions_for_ui,
-    get_primary_paid_subscription_for_ui,
-    get_primary_subscription_for_ui,
-)
+from services.subscription_labels import normalize_display_name, subscription_display_name
+from services.subscription_sync import get_active_subscriptions_for_ui
 from services.promo_redeem import redeem_promo_code
 from services.trial import claim_trial, get_trial_button_visible
 from services.xui import build_sub_link
@@ -59,8 +56,12 @@ from .keyboards import (
     subscriptions_manage_kb,
     no_subscription_kb,
     back_to_main_kb,
+    fulfillment_success_kb,
     payment_failed_kb,
     trial_confirm_kb,
+    extend_sub_picker_kb,
+    purchase_action_kb,
+    sub_name_prompt_kb,
 )
 from .messages import (
     EXTEND_BLOCKED_REFUND_PENDING_MSG,
@@ -76,6 +77,10 @@ from .messages import (
     pending_payment_text,
     promo_enter_text,
     trial_offer_text,
+    sub_name_prompt_text,
+    sub_rename_prompt_text,
+    extend_sub_picker_text,
+    purchase_action_text,
 )
 from .states import UserStates
 
@@ -99,6 +104,51 @@ async def _checkout_quote(
 
 async def _clear_promo_input_state(state: FSMContext) -> None:
     await state.set_state(None)
+
+
+async def _user_has_paid_subs(tg_id: int) -> bool:
+    paid = await db.get_active_paid_subscriptions(tg_id)
+    return bool(paid)
+
+
+async def _resolve_extend_subscription_id(
+    tg_id: int,
+    state: FSMContext,
+    *,
+    subscription_id: int | None = None,
+) -> int | None:
+    if subscription_id:
+        sub = await db.get_subscription_by_id(subscription_id)
+        if sub and sub["tg_id"] == tg_id and sub.get("is_active"):
+            if not is_trial_email(sub.get("client_email")):
+                return subscription_id
+        return None
+
+    data = await state.get_data()
+    stored = data.get("extend_subscription_id")
+    if stored:
+        sub = await db.get_subscription_by_id(int(stored))
+        if sub and sub["tg_id"] == tg_id and sub.get("is_active"):
+            if not is_trial_email(sub.get("client_email")):
+                return int(stored)
+
+    paid_subs = await db.get_active_paid_subscriptions(tg_id)
+    if len(paid_subs) == 1:
+        return paid_subs[0]["id"]
+    return None
+
+
+async def _show_extend_sub_picker(
+    cb: CallbackQuery,
+    paid_subs: list[dict],
+    *,
+    plan_id: str | None = None,
+) -> None:
+    await send_or_edit(
+        cb,
+        extend_sub_picker_text(paid_subs),
+        extend_sub_picker_kb(paid_subs, plan_id=plan_id),
+    )
 
 
 def _message_command(text: str) -> str | None:
@@ -265,13 +315,13 @@ async def cb_trial_confirm(cb: CallbackQuery):
 @router.callback_query(F.data == "tariffs")
 async def cb_tariffs(cb: CallbackQuery, state: FSMContext):
     await _clear_promo_input_state(state)
-    sub = await get_primary_subscription_for_ui(cb.from_user.id)
+    has_paid = await _user_has_paid_subs(cb.from_user.id)
     extend_blocked = await tickets_db.is_extend_blocked_by_pending_refund(cb.from_user.id)
     plans = await list_plans()
     await safe_cb_answer(cb)
     await send_or_edit(
         cb,
-        plans_menu_text(has_active_sub=sub is not None and not extend_blocked),
+        plans_menu_text(has_active_sub=has_paid and not extend_blocked),
         plans_kb(plans),
     )
 
@@ -283,8 +333,76 @@ async def cb_select_plan(cb: CallbackQuery, state: FSMContext):
     if not quote:
         await safe_cb_answer(cb, "Тариф не найден", show_alert=True)
         return
-    sub = await get_primary_subscription_for_ui(cb.from_user.id)
+    has_paid = await _user_has_paid_subs(cb.from_user.id)
     extend_blocked = await tickets_db.is_extend_blocked_by_pending_refund(cb.from_user.id)
+    await safe_cb_answer(cb)
+    if has_paid:
+        await send_or_edit(
+            cb,
+            purchase_action_text(quote.plan, quote=quote),
+            purchase_action_kb(plan_id, can_extend=not extend_blocked),
+        )
+        return
+    methods = await pay_methods_db.get_enabled_payment_methods()
+    if not methods:
+        await safe_cb_answer(cb, "Способы оплаты временно недоступны", show_alert=True)
+        return
+    await send_or_edit(
+        cb,
+        plan_card_text(quote.plan, quote=quote),
+        payment_methods_kb(plan_id, methods=methods, quote=quote),
+    )
+
+
+@router.callback_query(F.data.startswith("purchase_new:"))
+async def cb_purchase_new(cb: CallbackQuery, state: FSMContext):
+    plan_id = cb.data.split(":", 1)[1]
+    quote = await _checkout_quote(state, plan_id, cb.from_user.id)
+    if not quote:
+        await safe_cb_answer(cb, "Тариф не найден", show_alert=True)
+        return
+    methods = await pay_methods_db.get_enabled_payment_methods()
+    if not methods:
+        await safe_cb_answer(cb, "Способы оплаты временно недоступны", show_alert=True)
+        return
+    await state.update_data(extend_subscription_id=None)
+    await safe_cb_answer(cb)
+    await send_or_edit(
+        cb,
+        plan_card_text(quote.plan, quote=quote),
+        payment_methods_kb(
+            plan_id,
+            methods=methods,
+            quote=quote,
+            back_callback=f"select_plan:{plan_id}",
+        ),
+    )
+
+
+@router.callback_query(F.data.startswith("purchase_extend:"))
+async def cb_purchase_extend(cb: CallbackQuery, state: FSMContext):
+    if await tickets_db.is_extend_blocked_by_pending_refund(cb.from_user.id):
+        await safe_cb_answer(cb, EXTEND_BLOCKED_REFUND_PENDING_MSG, show_alert=True)
+        return
+    plan_id = cb.data.split(":", 1)[1]
+    quote = await _checkout_quote(state, plan_id, cb.from_user.id)
+    if not quote:
+        await safe_cb_answer(cb, "Тариф не найден", show_alert=True)
+        return
+    paid_subs = await db.get_active_paid_subscriptions(cb.from_user.id)
+    if not paid_subs:
+        await safe_cb_answer(cb, "Нет активной подписки", show_alert=True)
+        return
+    if len(paid_subs) > 1:
+        await safe_cb_answer(cb)
+        await send_or_edit(
+            cb,
+            extend_sub_picker_text(paid_subs),
+            extend_sub_picker_kb(paid_subs, plan_id=plan_id),
+        )
+        return
+    sub_id = paid_subs[0]["id"]
+    await state.update_data(extend_subscription_id=sub_id)
     methods = await pay_methods_db.get_enabled_payment_methods()
     if not methods:
         await safe_cb_answer(cb, "Способы оплаты временно недоступны", show_alert=True)
@@ -294,10 +412,58 @@ async def cb_select_plan(cb: CallbackQuery, state: FSMContext):
         cb,
         plan_card_text(
             quote.plan,
-            has_active_sub=sub is not None and not extend_blocked,
+            extend=True,
             quote=quote,
+            extending_sub_name=subscription_display_name(paid_subs[0]),
         ),
-        payment_methods_kb(plan_id, methods=methods, quote=quote),
+        payment_methods_kb(
+            plan_id,
+            methods=methods,
+            extend=True,
+            quote=quote,
+            back_callback=f"select_plan:{plan_id}",
+            extend_sub_id=sub_id,
+        ),
+    )
+
+
+@router.callback_query(F.data.regexp(r"^purchase_extend_sub:[^:]+:\d+$"))
+async def cb_purchase_extend_sub(cb: CallbackQuery, state: FSMContext):
+    if await tickets_db.is_extend_blocked_by_pending_refund(cb.from_user.id):
+        await safe_cb_answer(cb, EXTEND_BLOCKED_REFUND_PENDING_MSG, show_alert=True)
+        return
+    _, plan_id, sub_id_str = cb.data.split(":", 2)
+    sub_id = int(sub_id_str)
+    sub = await db.get_subscription_by_id(sub_id)
+    if not sub or sub["tg_id"] != cb.from_user.id or not sub.get("is_active"):
+        await safe_cb_answer(cb, "Подписка не найдена", show_alert=True)
+        return
+    quote = await _checkout_quote(state, plan_id, cb.from_user.id)
+    if not quote:
+        await safe_cb_answer(cb, "Тариф не найден", show_alert=True)
+        return
+    methods = await pay_methods_db.get_enabled_payment_methods()
+    if not methods:
+        await safe_cb_answer(cb, "Способы оплаты временно недоступны", show_alert=True)
+        return
+    await state.update_data(extend_subscription_id=sub_id)
+    await safe_cb_answer(cb)
+    await send_or_edit(
+        cb,
+        plan_card_text(
+            quote.plan,
+            extend=True,
+            quote=quote,
+            extending_sub_name=subscription_display_name(sub),
+        ),
+        payment_methods_kb(
+            plan_id,
+            methods=methods,
+            extend=True,
+            quote=quote,
+            back_callback=f"select_plan:{plan_id}",
+            extend_sub_id=sub_id,
+        ),
     )
 
 
@@ -311,22 +477,46 @@ async def cb_extend_plan(cb: CallbackQuery, state: FSMContext):
     if not quote:
         await safe_cb_answer(cb, "Тариф не найден", show_alert=True)
         return
+
+    sub_id = await _resolve_extend_subscription_id(cb.from_user.id, state)
+    if not sub_id:
+        paid_subs = await db.get_active_paid_subscriptions(cb.from_user.id)
+        if len(paid_subs) > 1:
+            await safe_cb_answer(cb)
+            await _show_extend_sub_picker(cb, paid_subs)
+            return
+        await safe_cb_answer(cb, "Выберите подписку для продления", show_alert=True)
+        return
+
+    sub = await db.get_subscription_by_id(sub_id)
     methods = await pay_methods_db.get_enabled_payment_methods()
     if not methods:
         await safe_cb_answer(cb, "Способы оплаты временно недоступны", show_alert=True)
         return
+    await state.update_data(extend_subscription_id=sub_id)
     await safe_cb_answer(cb)
     await send_or_edit(
         cb,
-        plan_card_text(quote.plan, extend=True, quote=quote),
-        payment_methods_kb(plan_id, methods=methods, extend=True, quote=quote),
+        plan_card_text(
+            quote.plan,
+            extend=True,
+            quote=quote,
+            extending_sub_name=subscription_display_name(sub) if sub else None,
+        ),
+        payment_methods_kb(
+            plan_id,
+            methods=methods,
+            extend=True,
+            quote=quote,
+            extend_sub_id=sub_id,
+        ),
     )
 
 
 @router.callback_query(F.data.startswith("pay:"))
 async def cb_pay(cb: CallbackQuery, state: FSMContext):
     _, plan_id, method_key = cb.data.split(":", 2)
-    await _start_payment(cb, plan_id, method_key, order_type="new", state=state)
+    await _prompt_sub_display_name(cb, state, plan_id, method_key)
 
 
 @router.callback_query(F.data.startswith("pay_extend:"))
@@ -334,12 +524,110 @@ async def cb_pay_extend(cb: CallbackQuery, state: FSMContext):
     if await tickets_db.is_extend_blocked_by_pending_refund(cb.from_user.id):
         await safe_cb_answer(cb, EXTEND_BLOCKED_REFUND_PENDING_MSG, show_alert=True)
         return
-    _, plan_id, method_key = cb.data.split(":", 2)
-    sub = await get_primary_subscription_for_ui(cb.from_user.id)
-    if not sub:
-        await safe_cb_answer(cb, "Нет активной подписки", show_alert=True)
+    parts = cb.data.split(":")
+    plan_id = parts[1]
+    method_key = parts[2]
+    explicit_sub_id = int(parts[3]) if len(parts) > 3 else None
+    subscription_id = await _resolve_extend_subscription_id(
+        cb.from_user.id,
+        state,
+        subscription_id=explicit_sub_id,
+    )
+    if not subscription_id:
+        paid_subs = await db.get_active_paid_subscriptions(cb.from_user.id)
+        if len(paid_subs) > 1:
+            await safe_cb_answer(cb)
+            await _show_extend_sub_picker(cb, paid_subs, plan_id=plan_id)
+            return
+        await safe_cb_answer(cb, "Выберите подписку для продления", show_alert=True)
         return
-    await _start_payment(cb, plan_id, method_key, order_type="extend", state=state)
+    await state.update_data(extend_subscription_id=subscription_id)
+    await _start_payment(
+        cb,
+        plan_id,
+        method_key,
+        order_type="extend",
+        state=state,
+        subscription_id=subscription_id,
+    )
+
+
+async def _prompt_sub_display_name(
+    cb: CallbackQuery,
+    state: FSMContext,
+    plan_id: str,
+    method_key: str,
+) -> None:
+    quote = await _checkout_quote(state, plan_id, cb.from_user.id)
+    method = get_payment_method_by_key(method_key)
+    if not quote or not method:
+        await safe_cb_answer(cb, "Неверные данные оплаты", show_alert=True)
+        return
+    if not await pay_methods_db.is_payment_method_enabled(method_key):
+        await safe_cb_answer(cb, "Этот способ оплаты отключён", show_alert=True)
+        return
+
+    default_name = await db.suggest_subscription_display_name(cb.from_user.id)
+    await state.set_state(UserStates.waiting_sub_display_name)
+    await state.update_data(
+        pending_plan_id=plan_id,
+        pending_method_key=method_key,
+        pending_sub_display_name=default_name,
+    )
+    await safe_cb_answer(cb)
+    await send_or_edit(cb, sub_name_prompt_text(default_name), sub_name_prompt_kb())
+
+
+@router.callback_query(F.data == "sub_name_confirm")
+async def cb_sub_name_confirm(cb: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    plan_id = data.get("pending_plan_id")
+    method_key = data.get("pending_method_key")
+    display_name = data.get("pending_sub_display_name")
+    if not plan_id or not method_key or not display_name:
+        await safe_cb_answer(cb, "Сессия истекла", show_alert=True)
+        await state.clear()
+        return
+    await state.set_state(None)
+    await _start_payment(
+        cb,
+        plan_id,
+        method_key,
+        order_type="new",
+        state=state,
+        sub_display_name=display_name,
+    )
+
+
+@router.message(UserStates.waiting_sub_display_name)
+async def msg_sub_display_name(message: Message, state: FSMContext):
+    data = await state.get_data()
+    plan_id = data.get("pending_plan_id")
+    method_key = data.get("pending_method_key")
+    if not plan_id or not method_key:
+        await state.clear()
+        await message.answer("Сессия истекла.", reply_markup=back_to_main_kb())
+        return
+
+    name = normalize_display_name(message.text or "")
+    if not name:
+        await message.answer(
+            "❌ Название: 1–32 символа, буквы, цифры и обычная пунктуация.",
+            reply_markup=sub_name_prompt_kb(),
+        )
+        return
+
+    await state.set_state(None)
+    await state.update_data(pending_sub_display_name=name)
+    await message.answer("⏳ Создаём счёт на оплату...")
+    await _start_payment_message(
+        message,
+        plan_id,
+        method_key,
+        order_type="new",
+        state=state,
+        sub_display_name=name,
+    )
 
 
 def _payment_metadata(cb: CallbackQuery, plan_id: str, order_type: str) -> dict:
@@ -357,42 +645,95 @@ def _payment_description(plan_name: str, *, extend: bool) -> str:
     return f"{action}: {plan_name}"
 
 
-async def _start_payment(
-    cb: CallbackQuery,
+async def _start_payment_message(
+    message: Message,
     plan_id: str,
     method_key: str,
     *,
     order_type: str,
     state: FSMContext,
+    subscription_id: int | None = None,
+    sub_display_name: str | None = None,
+) -> None:
+    class _MsgTarget:
+        from_user = message.from_user
+        message = message
+        bot = message.bot
+
+        async def answer(self, *args, **kwargs):
+            return await message.answer(*args, **kwargs)
+
+    target = _MsgTarget()
+    await _start_payment(
+        target,
+        plan_id,
+        method_key,
+        order_type=order_type,
+        state=state,
+        subscription_id=subscription_id,
+        sub_display_name=sub_display_name,
+        from_message=True,
+    )
+
+
+async def _start_payment(
+    cb: CallbackQuery | object,
+    plan_id: str,
+    method_key: str,
+    *,
+    order_type: str,
+    state: FSMContext,
+    subscription_id: int | None = None,
+    sub_display_name: str | None = None,
+    from_message: bool = False,
 ):
-    quote = await _checkout_quote(state, plan_id, cb.from_user.id)
+    tg_id = cb.from_user.id
+    quote = await _checkout_quote(state, plan_id, tg_id)
     method = get_payment_method_by_key(method_key)
     if not quote or not method:
-        await safe_cb_answer(cb, "Неверные данные оплаты", show_alert=True)
+        if from_message:
+            await cb.answer("Неверные данные оплаты", reply_markup=back_to_main_kb())
+        else:
+            await safe_cb_answer(cb, "Неверные данные оплаты", show_alert=True)
         return
     if not await pay_methods_db.is_payment_method_enabled(method_key):
-        await safe_cb_answer(cb, "Этот способ оплаты отключён", show_alert=True)
+        if from_message:
+            await cb.answer("Этот способ оплаты отключён", reply_markup=back_to_main_kb())
+        else:
+            await safe_cb_answer(cb, "Этот способ оплаты отключён", show_alert=True)
         return
 
     plan = quote.plan
-
     extend = order_type == "extend"
-    existing_sub = await db.get_primary_subscription(cb.from_user.id)
-    if extend or (
-        existing_sub and not is_trial_email(existing_sub.get("client_email"))
-    ):
-        if await tickets_db.is_extend_blocked_by_pending_refund(cb.from_user.id):
-            await safe_cb_answer(cb, EXTEND_BLOCKED_REFUND_PENDING_MSG, show_alert=True)
+    if extend:
+        if await tickets_db.is_extend_blocked_by_pending_refund(tg_id):
+            if from_message:
+                await cb.answer(EXTEND_BLOCKED_REFUND_PENDING_MSG, reply_markup=back_to_main_kb())
+            else:
+                await safe_cb_answer(cb, EXTEND_BLOCKED_REFUND_PENDING_MSG, show_alert=True)
+            return
+        if not subscription_id:
+            if from_message:
+                await cb.answer("Выберите подписку для продления", reply_markup=back_to_main_kb())
+            else:
+                await safe_cb_answer(cb, "Выберите подписку для продления", show_alert=True)
             return
 
-    await safe_cb_answer(cb)
-    has_active_sub = existing_sub is not None and not extend
+    if not from_message:
+        await safe_cb_answer(cb)
+    has_active_sub = await _user_has_paid_subs(tg_id) and not extend
+
+    async def _payment_reply(text: str, kb=None) -> None:
+        if from_message:
+            await cb.message.answer(text, reply_markup=kb)
+        else:
+            await send_or_edit(cb, text, kb)
 
     bot_username = (await cb.bot.get_me()).username
     return_url, failed_url = get_return_urls(bot_username)
     metadata = _payment_metadata(cb, plan_id, order_type)
     description = _payment_description(plan["name"], extend=extend)
-    payload = f"tg:{cb.from_user.id}:{plan_id}:{order_type}"
+    payload = f"tg:{tg_id}:{plan_id}:{order_type}"
     req = build_create_request(
         quote.final_price,
         description=description,
@@ -405,18 +746,23 @@ async def _start_payment(
     preview = format_request_preview(req["path"], req["body"])
 
     if settings.TEST_MODE:
-        await send_or_edit(
-            cb,
+        await _payment_reply(
             test_payment_text(
                 plan, method["name"], method["emoji"],
                 extend=extend, has_active_sub=has_active_sub, quote=quote,
                 request_preview=preview,
             ),
-            test_scenario_kb(plan_id, method_key, extend=extend),
+            test_scenario_kb(
+                plan_id,
+                method_key,
+                extend=extend,
+                extend_sub_id=subscription_id if extend else None,
+            ),
         )
         return
 
-    await send_or_edit(cb, "⏳ Создаём счёт на оплату...")
+    if not from_message:
+        await _payment_reply("⏳ Создаём счёт на оплату...")
     try:
         tx = await create_transaction(
             amount=quote.final_price,
@@ -429,26 +775,25 @@ async def _start_payment(
         )
     except PlategaAPIError as e:
         logger.exception("Platega error: {}", e)
-        await send_or_edit(cb, format_create_error_message(e), back_to_main_kb())
+        await _payment_reply(format_create_error_message(e), back_to_main_kb())
         return
     except Exception as e:
         logger.exception("Platega error: {}", e)
-        await send_or_edit(cb, format_create_error_message(e), back_to_main_kb())
+        await _payment_reply(format_create_error_message(e), back_to_main_kb())
         return
 
     parsed = parse_create_response(tx)
     tx_id = parsed["tx_id"]
     redirect = parsed["redirect"]
     if not tx_id or not redirect:
-        await send_or_edit(
-            cb,
+        await _payment_reply(
             "❌ Не удалось получить ссылку на оплату.",
             back_to_main_kb(),
         )
         return
 
     await db.create_order(
-        tg_id=cb.from_user.id,
+        tg_id=tg_id,
         plan_id=plan_id,
         plan_name=plan["name"],
         amount=quote.final_price,
@@ -459,6 +804,8 @@ async def _start_payment(
         original_amount=quote.base_price,
         discount_amount=quote.discount_amount,
         payment_redirect=redirect,
+        subscription_id=subscription_id,
+        sub_display_name=sub_display_name,
     )
     order = await db.get_order_by_platega_tx(tx_id) or {
         "created_at": None,
@@ -466,8 +813,7 @@ async def _start_payment(
     }
     expires_in = parsed.get("expires_in") or expires_in_from_order_created(order.get("created_at"))
 
-    await send_or_edit(
-        cb,
+    await _payment_reply(
         pending_payment_text(
             plan, method["name"],
             extend=extend, has_active_sub=has_active_sub, quote=quote,
@@ -479,17 +825,41 @@ async def _start_payment(
 
 @router.callback_query(F.data.startswith("test_scenario:"))
 async def cb_test_scenario(cb: CallbackQuery, state: FSMContext):
-    _, plan_id, method_key, scenario, ext_flag = cb.data.split(":", 4)
+    parts = cb.data.split(":")
+    plan_id = parts[1]
+    method_key = parts[2]
+    scenario = parts[3]
+    ext_flag = parts[4]
+    explicit_sub_id = int(parts[5]) if len(parts) > 5 and parts[4] == "1" else None
     order_type = "extend" if ext_flag == "1" else "new"
+    subscription_id = None
     if order_type == "extend":
         if await tickets_db.is_extend_blocked_by_pending_refund(cb.from_user.id):
             await safe_cb_answer(cb, EXTEND_BLOCKED_REFUND_PENDING_MSG, show_alert=True)
             return
-        sub = await get_primary_subscription_for_ui(cb.from_user.id)
-        if not sub:
-            await safe_cb_answer(cb, "Нет активной подписки", show_alert=True)
+        subscription_id = await _resolve_extend_subscription_id(
+            cb.from_user.id,
+            state,
+            subscription_id=explicit_sub_id,
+        )
+        if not subscription_id:
+            paid_subs = await db.get_active_paid_subscriptions(cb.from_user.id)
+            if len(paid_subs) > 1:
+                await safe_cb_answer(cb)
+                await _show_extend_sub_picker(cb, paid_subs, plan_id=plan_id)
+                return
+            await safe_cb_answer(cb, "Выберите подписку для продления", show_alert=True)
             return
-    await _apply_test_scenario(cb, plan_id, method_key, scenario, order_type=order_type, state=state)
+        await state.update_data(extend_subscription_id=subscription_id)
+    await _apply_test_scenario(
+        cb,
+        plan_id,
+        method_key,
+        scenario,
+        order_type=order_type,
+        state=state,
+        subscription_id=subscription_id,
+    )
 
 
 async def _apply_test_scenario(
@@ -500,6 +870,7 @@ async def _apply_test_scenario(
     *,
     order_type: str,
     state: FSMContext,
+    subscription_id: int | None = None,
 ):
     quote = await _checkout_quote(state, plan_id, cb.from_user.id)
     method = get_payment_method_by_key(method_key)
@@ -512,14 +883,15 @@ async def _apply_test_scenario(
 
     plan = quote.plan
     extend = order_type == "extend"
-    existing_sub = await db.get_primary_subscription(cb.from_user.id)
-    if extend or (
-        existing_sub and not is_trial_email(existing_sub.get("client_email"))
-    ):
+    if extend:
         if await tickets_db.is_extend_blocked_by_pending_refund(cb.from_user.id):
             await safe_cb_answer(cb, EXTEND_BLOCKED_REFUND_PENDING_MSG, show_alert=True)
             return
-    has_active_sub = existing_sub is not None and not extend
+    has_active_sub = await _user_has_paid_subs(cb.from_user.id) and not extend
+    data = await state.get_data()
+    if extend and not subscription_id:
+        subscription_id = await _resolve_extend_subscription_id(cb.from_user.id, state)
+    sub_display_name = None if extend else data.get("pending_sub_display_name")
 
     if scenario == platega_sim.SCENARIO_CREATE_ERROR:
         await safe_cb_answer(cb)
@@ -593,6 +965,8 @@ async def _apply_test_scenario(
         original_amount=quote.base_price,
         discount_amount=quote.discount_amount,
         payment_redirect=redirect or "",
+        subscription_id=subscription_id,
+        sub_display_name=sub_display_name,
     )
 
     if scenario == platega_sim.SCENARIO_PENDING:
@@ -647,9 +1021,7 @@ async def _apply_test_scenario(
             text=result.user_message,
             photo=result.photo,
             link_message=result.link_message,
-            setup_text=result.setup_text,
-            setup_photos=result.setup_photos or None,
-            reply_markup=back_to_main_kb(),
+            reply_markup=fulfillment_success_kb(),
         )
         return
 
@@ -673,7 +1045,7 @@ async def _pending_payment_view(
     method = get_payment_method_by_key(order.get("payment_method") or "")
     quote = quote_from_order(order, plan)
     extend = (order.get("order_type") or "new") == "extend"
-    existing_sub = await db.get_primary_subscription(order["tg_id"])
+    has_paid = await db.count_paid_subscriptions(order["tg_id"], active_only=True) > 0
     expires_in = await fetch_pending_expires_in(tx_id, order)
     redirect = (order.get("payment_redirect") or "").strip()
     if not redirect and settings.TEST_MODE and tx_id.startswith("test-"):
@@ -686,7 +1058,7 @@ async def _pending_payment_view(
         plan,
         method["name"] if method else "—",
         extend=extend,
-        has_active_sub=existing_sub is not None and not extend,
+        has_active_sub=has_paid and not extend,
         quote=quote,
         expires_in=expires_in,
         test_mode=is_test,
@@ -736,9 +1108,7 @@ async def _respond_payment_flow(cb: CallbackQuery, order: dict, tx_id: str, flow
             text=result.user_message,
             photo=result.photo,
             link_message=result.link_message,
-            setup_text=result.setup_text,
-            setup_photos=result.setup_photos or None,
-            reply_markup=back_to_main_kb(),
+            reply_markup=fulfillment_success_kb(),
         )
         return
     if status == "PENDING":
@@ -886,17 +1256,99 @@ async def cb_extend_menu(cb: CallbackQuery, state: FSMContext):
     if await tickets_db.is_extend_blocked_by_pending_refund(cb.from_user.id):
         await safe_cb_answer(cb, EXTEND_BLOCKED_REFUND_PENDING_MSG, show_alert=True)
         return
-    sub = await get_primary_paid_subscription_for_ui(cb.from_user.id)
-    if not sub:
+    paid_subs = await db.get_active_paid_subscriptions(cb.from_user.id)
+    if not paid_subs:
         await safe_cb_answer(cb, "Нет активной подписки", show_alert=True)
         return
+    if len(paid_subs) == 1:
+        await state.update_data(extend_subscription_id=paid_subs[0]["id"])
+        plans = await list_plans()
+        await safe_cb_answer(cb)
+        await send_or_edit(
+            cb,
+            f"🔄 <b>Продление: {subscription_display_name(paid_subs[0])}</b>\n\n"
+            "Выберите срок продления:",
+            plans_kb(plans, extend=True),
+        )
+        return
+    await safe_cb_answer(cb)
+    await _show_extend_sub_picker(cb, paid_subs)
+
+
+@router.callback_query(F.data.startswith("extend_sub:"))
+async def cb_extend_sub(cb: CallbackQuery, state: FSMContext):
+    if await tickets_db.is_extend_blocked_by_pending_refund(cb.from_user.id):
+        await safe_cb_answer(cb, EXTEND_BLOCKED_REFUND_PENDING_MSG, show_alert=True)
+        return
+    sub_id = int(cb.data.split(":", 1)[1])
+    sub = await db.get_subscription_by_id(sub_id)
+    if not sub or sub["tg_id"] != cb.from_user.id or not sub.get("is_active"):
+        await safe_cb_answer(cb, "Подписка не найдена", show_alert=True)
+        return
+    if is_trial_email(sub.get("client_email")):
+        await safe_cb_answer(cb, "Пробную подписку нельзя продлить", show_alert=True)
+        return
+    await state.update_data(extend_subscription_id=sub_id)
     plans = await list_plans()
     await safe_cb_answer(cb)
     await send_or_edit(
         cb,
-        "🔄 <b>Продление подписки</b>\n\nВыберите срок продления:",
+        f"🔄 <b>Продление: {subscription_display_name(sub)}</b>\n\nВыберите срок:",
         plans_kb(plans, extend=True),
     )
+
+
+@router.callback_query(F.data.regexp(r"^manage_sub:\d+$"))
+async def cb_manage_sub_detail(cb: CallbackQuery):
+    sub_id = int(cb.data.split(":", 1)[1])
+    from .tickets import show_subscription_detail
+    await show_subscription_detail(cb, cb.from_user.id, sub_id)
+
+
+@router.callback_query(F.data.startswith("sub_rename:"))
+async def cb_sub_rename(cb: CallbackQuery, state: FSMContext):
+    sub_id = int(cb.data.split(":", 1)[1])
+    sub = await db.get_subscription_by_id(sub_id)
+    if not sub or sub["tg_id"] != cb.from_user.id:
+        await safe_cb_answer(cb, "Подписка не найдена", show_alert=True)
+        return
+    await state.set_state(UserStates.waiting_sub_rename)
+    await state.update_data(rename_subscription_id=sub_id)
+    await safe_cb_answer(cb)
+    from aiogram.types import InlineKeyboardMarkup
+    from .keyboards import nav_row
+    await send_or_edit(
+        cb,
+        sub_rename_prompt_text(subscription_display_name(sub)),
+        InlineKeyboardMarkup(inline_keyboard=[nav_row(f"manage_sub:{sub_id}")]),
+    )
+
+
+@router.message(UserStates.waiting_sub_rename)
+async def msg_sub_rename(message: Message, state: FSMContext):
+    data = await state.get_data()
+    sub_id = data.get("rename_subscription_id")
+    if not sub_id:
+        await state.clear()
+        await message.answer("Сессия истекла.", reply_markup=back_to_main_kb())
+        return
+
+    name = normalize_display_name(message.text or "")
+    if not name:
+        await message.answer("❌ Название: 1–32 символа, буквы, цифры и обычная пунктуация.")
+        return
+
+    sub = await db.get_subscription_by_id(int(sub_id))
+    if not sub or sub["tg_id"] != message.from_user.id:
+        await state.clear()
+        await message.answer("Подписка не найдена.", reply_markup=back_to_main_kb())
+        return
+
+    await db.update_subscription_display_name(int(sub_id), name)
+    await state.clear()
+    await message.answer(f"✅ Подписка переименована в <b>{name}</b>")
+    from .tickets import show_subscription_detail
+    await show_subscription_detail(message, message.from_user.id, int(sub_id))
 
 
 @router.message(UserStates.waiting_promo_code)
@@ -957,9 +1409,7 @@ async def msg_promo_code(message: Message, state: FSMContext):
             text=result.fulfillment.text,
             photo=result.fulfillment.photo,
             link_message=result.fulfillment.link_message,
-            setup_text=result.fulfillment.setup_text,
-            setup_photos=result.fulfillment.setup_photos or None,
-            reply_markup=back_to_main_kb(),
+            reply_markup=fulfillment_success_kb(),
         )
         return
 

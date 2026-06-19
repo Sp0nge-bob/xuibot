@@ -17,10 +17,13 @@ from config.plans import Plan
 from config.settings import settings
 from config.trial import TRIAL_COOLDOWN_DAYS, TRIAL_DAYS, TRIAL_TRAFFIC_GB, is_trial_email
 from services.pricing import PriceQuote
+from services.subscription_labels import subscription_display_name, subscription_short_label
 
 
 def _sub_kind_label(sub: Dict[str, Any]) -> str:
-    return "🎁 Пробная" if is_trial_email(sub.get("client_email")) else "✅ Платная"
+    if is_trial_email(sub.get("client_email")):
+        return "🎁 Пробная"
+    return f"📱 {subscription_display_name(sub)}"
 
 
 def _sub_menu_line(sub: Dict[str, Any]) -> str:
@@ -167,8 +170,42 @@ def plans_menu_text(*, has_active_sub: bool = False) -> str:
     hint = renewal_hint(has_active_sub=has_active_sub) or None
     return screen(
         "📦 <b>Тарифы</b>",
-        "Выберите подходящий план — после этого откроется выбор способа оплаты.",
+        "Выберите подходящий план.",
         hint=hint,
+    )
+
+
+def purchase_action_text(plan: Plan, quote: PriceQuote | None = None) -> str:
+    return screen(
+        f"📦 <b>{plan['name']}</b>",
+        _price_block(quote, plan),
+        hint="Продлить одну из ваших подписок или оформить новую?",
+    )
+
+
+def sub_name_prompt_text(default_name: str) -> str:
+    return screen(
+        "📱 <b>Название подписки</b>",
+        "Как назвать новую подписку? Так будет проще отличать её в списке.",
+        f"По умолчанию: <b>{default_name}</b>",
+        hint="Отправьте своё название (до 32 символов) или нажмите «Продолжить».",
+    )
+
+
+def sub_rename_prompt_text(current_name: str) -> str:
+    return screen(
+        "✏️ <b>Переименование</b>",
+        f"Текущее название: <b>{current_name}</b>",
+        hint="Отправьте новое название (до 32 символов).",
+    )
+
+
+def extend_sub_picker_text(subs: List[Dict[str, Any]]) -> str:
+    lines = [f"• {subscription_short_label(sub)}" for sub in subs]
+    return screen(
+        "🔄 <b>Продление подписки</b>",
+        "Выберите, какую подписку продлить:",
+        "\n".join(lines),
     )
 
 
@@ -195,9 +232,15 @@ def plan_card_text(
     extend: bool = False,
     has_active_sub: bool = False,
     quote: PriceQuote | None = None,
+    extending_sub_name: str | None = None,
 ) -> str:
     is_renewal = extend or has_active_sub
-    action = "Продление" if is_renewal else "Тариф"
+    if extend and extending_sub_name:
+        action = f"Продление: {extending_sub_name}"
+    elif is_renewal:
+        action = "Продление"
+    else:
+        action = "Тариф"
     hint_parts = [renewal_hint(extend=extend, has_active_sub=has_active_sub), "Выберите способ оплаты:"]
     hint = "\n".join(p for p in hint_parts if p) or None
     return screen(
@@ -287,7 +330,7 @@ def _subscription_detail_block(
     left = days_left(sub["end_date"])
     traffic = traffic_label(sub.get("traffic_limit_gb", 0))
     lines = [
-        f"<b>{_sub_kind_label(sub)}</b>",
+        f"📱 <b>{subscription_display_name(sub)}</b>",
         f"📅 Действует до: <b>{end}</b> ({left} дн.)",
         f"📊 Трафик: {traffic}",
     ]
@@ -305,8 +348,9 @@ def subscription_manage_text(
     *,
     limit_ip: int | None = None,
 ) -> str:
+    title = subscription_display_name(sub)
     return screen(
-        "⚙️ <b>Подписка</b>",
+        f"⚙️ <b>{title}</b>",
         _subscription_detail_block(sub, sub_link, limit_ip=limit_ip),
         hint="Что хотите сделать?",
     )

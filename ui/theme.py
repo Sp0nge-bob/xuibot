@@ -126,9 +126,9 @@ def plan_specs_table(plan: Plan, *, quote_final: int | None = None) -> str:
 
 def renewal_hint(*, extend: bool = False, has_active_sub: bool = False) -> str:
     if extend:
-        return "Срок добавится к текущей подписке."
+        return "Срок добавится к выбранной подписке."
     if has_active_sub:
-        return "У вас уже есть подписка — оплата её продлит, новый ключ не создаётся."
+        return "После выбора тарифа можно продлить текущую подписку или оформить новую."
     return ""
 
 
