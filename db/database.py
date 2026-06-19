@@ -409,7 +409,8 @@ async def allocate_client_email(tg_id: int) -> str:
     async with get_db() as db:
         async with db.execute(
             """SELECT client_email FROM subscriptions
-               WHERE tg_id = ? AND client_email NOT LIKE 'tgfree%'""",
+               WHERE tg_id = ? AND is_active = 1
+                 AND client_email NOT LIKE 'tgfree%'""",
             (tg_id,),
         ) as cur:
             emails = {row[0] for row in await cur.fetchall()}
