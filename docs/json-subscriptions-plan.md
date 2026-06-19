@@ -1,5 +1,7 @@
 # JSON-подписки с балансировкой — план внедрения
 
+> **Статус: отложено.** Код в боте не реализован; материалы ниже — заготовка на будущее. Текущий прод: text-подписки через `SUBSCRIPTION_BASE_URL` + `/api/v4/GET/{sub_id}`.
+
 См. также: [report/JSON_SUBSCRIPTIONS_DEEP_DIVE.md](../report/JSON_SUBSCRIPTIONS_DEEP_DIVE.md), [json-subscription-template-setup.md](json-subscription-template-setup.md).
 
 ## Цель
