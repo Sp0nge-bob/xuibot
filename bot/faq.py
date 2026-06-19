@@ -64,11 +64,7 @@ async def cb_faq_builtin_activation(cb: CallbackQuery):
     if not article:
         await safe_cb_answer(cb, "Статья не найдена", show_alert=True)
         return
-    await safe_cb_answer(cb)
-    try:
-        await cb.message.delete()
-    except Exception:
-        pass
+    await safe_cb_answer(cb, "Инструкция ниже")
     await _open_faq_article(cb.message.bot, cb.message.chat.id, article)
 
 
