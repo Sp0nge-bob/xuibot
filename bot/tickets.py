@@ -14,7 +14,6 @@ from .keyboards import (
     refund_confirm_kb,
     refund_pick_kb,
     subscription_manage_kb,
-    subscriptions_manage_kb,
     support_menu_kb,
     ticket_category_kb,
     ticket_view_kb,
