@@ -630,10 +630,10 @@ async def msg_sub_display_name(message: Message, state: FSMContext):
     )
 
 
-def _payment_metadata(cb: CallbackQuery, plan_id: str, order_type: str) -> dict:
-    user_name = cb.from_user.username or cb.from_user.first_name or str(cb.from_user.id)
+def _payment_metadata(user, plan_id: str, order_type: str) -> dict:
+    user_name = user.username or user.first_name or str(user.id)
     return {
-        "userId": str(cb.from_user.id),
+        "userId": str(user.id),
         "userName": user_name,
         "planId": plan_id,
         "orderType": order_type,
@@ -655,17 +655,8 @@ async def _start_payment_message(
     subscription_id: int | None = None,
     sub_display_name: str | None = None,
 ) -> None:
-    class _MsgTarget:
-        from_user = message.from_user
-        message = message
-        bot = message.bot
-
-        async def answer(self, *args, **kwargs):
-            return await message.answer(*args, **kwargs)
-
-    target = _MsgTarget()
     await _start_payment(
-        target,
+        message,
         plan_id,
         method_key,
         order_type=order_type,
@@ -677,7 +668,7 @@ async def _start_payment_message(
 
 
 async def _start_payment(
-    cb: CallbackQuery | object,
+    cb: CallbackQuery | Message,
     plan_id: str,
     method_key: str,
     *,
@@ -687,18 +678,23 @@ async def _start_payment(
     sub_display_name: str | None = None,
     from_message: bool = False,
 ):
-    tg_id = cb.from_user.id
+    if from_message:
+        message = cb
+        tg_id = message.from_user.id
+    else:
+        message = cb.message
+        tg_id = cb.from_user.id
     quote = await _checkout_quote(state, plan_id, tg_id)
     method = get_payment_method_by_key(method_key)
     if not quote or not method:
         if from_message:
-            await cb.answer("Неверные данные оплаты", reply_markup=back_to_main_kb())
+            await message.answer("Неверные данные оплаты", reply_markup=back_to_main_kb())
         else:
             await safe_cb_answer(cb, "Неверные данные оплаты", show_alert=True)
         return
     if not await pay_methods_db.is_payment_method_enabled(method_key):
         if from_message:
-            await cb.answer("Этот способ оплаты отключён", reply_markup=back_to_main_kb())
+            await message.answer("Этот способ оплаты отключён", reply_markup=back_to_main_kb())
         else:
             await safe_cb_answer(cb, "Этот способ оплаты отключён", show_alert=True)
         return
@@ -708,13 +704,13 @@ async def _start_payment(
     if extend:
         if await tickets_db.is_extend_blocked_by_pending_refund(tg_id):
             if from_message:
-                await cb.answer(EXTEND_BLOCKED_REFUND_PENDING_MSG, reply_markup=back_to_main_kb())
+                await message.answer(EXTEND_BLOCKED_REFUND_PENDING_MSG, reply_markup=back_to_main_kb())
             else:
                 await safe_cb_answer(cb, EXTEND_BLOCKED_REFUND_PENDING_MSG, show_alert=True)
             return
         if not subscription_id:
             if from_message:
-                await cb.answer("Выберите подписку для продления", reply_markup=back_to_main_kb())
+                await message.answer("Выберите подписку для продления", reply_markup=back_to_main_kb())
             else:
                 await safe_cb_answer(cb, "Выберите подписку для продления", show_alert=True)
             return
@@ -725,13 +721,14 @@ async def _start_payment(
 
     async def _payment_reply(text: str, kb=None) -> None:
         if from_message:
-            await cb.message.answer(text, reply_markup=kb)
+            await message.answer(text, reply_markup=kb)
         else:
             await send_or_edit(cb, text, kb)
 
-    bot_username = (await cb.bot.get_me()).username
+    bot_username = (await message.bot.get_me()).username
     return_url, failed_url = get_return_urls(bot_username)
-    metadata = _payment_metadata(cb, plan_id, order_type)
+    payer = message.from_user if from_message else cb.from_user
+    metadata = _payment_metadata(payer, plan_id, order_type)
     description = _payment_description(plan["name"], extend=extend)
     payload = f"tg:{tg_id}:{plan_id}:{order_type}"
     req = build_create_request(
@@ -916,7 +913,7 @@ async def _apply_test_scenario(
     await safe_cb_answer(cb, scenario_labels.get(scenario, "Симулируем…"))
     bot_username = (await cb.bot.get_me()).username
     return_url, failed_url = get_return_urls(bot_username)
-    metadata = _payment_metadata(cb, plan_id, order_type)
+    metadata = _payment_metadata(cb.from_user, plan_id, order_type)
     description = _payment_description(plan["name"], extend=extend)
     payload = f"tg:{cb.from_user.id}:{plan_id}:{order_type}"
 
