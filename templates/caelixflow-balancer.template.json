@@ -1,0 +1,146 @@
+{
+  "remarks": "__REMARKS__",
+  "meta": {
+    "serverDescription": "VPN Bot • NL+US balancer",
+    "userId": "__USER_ID__",
+    "clientEmail": "__CLIENT_EMAIL__",
+    "createdAt": "__CREATED_AT__",
+    "templateVersion": "__TEMPLATE_VERSION__"
+  },
+  "log": {
+    "loglevel": "warning"
+  },
+  "dns": {
+    "servers": [
+      {
+        "address": "1.1.1.1",
+        "port": 53
+      },
+      {
+        "address": "8.8.8.8",
+        "port": 53
+      }
+    ]
+  },
+  "inbounds": [
+    {
+      "tag": "socks-in",
+      "port": 10808,
+      "listen": "127.0.0.1",
+      "protocol": "socks",
+      "settings": {
+        "auth": "noauth",
+        "udp": true
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "direct",
+      "protocol": "freedom"
+    },
+    {
+      "tag": "block",
+      "protocol": "blackhole"
+    },
+    {
+      "tag": "srv_nl",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "cdn.example.com",
+            "port": 443,
+            "users": [
+              {
+                "id": "__UUID__",
+                "encryption": "none",
+                "flow": ""
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "ws",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "cdn.example.com",
+          "fingerprint": "random",
+          "alpn": [
+            "http/1.1",
+            "h2"
+          ]
+        },
+        "wsSettings": {
+          "path": "/httptunnel",
+          "headers": {}
+        }
+      }
+    },
+    {
+      "tag": "srv_us",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "mirror2.example.com",
+            "port": 443,
+            "users": [
+              {
+                "id": "__UUID__",
+                "encryption": "none",
+                "flow": ""
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "ws",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "mirror2.example.com",
+          "fingerprint": "random",
+          "alpn": [
+            "http/1.1",
+            "h2"
+          ]
+        },
+        "wsSettings": {
+          "path": "/httptunnel",
+          "headers": {}
+        }
+      }
+    }
+  ],
+  "routing": {
+    "domainStrategy": "AsIs",
+    "balancers": [
+      {
+        "tag": "caelix-balancer",
+        "selector": [
+          "srv_nl",
+          "srv_us"
+        ],
+        "strategy": {
+          "type": "random"
+        }
+      }
+    ],
+    "rules": [
+      {
+        "type": "field",
+        "outboundTag": "direct",
+        "ip": [
+          "geoip:private"
+        ]
+      },
+      {
+        "type": "field",
+        "balancerTag": "caelix-balancer",
+        "network": "tcp,udp"
+      }
+    ]
+  }
+}
