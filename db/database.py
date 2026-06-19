@@ -400,7 +400,7 @@ async def count_paid_subscriptions(tg_id: int, *, active_only: bool = False) -> 
 
 
 async def suggest_subscription_display_name(tg_id: int) -> str:
-    n = await count_paid_subscriptions(tg_id) + 1
+    n = await count_paid_subscriptions(tg_id, active_only=True) + 1
     return "Моя подписка" if n == 1 else f"Подписка {n}"
 
 
