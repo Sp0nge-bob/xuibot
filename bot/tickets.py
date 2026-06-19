@@ -14,6 +14,7 @@ from .keyboards import (
     refund_confirm_kb,
     refund_pick_kb,
     subscription_manage_kb,
+    sub_email_search_kb,
     support_menu_kb,
     ticket_category_kb,
     ticket_view_kb,
@@ -25,10 +26,12 @@ from .messages import (
     refund_pick_text,
     refund_request_sent_text,
     support_menu_text,
+    sub_email_search_prompt_text,
     ticket_session_banner_text,
     ticket_view_text,
 )
 from .states import UserStates
+from services.subscription_search import match_subscription_by_email, normalize_email_query
 from .ticket_chat import (
     clear_active_session,
     relay_ticket_message,
@@ -104,6 +107,59 @@ async def _enter_ticket_session(
         if prev and prev != ticket_id:
             await cb.answer(f"Переключились на тикет #{ticket_id}")
         await cb.answer(text, reply_markup=kb)
+
+
+@router.callback_query(F.data == "sub_search_email")
+async def cb_sub_search_email(cb: CallbackQuery, state: FSMContext):
+    subs = await get_active_subscriptions_for_ui(cb.from_user.id)
+    if len(subs) < 2:
+        await safe_cb_answer(cb, "Поиск доступен при нескольких подписках", show_alert=True)
+        return
+    await state.set_state(UserStates.waiting_sub_email_search)
+    await safe_cb_answer(cb)
+    await send_or_edit(cb, sub_email_search_prompt_text(), sub_email_search_kb())
+
+
+@router.message(UserStates.waiting_sub_email_search)
+async def msg_sub_email_search(message: Message, state: FSMContext):
+    raw = message.text or ""
+    cmd = _message_command(raw)
+    if cmd == "/start":
+        await state.clear()
+        from .handlers import _show_main_menu
+        await _show_main_menu(message, state=state)
+        return
+    if cmd == "/subscription":
+        await state.clear()
+        await show_subscriptions_manage(message, message.from_user.id)
+        return
+    if cmd:
+        return
+
+    query = raw.strip()
+    if not query:
+        await message.answer(
+            "❌ Введите email, например <code>tg123456789_2</code>",
+            reply_markup=sub_email_search_kb(),
+        )
+        return
+    if not normalize_email_query(query):
+        await message.answer(
+            "❌ Формат: <code>tg123456789</code> или <code>tg123456789_2</code>",
+            reply_markup=sub_email_search_kb(),
+        )
+        return
+
+    subs = await get_active_subscriptions_for_ui(message.from_user.id)
+    sub = match_subscription_by_email(subs, query)
+    await state.set_state(None)
+    if not sub:
+        await message.answer(
+            f"🔍 Подписка <code>{query}</code> не найдена среди ваших активных.",
+            reply_markup=sub_email_search_kb(),
+        )
+        return
+    await show_subscription_detail(message, message.from_user.id, sub["id"])
 
 
 @router.callback_query(F.data == "support")

@@ -248,8 +248,19 @@ def subscriptions_picker_kb(subs: list[dict]) -> InlineKeyboardMarkup:
         )]
         for sub in subs
     ]
+    if len(subs) > 1:
+        rows.append([InlineKeyboardButton(
+            text="🔍 Поиск по email",
+            callback_data="sub_search_email",
+        )])
     rows.append([InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def sub_email_search_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        nav_row("manage_sub"),
+    ])
 
 
 def subscription_manage_kb(

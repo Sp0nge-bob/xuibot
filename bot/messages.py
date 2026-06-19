@@ -362,7 +362,18 @@ def subscriptions_picker_text(subs: List[Dict[str, Any]]) -> str:
         "⚙️ <b>Подписки</b>",
         f"Активных: <b>{len(subs)}</b>",
         "\n".join(lines),
-        hint="Выберите подписку — откроются детали и действия.",
+        hint="Выберите подписку или найдите по email клиента (tg…).",
+    )
+
+
+def sub_email_search_prompt_text() -> str:
+    return screen(
+        "🔍 <b>Поиск подписки</b>",
+        "Отправьте email клиента с панели, например:",
+        "• <code>tg123456789</code>\n"
+        "• <code>tg123456789_2</code>\n"
+        "• <code>tgfree123456789</code>",
+        hint="Можно ввести только цифры — бот подставит префикс tg.",
     )
 
 

@@ -209,6 +209,7 @@ async def cb_admin_users_search(cb: CallbackQuery, state: FSMContext):
         "• <code>@username</code> или <code>username</code>\n"
         "• <code>123456789</code> — Telegram ID\n"
         "• <code>tg123456789</code> — платный клиент\n"
+        "• <code>tg123456789_2</code> — вторая подписка\n"
         "• <code>tgfree123456789</code> — пробный клиент\n\n"
         "Для отмены: /admin",
         admin_back_kb(),

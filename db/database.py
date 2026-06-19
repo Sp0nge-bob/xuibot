@@ -690,14 +690,21 @@ async def search_connected_users(query: str, limit: int = 25) -> List[Dict[str, 
     """
     async with get_db() as db:
 
-        if q.isdigit():
+        from services.subscription_search import normalize_email_query
+
+        email_q = normalize_email_query(q)
+        if email_q:
+            sql = base_sql + " AND LOWER(s.client_email) = LOWER(?) ORDER BY s.end_date DESC LIMIT ?"
+            params: tuple = (email_q, limit)
+        elif q.isdigit():
             from config.trial import trial_client_email
             tg_id = int(q)
             sql = base_sql + (
-                " AND (u.tg_id = ? OR s.client_email = ? OR s.client_email = ?)"
+                " AND (u.tg_id = ? OR s.client_email = ? OR s.client_email = ?"
+                " OR s.client_email LIKE ?)"
                 " ORDER BY s.end_date DESC LIMIT ?"
             )
-            params: tuple = (tg_id, f"tg{tg_id}", trial_client_email(tg_id), limit)
+            params = (tg_id, f"tg{tg_id}", trial_client_email(tg_id), f"tg{tg_id}_%", limit)
         else:
             pattern = f"%{q}%"
             sql = base_sql + """
