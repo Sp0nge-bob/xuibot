@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     FULL_SYNC_INTERVAL_HOURS: int = 24
     # Проверка истекших подписок (disable на панели) — bot/scheduler.py
     EXPIRED_CHECK_INTERVAL_HOURS: int = 1
+    # Напоминание об окончании подписки (за N дней, не чаще раза в сутки)
+    EXPIRY_REMINDER_ENABLED: bool = True
+    EXPIRY_REMINDER_DAYS: int = 3
+    EXPIRY_REMINDER_INTERVAL_HOURS: int = 24
     SUBSCRIPTION_SYNC_DEBOUNCE_SEC: int = 60
 
     # Пока бот настроен на одну ноду.

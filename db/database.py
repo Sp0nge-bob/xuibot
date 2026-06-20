@@ -137,6 +137,10 @@ async def _init_db_impl():
             sub_cols = {row[1] for row in await cur.fetchall()}
         if "display_name" not in sub_cols:
             await db.execute("ALTER TABLE subscriptions ADD COLUMN display_name TEXT")
+        if "expiry_reminder_sent_at" not in sub_cols:
+            await db.execute(
+                "ALTER TABLE subscriptions ADD COLUMN expiry_reminder_sent_at TIMESTAMP"
+            )
         await _create_indexes(db)
         await db.commit()
 
@@ -495,13 +499,16 @@ async def reactivate_subscription_record(
         if order_id is not None:
             await db.execute(
                 """UPDATE subscriptions
-                   SET end_date = ?, is_active = 1, order_id = ?
+                   SET end_date = ?, is_active = 1, order_id = ?,
+                       expiry_reminder_sent_at = NULL
                    WHERE id = ?""",
                 (end_iso, order_id, subscription_id),
             )
         else:
             await db.execute(
-                "UPDATE subscriptions SET end_date = ?, is_active = 1 WHERE id = ?",
+                """UPDATE subscriptions
+                   SET end_date = ?, is_active = 1, expiry_reminder_sent_at = NULL
+                   WHERE id = ?""",
                 (end_iso, subscription_id),
             )
         await db.commit()
@@ -537,7 +544,9 @@ async def extend_subscription_record(subscription_id: int, additional_days: int)
     new_end = base + timedelta(days=additional_days)
     async with get_db() as db:
         await db.execute(
-            "UPDATE subscriptions SET end_date = ?, is_active = 1 WHERE id = ?",
+            """UPDATE subscriptions
+               SET end_date = ?, is_active = 1, expiry_reminder_sent_at = NULL
+               WHERE id = ?""",
             (new_end.isoformat(), subscription_id),
         )
         await db.commit()
@@ -638,6 +647,46 @@ async def get_expired_subscriptions() -> List[Dict[str, Any]]:
         ) as cur:
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
+
+
+async def get_subscriptions_needing_expiry_reminder(
+    *,
+    days_before: int = 3,
+    min_hours_since_reminder: int = 24,
+) -> List[Dict[str, Any]]:
+    """Активные платные подписки в окне [сейчас; сейчас+days_before], без напоминания за min_hours."""
+    now = datetime.utcnow()
+    now_iso = now.isoformat()
+    window_end_iso = (now + timedelta(days=days_before)).isoformat()
+    reminder_cutoff_iso = (now - timedelta(hours=min_hours_since_reminder)).isoformat()
+    async with get_db() as db:
+        async with db.execute(
+            """SELECT * FROM subscriptions
+               WHERE is_active = 1
+                 AND client_email NOT LIKE 'tgfree%'
+                 AND end_date > ?
+                 AND end_date <= ?
+                 AND (expiry_reminder_sent_at IS NULL OR expiry_reminder_sent_at < ?)
+               ORDER BY end_date ASC""",
+            (now_iso, window_end_iso, reminder_cutoff_iso),
+        ) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+
+async def mark_expiry_reminders_sent(subscription_ids: List[int]) -> None:
+    if not subscription_ids:
+        return
+    now_iso = datetime.utcnow().isoformat()
+    placeholders = ",".join("?" * len(subscription_ids))
+    async with get_db() as db:
+        await db.execute(
+            f"""UPDATE subscriptions
+                SET expiry_reminder_sent_at = ?
+                WHERE id IN ({placeholders})""",
+            [now_iso, *subscription_ids],
+        )
+        await db.commit()
 
 async def deactivate_subscription(sub_id: int):
     async with get_db() as db:

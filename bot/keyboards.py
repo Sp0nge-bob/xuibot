@@ -439,6 +439,13 @@ def no_subscription_kb() -> InlineKeyboardMarkup:
     ])
 
 
+def expiry_reminder_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=BTN_TARIFFS, callback_data="tariffs")],
+        [InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")],
+    ])
+
+
 def trial_confirm_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Активировать", callback_data="trial_confirm")],

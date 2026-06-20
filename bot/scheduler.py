@@ -1,5 +1,5 @@
 """
-Планировщик: health нод, истечение подписок, синхронизация нод, ежедневный бэкап.
+Планировщик: health нод, истечение подписок, напоминания, синхронизация нод, бэкап.
 """
 import asyncio
 
@@ -12,6 +12,7 @@ from services.xui import disable_client
 from services.node_sync import sync_all_secondary_nodes
 from services.node_health import check_all_nodes_health
 from services.backup import run_scheduled_backup
+from services.expiry_reminders import send_expiry_reminders
 
 scheduler = AsyncIOScheduler()
 
@@ -40,6 +41,17 @@ async def expire_stale_pending_orders_job():
     count = await db.expire_stale_pending_orders(settings.STALE_PENDING_ORDER_HOURS)
     if count:
         logger.info("Expired {} stale pending orders", count)
+
+
+async def expiry_reminder_job():
+    stats = await send_expiry_reminders()
+    if stats["sent"] or stats["failed"]:
+        logger.info(
+            "Expiry reminders: sent={} failed={} subs={}",
+            stats["sent"],
+            stats["failed"],
+            stats["subs"],
+        )
 
 
 async def check_nodes_health_job():
@@ -92,6 +104,13 @@ def start_scheduler():
         id="check_expired",
     )
     scheduler.add_job(expire_stale_pending_orders_job, "interval", hours=6, id="expire_stale_pending")
+    if settings.EXPIRY_REMINDER_ENABLED:
+        scheduler.add_job(
+            expiry_reminder_job,
+            "interval",
+            hours=settings.EXPIRY_REMINDER_INTERVAL_HOURS,
+            id="expiry_reminder",
+        )
     if settings.BACKUP_ENABLED:
         scheduler.add_job(
             run_scheduled_backup,
@@ -102,9 +121,10 @@ def start_scheduler():
         )
     scheduler.start()
     logger.info(
-        "Scheduler started (sync {}h, expiry {}h, stale pending 6h, backup {}:00 UTC)",
+        "Scheduler started (sync {}h, expiry {}h, reminders {}h, stale pending 6h, backup {}:00 UTC)",
         settings.FULL_SYNC_INTERVAL_HOURS,
         settings.EXPIRED_CHECK_INTERVAL_HOURS,
+        settings.EXPIRY_REMINDER_INTERVAL_HOURS if settings.EXPIRY_REMINDER_ENABLED else "off",
         settings.BACKUP_HOUR_UTC if settings.BACKUP_ENABLED else "off",
     )
 
