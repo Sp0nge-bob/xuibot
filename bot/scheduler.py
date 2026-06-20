@@ -17,12 +17,24 @@ from services.expiry_reminders import send_expiry_reminders
 scheduler = AsyncIOScheduler()
 
 
+async def heartbeat_job():
+    stats = await db.get_admin_stats()
+    logger.info(
+        "Пульс: users={} paid_subs={} trial_subs={} paid_orders={}",
+        stats.get("users", 0),
+        stats.get("paid_subs", 0),
+        stats.get("trial_subs", 0),
+        stats.get("paid_orders", 0),
+    )
+
+
 async def check_expired_subscriptions():
-    logger.info("Checking expired subscriptions...")
     expired = await db.get_expired_subscriptions()
     if not expired:
+        logger.info("Истечение подписок: просроченных нет")
         return
 
+    logger.info("Истечение подписок: отключаем {}", len(expired))
     sem = asyncio.Semaphore(settings.XUI_PANEL_CONCURRENCY)
 
     async def _one(sub: dict) -> None:
@@ -30,9 +42,14 @@ async def check_expired_subscriptions():
             try:
                 await disable_client(sub["client_email"])
                 await db.deactivate_subscription(sub["id"])
-                logger.info("Deactivated expired subscription for tg_id={}", sub["tg_id"])
+                logger.info(
+                    "Подписка #{} отключена (tg_id={}, email={})",
+                    sub["id"],
+                    sub["tg_id"],
+                    sub["client_email"],
+                )
             except Exception as e:
-                logger.error("Error deactivating sub {}: {}", sub["id"], e)
+                logger.error("Ошибка отключения подписки #{}: {}", sub["id"], e)
 
     await asyncio.gather(*[_one(sub) for sub in expired])
 
@@ -40,22 +57,36 @@ async def check_expired_subscriptions():
 async def expire_stale_pending_orders_job():
     count = await db.expire_stale_pending_orders(settings.STALE_PENDING_ORDER_HOURS)
     if count:
-        logger.info("Expired {} stale pending orders", count)
+        logger.info("Старые pending-заказы: помечено failed={}", count)
+    else:
+        logger.info("Старые pending-заказы: очистка не требуется")
 
 
 async def expiry_reminder_job():
     stats = await send_expiry_reminders()
-    if stats["sent"] or stats["failed"]:
-        logger.info(
-            "Expiry reminders: sent={} failed={} subs={}",
-            stats["sent"],
-            stats["failed"],
-            stats["subs"],
-        )
+    logger.info(
+        "Напоминания о сроке: отправлено={} ошибок={} подписок в окне={}",
+        stats["sent"],
+        stats["failed"],
+        stats["subs"],
+    )
 
 
 async def check_nodes_health_job():
-    await check_all_nodes_health()
+    results = await check_all_nodes_health()
+    if not results:
+        logger.info("Health нод: нет включённых нод")
+        return
+    ok = sum(1 for r in results if r.get("ok"))
+    if ok == len(results):
+        logger.info("Health нод: {}/{} доступны", ok, len(results))
+    else:
+        bad = [
+            f"{r.get('name') or r.get('node_id')} ({r.get('error') or 'fail'})"
+            for r in results
+            if not r.get("ok")
+        ]
+        logger.warning("Health нод: {}/{} доступны, проблемы: {}", ok, len(results), "; ".join(bad))
 
 
 async def run_full_nodes_sync(*, source: str) -> None:
@@ -63,15 +94,15 @@ async def run_full_nodes_sync(*, source: str) -> None:
     from db import bot_settings as bot_settings_db
 
     if await bot_settings_db.is_sync_disabled():
-        logger.info("Full nodes sync skipped ({}) — disabled in admin", source)
+        logger.info("Синк нод пропущен ({}) — выключен в админке", source)
         return
 
-    logger.info("Full nodes sync ({})", source)
+    logger.info("Синк нод старт ({})", source)
     try:
         stats = await sync_all_secondary_nodes()
         logger.info(
-            "Full nodes sync done ({source}): subs={subs} nodes={nodes} ok={ok} failed={failed} "
-            "primary_created={primary_created} primary_updated={primary_updated} purged={purged}",
+            "Синк нод готов ({source}): subs={subs} nodes={nodes} ok={ok} failed={failed} "
+            "created={primary_created} updated={primary_updated} purged={purged}",
             source=source,
             subs=stats.get("subs", 0),
             nodes=stats.get("nodes", 0),
@@ -82,14 +113,16 @@ async def run_full_nodes_sync(*, source: str) -> None:
             purged=stats.get("purged", 0),
         )
     except Exception as e:
-        logger.exception("Full nodes sync failed ({source}): {}", source, e)
+        logger.exception("Синк нод ошибка ({source}): {}", source, e)
 
 
 async def scheduled_full_nodes_sync():
-    await run_full_nodes_sync(source=f"every {settings.FULL_SYNC_INTERVAL_HOURS}h")
+    await run_full_nodes_sync(source=f"каждые {settings.FULL_SYNC_INTERVAL_HOURS}ч")
 
 
 def start_scheduler():
+    heartbeat_min = max(1, int(settings.LOG_HEARTBEAT_INTERVAL_MINUTES))
+    scheduler.add_job(heartbeat_job, "interval", minutes=heartbeat_min, id="heartbeat")
     scheduler.add_job(check_nodes_health_job, "interval", minutes=5, id="check_nodes_health")
     scheduler.add_job(
         scheduled_full_nodes_sync,
@@ -121,15 +154,17 @@ def start_scheduler():
         )
     scheduler.start()
     logger.info(
-        "Scheduler started (sync {}h, expiry {}h, reminders {}h, stale pending 6h, backup {}:00 UTC)",
+        "Планировщик: пульс {}мин, health 5мин, синк {}ч, истечение {}ч, "
+        "напоминания {}, pending 6ч, бэкап {}:00 UTC → лог data/logs/bot.log",
+        heartbeat_min,
         settings.FULL_SYNC_INTERVAL_HOURS,
         settings.EXPIRED_CHECK_INTERVAL_HOURS,
-        settings.EXPIRY_REMINDER_INTERVAL_HOURS if settings.EXPIRY_REMINDER_ENABLED else "off",
-        settings.BACKUP_HOUR_UTC if settings.BACKUP_ENABLED else "off",
+        f"{settings.EXPIRY_REMINDER_INTERVAL_HOURS}ч" if settings.EXPIRY_REMINDER_ENABLED else "выкл",
+        settings.BACKUP_HOUR_UTC if settings.BACKUP_ENABLED else "выкл",
     )
 
 
 def stop_scheduler() -> None:
     if scheduler.running:
         scheduler.shutdown(wait=False)
-        logger.info("Scheduler stopped")
+        logger.info("Планировщик остановлен")

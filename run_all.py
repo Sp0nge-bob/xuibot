@@ -10,13 +10,13 @@ Ctrl+C останавливает оба.
 """
 from __future__ import annotations
 
+import os
 import signal
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-from config.settings import settings
 from db.database import clear_init_marker
 
 _ROOT = Path(__file__).resolve().parent
@@ -78,7 +78,7 @@ def _shutdown(*_args: object) -> None:
 
 
 def _preflight() -> None:
-    if settings.START_BOT_IN_WEBAPP:
+    if os.environ.get("START_BOT_IN_WEBAPP", "false").lower() in ("true", "1", "yes"):
         print(
             "Ошибка: START_BOT_IN_WEBAPP=true несовместим с run_all.py.\n"
             "Поставьте START_BOT_IN_WEBAPP=false в .env или запустите только python app.py."
@@ -100,6 +100,7 @@ def main() -> None:
     web_proc = _start("app.py")
     _PROCS.append(("app.py", web_proc))
     print("Both processes started. Press Ctrl+C to stop.")
+    print("Логи: tail -f data/logs/bot.log")
 
     try:
         while True:

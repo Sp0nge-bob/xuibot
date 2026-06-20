@@ -63,13 +63,4 @@ async def check_all_nodes_health() -> list[dict[str, Any]]:
                 }
 
     results = list(await asyncio.gather(*[_one(n) for n in nodes]))
-    for r in results:
-        if r.get("ok"):
-            continue
-        logger.warning(
-            "Node {} ({}) unhealthy: {}",
-            r.get("node_id"),
-            r.get("name"),
-            r.get("error") or "unknown",
-        )
     return results

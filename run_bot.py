@@ -1,3 +1,7 @@
+from config.logging_setup import init_logging
+
+init_logging("bot")
+
 """
 Запуск Telegram-бота (polling) — отдельный процесс от webhook.
 
@@ -17,6 +21,9 @@ from db.database import init_db
 
 
 async def _main() -> None:
+    from config.settings import warn_unsafe_runtime_config
+
+    warn_unsafe_runtime_config()
     install_shutdown_handlers()
     await init_db()
     from bot import start_bot

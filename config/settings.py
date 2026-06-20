@@ -96,7 +96,8 @@ class Settings(BaseSettings):
 
     LOG_LEVEL: str = "INFO"
     LOG_DIR: str = "data/logs"
-    LOG_SESSION_RETAIN: int = 5
+    LOG_RETAIN_DAYS: int = 7
+    LOG_HEARTBEAT_INTERVAL_MINUTES: int = 60
 
     # Ежедневный бэкап БД в ЛС админам (run_bot.py + планировщик)
     BACKUP_ENABLED: bool = True
@@ -158,20 +159,17 @@ settings = Settings()
 
 def warn_unsafe_runtime_config() -> None:
     """Предупреждение при опасной конфигурации (TEST_MODE + production webhook)."""
+    from config.logging_setup import ensure_logging
     from loguru import logger
 
+    ensure_logging(
+        "misc",
+        level=settings.LOG_LEVEL,
+        log_dir=settings.LOG_DIR,
+        retain_days=settings.LOG_RETAIN_DAYS,
+    )
     if settings.TEST_MODE and (settings.PUBLIC_WEBHOOK_URL or "").strip():
         logger.warning(
             "TEST_MODE=true при заданном PUBLIC_WEBHOOK_URL — "
             "для продакшена установите TEST_MODE=false"
         )
-
-
-from config.logging_setup import setup_logging
-
-setup_logging(
-    level=settings.LOG_LEVEL,
-    log_dir=settings.LOG_DIR,
-    session_retain=settings.LOG_SESSION_RETAIN,
-)
-warn_unsafe_runtime_config()

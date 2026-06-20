@@ -4,6 +4,10 @@ import sys
 if sys.platform.startswith("win"):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
+from config.logging_setup import init_logging
+
+init_logging("webhook")
+
 """
 Webhook-сервер Platega (FastAPI).
 
@@ -16,7 +20,9 @@ from fastapi import FastAPI, Request, HTTPException, Header
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from config.settings import settings
+from config.settings import settings, warn_unsafe_runtime_config
+
+warn_unsafe_runtime_config()
 from db.database import init_db
 from db.connection import close_connection
 from services.platega_client import verify_callback_headers

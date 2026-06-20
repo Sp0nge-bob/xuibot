@@ -34,15 +34,15 @@ def _sqlite_backup_file(src: Path, dest: Path) -> None:
 
 
 def _collect_log_paths() -> list[Path]:
-    from config.logging_setup import current_session_log_path
+    from config.logging_setup import current_log_path
 
     paths: list[Path] = []
-    session = current_session_log_path()
-    if session and session.is_file():
-        paths.append(session)
+    main_log = current_log_path()
+    if main_log and main_log.is_file():
+        paths.append(main_log)
     log_dir = Path(settings.LOG_DIR)
     if log_dir.is_dir():
-        for p in sorted(log_dir.glob("bot_*.log"), key=lambda x: x.stat().st_mtime, reverse=True)[:3]:
+        for p in sorted(log_dir.glob("bot.log.*"), key=lambda x: x.stat().st_mtime, reverse=True)[:2]:
             if p not in paths and p.is_file():
                 paths.append(p)
     return paths
