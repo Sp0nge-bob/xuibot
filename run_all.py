@@ -100,7 +100,8 @@ def main() -> None:
     web_proc = _start("app.py")
     _PROCS.append(("app.py", web_proc))
     print("Both processes started. Press Ctrl+C to stop.")
-    print("Логи: tail -f data/logs/bot.log")
+    print("Логи сессии: tail -f data/logs/bot.log")
+    print("Архивы после остановки: data/logs/botlog_*.log")
 
     try:
         while True:

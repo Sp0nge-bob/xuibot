@@ -96,7 +96,7 @@ class Settings(BaseSettings):
 
     LOG_LEVEL: str = "INFO"
     LOG_DIR: str = "data/logs"
-    LOG_RETAIN_DAYS: int = 7
+    LOG_ARCHIVE_RETAIN: int = 5
     LOG_HEARTBEAT_INTERVAL_MINUTES: int = 60
 
     # Ежедневный бэкап БД в ЛС админам (run_bot.py + планировщик)
@@ -166,7 +166,7 @@ def warn_unsafe_runtime_config() -> None:
         "misc",
         level=settings.LOG_LEVEL,
         log_dir=settings.LOG_DIR,
-        retain_days=settings.LOG_RETAIN_DAYS,
+        archive_retain=settings.LOG_ARCHIVE_RETAIN,
     )
     if settings.TEST_MODE and (settings.PUBLIC_WEBHOOK_URL or "").strip():
         logger.warning(

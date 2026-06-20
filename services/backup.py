@@ -42,7 +42,7 @@ def _collect_log_paths() -> list[Path]:
         paths.append(main_log)
     log_dir = Path(settings.LOG_DIR)
     if log_dir.is_dir():
-        for p in sorted(log_dir.glob("bot.log.*"), key=lambda x: x.stat().st_mtime, reverse=True)[:2]:
+        for p in sorted(log_dir.glob("botlog_*.log"), key=lambda x: x.stat().st_mtime, reverse=True)[:2]:
             if p not in paths and p.is_file():
                 paths.append(p)
     return paths

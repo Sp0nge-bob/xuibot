@@ -172,6 +172,10 @@ async def graceful_shutdown(*, reason: str = "shutdown") -> None:
         _shutdown_done = True
         logger.info("Бот остановлен ({})", reason)
 
+        from config.logging_setup import shutdown_session_logging
+
+        shutdown_session_logging(reason=reason)
+
     _shutdown_task = None
 
 

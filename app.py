@@ -65,6 +65,9 @@ async def lifespan(app: FastAPI):
         await stop_bot()
     await close_connection()
     logger.info("Shutdown complete")
+    from config.logging_setup import shutdown_session_logging
+
+    shutdown_session_logging(reason="webhook_shutdown")
 
 
 app = FastAPI(title="VPN Platega Bot", lifespan=lifespan)

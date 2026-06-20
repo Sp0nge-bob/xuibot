@@ -155,7 +155,7 @@ def start_scheduler():
     scheduler.start()
     logger.info(
         "Планировщик: пульс {}мин, health 5мин, синк {}ч, истечение {}ч, "
-        "напоминания {}, pending 6ч, бэкап {}:00 UTC → лог data/logs/bot.log",
+        "напоминания {}, pending 6ч, бэкап {}:00 UTC → tail -f data/logs/bot.log",
         heartbeat_min,
         settings.FULL_SYNC_INTERVAL_HOURS,
         settings.EXPIRED_CHECK_INTERVAL_HOURS,
