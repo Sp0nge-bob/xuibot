@@ -33,11 +33,41 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="📢 /start", callback_data="adm:start_text"),
+            InlineKeyboardButton(text="📄 Документы", callback_data="adm:legal"),
         ],
         [InlineKeyboardButton(text="💾 Бэкап", callback_data="adm:backup")],
     ]
     if settings.ALLOW_DEBUG_ADMIN:
         rows.append([InlineKeyboardButton(text="🧪 Отладка", callback_data="adm:debug")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_legal_kb(
+    *,
+    privacy_custom: bool = False,
+    terms_custom: bool = False,
+) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(
+            text="🔒 Политика конфиденциальности",
+            callback_data="adm:legal:edit:privacy",
+        )],
+        [InlineKeyboardButton(
+            text="📜 Пользовательское соглашение",
+            callback_data="adm:legal:edit:terms",
+        )],
+    ]
+    if privacy_custom:
+        rows.append([InlineKeyboardButton(
+            text="↩️ Сбросить политику (дефолт)",
+            callback_data="adm:legal:reset:privacy",
+        )])
+    if terms_custom:
+        rows.append([InlineKeyboardButton(
+            text="↩️ Сбросить соглашение (дефолт)",
+            callback_data="adm:legal:reset:terms",
+        )])
+    rows.append([InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

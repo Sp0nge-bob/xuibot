@@ -5,7 +5,6 @@ from config.trial import is_trial_email
 from services.pricing import PriceQuote
 from services.subscription_labels import subscription_short_label
 
-from config.legal import PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL
 from ui.theme import (
     BTN_BACK,
     BTN_BACK_TARIFFS,
@@ -67,10 +66,14 @@ def main_menu_kb(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def project_policy_kb() -> InlineKeyboardMarkup:
+def project_policy_kb(
+    *,
+    privacy_url: str,
+    terms_url: str,
+) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=BTN_PRIVACY_POLICY, url=PRIVACY_POLICY_URL)],
-        [InlineKeyboardButton(text=BTN_TERMS_OF_SERVICE, url=TERMS_OF_SERVICE_URL)],
+        [InlineKeyboardButton(text=BTN_PRIVACY_POLICY, url=privacy_url)],
+        [InlineKeyboardButton(text=BTN_TERMS_OF_SERVICE, url=terms_url)],
         [InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")],
     ])
 

@@ -21,6 +21,7 @@ from .admin_backup import router as admin_backup_router
 from .admin_faq import router as admin_faq_router
 from .admin_happ_crypto import router as admin_happ_crypto_router
 from .admin_limit_ip import router as admin_limit_ip_router
+from .admin_legal import router as admin_legal_router
 from .faq import router as faq_router
 from .policy import router as policy_router
 from .middlewares import ActionLockMiddleware
@@ -50,6 +51,7 @@ dp.include_router(admin_backup_router)
 dp.include_router(admin_faq_router)
 dp.include_router(admin_happ_crypto_router)
 dp.include_router(admin_limit_ip_router)
+dp.include_router(admin_legal_router)
 dp.include_router(faq_router)
 dp.include_router(policy_router)
 

@@ -13,6 +13,8 @@ SETTING_BACKUP_DISABLED = "backup_disabled"
 SETTING_HAPP_CRYPTO_MODE = "happ_crypto_mode"
 SETTING_TRIAL_LIMIT_IP = "trial_limit_ip"
 SETTING_PAID_LIMIT_IP = "paid_limit_ip"
+SETTING_PRIVACY_POLICY_URL = "privacy_policy_url"
+SETTING_TERMS_OF_SERVICE_URL = "terms_of_service_url"
 
 _SYNC_DISABLED_TRUTHY = frozenset({"1", "true", "yes", "on"})
 
@@ -206,3 +208,41 @@ async def set_paid_limit_ip(value: int) -> int:
     val = max(0, int(value))
     await set_setting(SETTING_PAID_LIMIT_IP, str(val))
     return val
+
+
+async def get_privacy_policy_url() -> str:
+    from config.legal import PRIVACY_POLICY_URL
+
+    raw = await get_setting(SETTING_PRIVACY_POLICY_URL)
+    if raw and raw.strip():
+        return raw.strip()
+    return PRIVACY_POLICY_URL
+
+
+async def get_terms_of_service_url() -> str:
+    from config.legal import TERMS_OF_SERVICE_URL
+
+    raw = await get_setting(SETTING_TERMS_OF_SERVICE_URL)
+    if raw and raw.strip():
+        return raw.strip()
+    return TERMS_OF_SERVICE_URL
+
+
+async def set_privacy_policy_url(url: str) -> str:
+    value = url.strip()
+    await set_setting(SETTING_PRIVACY_POLICY_URL, value)
+    return value
+
+
+async def set_terms_of_service_url(url: str) -> str:
+    value = url.strip()
+    await set_setting(SETTING_TERMS_OF_SERVICE_URL, value)
+    return value
+
+
+async def clear_privacy_policy_url() -> None:
+    await set_setting(SETTING_PRIVACY_POLICY_URL, "")
+
+
+async def clear_terms_of_service_url() -> None:
+    await set_setting(SETTING_TERMS_OF_SERVICE_URL, "")

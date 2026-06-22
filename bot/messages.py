@@ -513,6 +513,49 @@ def admin_start_greeting_edit_prompt_text() -> str:
     )
 
 
+def _legal_url_display(url: str, *, max_len: int = 64) -> str:
+    u = (url or "").strip()
+    if len(u) <= max_len:
+        return u
+    return u[: max_len - 1] + "…"
+
+
+def admin_legal_menu_text(
+    *,
+    privacy_url: str,
+    terms_url: str,
+    privacy_custom: bool,
+    terms_custom: bool,
+) -> str:
+    privacy_src = "админка" if privacy_custom else "по умолчанию"
+    terms_src = "админка" if terms_custom else "по умолчанию"
+    return (
+        "📄 <b>Юридические ссылки</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        "Кнопки в разделе «Политика проекта» открывают эти URL.\n\n"
+        f"🔒 <b>Политика конфиденциальности</b> ({privacy_src})\n"
+        f"<code>{_legal_url_display(privacy_url)}</code>\n\n"
+        f"📜 <b>Пользовательское соглашение</b> ({terms_src})\n"
+        f"<code>{_legal_url_display(terms_url)}</code>\n\n"
+        "<i>Ссылка должна начинаться с https:// или http://</i>"
+    )
+
+
+def admin_legal_edit_prompt_text(*, kind: str, current: str) -> str:
+    title = (
+        "Политика конфиденциальности"
+        if kind == "privacy"
+        else "Пользовательское соглашение"
+    )
+    return (
+        f"✏️ <b>{title}</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        "Отправьте новую ссылку (URL) на документ.\n\n"
+        f"Сейчас:\n<code>{_legal_url_display(current, max_len=120)}</code>\n\n"
+        "Для отмены: /admin"
+    )
+
+
 def admin_start_text_edit_prompt_text() -> str:
     from ui.compliance import COMPLIANCE_HINT
 
