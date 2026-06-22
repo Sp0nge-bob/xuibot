@@ -30,6 +30,10 @@
 - Проверьте `XUI_TOKEN` и secret path
 - `LOG_LEVEL=DEBUG` для деталей API
 
+## Сменили `XUI_HOST` в `.env`, а бот ходит на старый URL
+
+Адрес ★ основной ноды хранится в `data/bot.db` (`xui_nodes`). После правки `.env` **перезапустите** бота — при старте host подтянется из `XUI_HOST` (в логах: `primary host обновлён из .env`). Без перезапуска или без обновления кода — `/admin` → **Ноды** → ★ Primary → **Редактировать** → новый host.
+
 ## `message caption is too long` при выдаче ключа / trial
 
 - При `crypt3_local` / `crypt5_api` ссылка `happ://crypt…` ~700 символов — не влезает в caption фото (лимит Telegram **1024**).

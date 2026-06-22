@@ -157,6 +157,7 @@ async def _init_xui_nodes_impl() -> None:
                 "xui_nodes: удалено {} дубликатов (было {}, осталось {})",
                 stats["removed"], stats["before"], stats["after"],
             )
+        await _sync_primary_from_env()
 
 
 async def _ensure_init() -> None:
@@ -229,6 +230,82 @@ async def _migrate_primary_from_env() -> None:
         is_primary=True,
         is_enabled=True,
     )
+
+
+async def _sync_primary_from_env() -> None:
+    """При старте: подтянуть XUI_HOST и учётные данные в ★ основную ноду из .env."""
+    from loguru import logger
+    from services.xui import invalidate_api_cache, normalize_xui_host
+
+    env_host_raw = (settings.XUI_HOST or "").strip()
+    if not env_host_raw:
+        return
+
+    primary = await get_primary_node()
+    primary_id = int((primary or {}).get("id") or 0)
+    if primary_id <= 0:
+        return
+
+    env_host = normalize_xui_host(env_host_raw)
+    current_host = normalize_node_host(primary.get("host") or "")
+    env_username = settings.XUI_USERNAME or ""
+    env_password = settings.XUI_PASSWORD or ""
+    env_token = settings.XUI_TOKEN or ""
+    current_username = primary.get("username") or ""
+    current_password = primary.get("password") or ""
+    current_token = primary.get("token") or ""
+
+    host_changed = current_host != normalize_node_host(env_host)
+    creds_changed = (
+        current_username != env_username
+        or current_password != env_password
+        or current_token != env_token
+    )
+    if not host_changed and not creds_changed:
+        return
+
+    if host_changed:
+        existing = await get_node_by_host(env_host_raw)
+        if existing and int(existing["id"]) != primary_id:
+            ok, err = await set_primary_node(existing["id"])
+            if ok:
+                logger.info(
+                    "xui_nodes: ★ primary переключена на [{}] ({}) — был {}",
+                    existing.get("name"),
+                    normalize_node_host(existing.get("host") or ""),
+                    current_host,
+                )
+                invalidate_api_cache(primary_id)
+                invalidate_api_cache(existing["id"])
+                primary_id = int(existing["id"])
+            else:
+                logger.warning("xui_nodes: не удалось переключить primary: {}", err)
+                return
+        else:
+            await update_node(
+                primary_id,
+                host=env_host,
+                username=env_username,
+                password=env_password,
+                token=env_token,
+            )
+            logger.info(
+                "xui_nodes: ★ primary host обновлён из .env: {} → {}",
+                current_host,
+                normalize_node_host(env_host),
+            )
+            invalidate_api_cache(primary_id)
+            return
+
+    if creds_changed:
+        await update_node(
+            primary_id,
+            username=env_username,
+            password=env_password,
+            token=env_token,
+        )
+        logger.info("xui_nodes: ★ primary учётные данные обновлены из .env")
+        invalidate_api_cache(primary_id)
 
 
 async def list_nodes(*, enabled_only: bool = False) -> list[dict[str, Any]]:
