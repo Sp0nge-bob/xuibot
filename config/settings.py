@@ -93,6 +93,8 @@ class Settings(BaseSettings):
     # Параллельная обработка webhook Platega (выдача ключей) — services/fulfillment_queue.py
     FULFILLMENT_QUEUE_WORKERS: int = 2
     FULFILLMENT_QUEUE_MAX_SIZE: int = 200
+    FULFILLMENT_RETRY_ATTEMPTS: int = 3
+    FULFILLMENT_RETRY_DELAYS_SEC: str = "3,10,30"
 
     LOG_LEVEL: str = "INFO"
     LOG_DIR: str = "data/logs"

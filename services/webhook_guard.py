@@ -5,26 +5,21 @@ import time
 from collections import deque
 
 from config.settings import settings
+from db.webhook_dedup import finalize_webhook, try_acquire_webhook
 
-_processed: dict[str, float] = {}
 _rate_hits: dict[str, deque[float]] = {}
 
 
-def _cleanup_processed(now: float, ttl: float) -> None:
-    stale = [k for k, ts in _processed.items() if now - ts > ttl]
-    for key in stale:
-        _processed.pop(key, None)
+async def acquire_webhook(tx_id: str, status: str) -> bool:
+    """
+    False — дубликат (уже успешно обработан в пределах TTL).
+    True — можно обрабатывать.
+    """
+    return await try_acquire_webhook(tx_id, status)
 
 
-def is_duplicate_webhook(tx_id: str, status: str) -> bool:
-    ttl = float(settings.WEBHOOK_IDEMPOTENCY_TTL_SEC)
-    key = f"{tx_id}:{(status or '').upper()}"
-    now = time.monotonic()
-    _cleanup_processed(now, ttl)
-    if key in _processed and now - _processed[key] < ttl:
-        return True
-    _processed[key] = now
-    return False
+async def complete_webhook(tx_id: str, status: str, *, success: bool) -> None:
+    await finalize_webhook(tx_id, status, success=success)
 
 
 def webhook_rate_limited(client_ip: str) -> bool:

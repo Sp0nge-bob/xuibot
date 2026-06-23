@@ -26,7 +26,7 @@ warn_unsafe_runtime_config()
 from db.database import init_db
 from db.connection import close_connection
 from services.platega_client import verify_callback_headers
-from services.webhook_guard import is_duplicate_webhook, webhook_rate_limited
+from services.webhook_guard import acquire_webhook, webhook_rate_limited
 from services.fulfillment_queue import (
     drain_fulfillment_queue,
     enqueue_webhook_job,
@@ -119,7 +119,7 @@ async def platega_webhook(
     if not tx_id or not status:
         return JSONResponse({"ok": True})
 
-    if is_duplicate_webhook(tx_id, status):
+    if not await acquire_webhook(tx_id, status):
         logger.debug("Duplicate webhook ignored: {} {}", tx_id, status)
         return JSONResponse({"ok": True})
 

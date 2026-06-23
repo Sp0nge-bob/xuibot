@@ -151,6 +151,7 @@ async def _init_db_impl():
     from db.xui_nodes import init_xui_nodes
     from db.tickets import init_tickets_tables
     from db.faq import init_faq_tables
+    from db.webhook_dedup import init_webhook_dedup
     await init_bot_settings()
     await init_promo_tables()
     await init_promo_pending_tables()
@@ -159,6 +160,7 @@ async def _init_db_impl():
     await init_xui_nodes()
     await init_tickets_tables()
     await init_faq_tables()
+    await init_webhook_dedup()
     _INIT_MARKER.parent.mkdir(parents=True, exist_ok=True)
     _INIT_MARKER.write_text(datetime.utcnow().isoformat(), encoding="utf-8")
     logger.info("Database initialized at {}", DB_PATH)
