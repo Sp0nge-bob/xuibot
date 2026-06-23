@@ -9,7 +9,10 @@ from services.xui import get_api, _fetch_sub_links
 
 
 async def main() -> None:
-    tg_id = int(sys.argv[1]) if len(sys.argv) > 1 else 123456789
+    if len(sys.argv) < 2:
+        print("Usage: python scripts/dev/dump_client_sub_links.py <tg_id>")
+        raise SystemExit(1)
+    tg_id = int(sys.argv[1])
     subs = await db.get_active_subscriptions(tg_id)
     if not subs:
         print(f"No active subs for tg_id={tg_id}")

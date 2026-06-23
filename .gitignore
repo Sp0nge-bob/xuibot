@@ -18,9 +18,11 @@ dist/
 build/
 *.egg
 
-# Logs
+# Logs / local session artifacts
 *.log
 report/
+terminals/
+vpn_platega_bot.egg-info/
 
 # Archives
 *.rar
