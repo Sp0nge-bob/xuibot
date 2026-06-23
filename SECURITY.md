@@ -8,19 +8,39 @@
 - `data/` — SQLite-база с пользователями и заказами
 - логи с телами webhook и персональными данными
 - `terminals/` — локальные дампы терминала IDE (могут содержать URL панели и ID)
+- `report/`, `CHAT_CONTEXT.md` — отчёты и контекст сессий с реальными URL и токенами
 
 В git допустим только [`.env.example`](.env.example) с плейсхолдерами. В коде — только примерные ID (`123456789`), не реальные Telegram ID админов.
 
 ## Очистка истории git
 
-Если `.env` или `data/bot.db` уже попали в удалённый репозиторий:
+Если секреты уже попали в удалённый репозиторий, одного `git rm` недостаточно — данные остаются в старых коммитах.
+
+### Быстрая очистка (только `.env` / `data/bot.db`)
 
 ```bash
 pip install git-filter-repo
-git filter-repo --path .env --invert-paths
-git filter-repo --path data/bot.db --invert-paths
+git filter-repo --path .env --invert-paths --force
+git filter-repo --path data/bot.db --invert-paths --force
+git remote add origin https://github.com/OWNER/REPO.git
 git push origin main --force
 ```
+
+### Полная очистка (рекомендуется при утечке)
+
+1. Удалить из всей истории чувствительные пути:
+   - `report/`, `CHAT_CONTEXT.md`, `docs/sync-service-context.md`, `test_bot.py`
+   - `vpn_platega_bot.egg-info/`, `__pycache__/`, `*.pyc`
+2. Заменить в оставшихся коммитах реальные значения на плейсхолдеры (`git filter-repo --replace-text`).
+3. Анонимизировать email авторов коммитов (`--email-callback`), если в истории есть личные адреса.
+4. Проверить, что поиск по всей истории пустой:
+
+```bash
+git grep -iE "123456789|123456789|AAHxx|panel-secret-path|mirror2-secret-path|mirror1-secret-path|example-user|example-brand" $(git rev-list --all)
+```
+
+5. `git push origin main --force`
+6. На VPS: `git fetch origin && git reset --hard origin/main`
 
 После force push — **обязательно** ротируйте все ключи, даже если история очищена.
 
@@ -31,7 +51,7 @@ git push origin main --force
    - `PLATEGA_SECRET` — личный кабинет Platega
    - `XUI_TOKEN` / пароль панели — 3x-ui
 2. Убедитесь, что `.env` не отслеживается: `git rm --cached .env`
-3. Если секрет уже был в удалённом репозитории — очистите историю (`git filter-repo` или BFG) и снова ротируйте ключи
+3. Если секрет уже был в удалённом репозитории — выполните полную очистку истории (см. выше) и снова ротируйте ключи
 
 ## Продакшен
 

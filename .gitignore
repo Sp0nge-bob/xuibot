@@ -34,6 +34,9 @@ vpn_platega_bot.egg-info/
 .cursor/
 mcps/
 grokerrorreports/
+agent-tools/
+replacements.txt
+email_callback.py
 
 # OS
 .DS_Store
