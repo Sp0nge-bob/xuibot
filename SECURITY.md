@@ -33,11 +33,7 @@ git push origin main --force
    - `vpn_platega_bot.egg-info/`, `__pycache__/`, `*.pyc`
 2. Заменить в оставшихся коммитах реальные значения на плейсхолдеры (`git filter-repo --replace-text`).
 3. Анонимизировать email авторов коммитов (`--email-callback`), если в истории есть личные адреса.
-4. Проверить, что поиск по всей истории пустой:
-
-```bash
-git grep -iE "123456789|123456789|AAHxx|panel-secret-path|mirror2-secret-path|mirror1-secret-path|example-user|example-brand" $(git rev-list --all)
-```
+4. Проверить, что по всей истории нет известных утечек (реальные Telegram ID, токены бота, секретные пути панели, домены проекта, личные email). Используйте `git grep` по своему списку скомпрометированных значений — вывод должен быть пустым.
 
 5. `git push origin main --force`
 6. На VPS: `git fetch origin && git reset --hard origin/main`
