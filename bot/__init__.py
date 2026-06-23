@@ -24,7 +24,8 @@ from .admin_limit_ip import router as admin_limit_ip_router
 from .admin_legal import router as admin_legal_router
 from .faq import router as faq_router
 from .policy import router as policy_router
-from .middlewares import ActionLockMiddleware
+from .middlewares import ActionLockMiddleware, PrimaryGateMiddleware
+from services.primary_gate import ensure_primary_ready_at_startup
 from .scheduler import run_full_nodes_sync, start_scheduler
 from .sender import send_message
 from .shutdown import graceful_shutdown, register_bot_task
@@ -35,7 +36,10 @@ bot = Bot(
 )
 dp = Dispatcher(storage=MemoryStorage())
 
+_primary_gate = PrimaryGateMiddleware()
 _action_lock = ActionLockMiddleware()
+dp.callback_query.middleware(_primary_gate)
+dp.message.middleware(_primary_gate)
 dp.callback_query.middleware(_action_lock)
 dp.message.middleware(_action_lock)
 
@@ -66,12 +70,26 @@ async def start_bot():
     logger.info("Бот запускается…")
     register_bot_task(asyncio.current_task())
 
+    from bot.polling_lock import release_polling_lock
+
+    try:
+        await asyncio.wait_for(ensure_primary_ready_at_startup(), timeout=60)
+    except asyncio.TimeoutError as e:
+        release_polling_lock()
+        raise RuntimeError(
+            "Запуск отменён: таймаут проверки ★ Primary (60 с). "
+            "Проверьте доступность панели 3x-ui."
+        ) from e
+    except RuntimeError:
+        release_polling_lock()
+        raise
+
     start_scheduler()
 
     try:
         await asyncio.wait_for(initialize_nodes_at_startup(), timeout=90)
     except asyncio.TimeoutError:
-        logger.warning("Node startup: таймаут 90s — бот продолжит без полной инициализации нод")
+        logger.warning("Node startup: таймаут 90s — вторичные ноды не полностью инициализированы")
     except Exception as e:
         logger.exception("Node startup failed: {}", e)
 

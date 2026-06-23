@@ -33,6 +33,11 @@ from services.fulfillment_queue import (
     start_fulfillment_workers,
     stop_fulfillment_workers,
 )
+from services.primary_gate import (
+    ensure_primary_ready_at_startup,
+    primary_unavailable_reason,
+    refresh_primary_ready,
+)
 from bot import start_bot, stop_bot
 from bot.shutdown import bind_event_loop, install_uvicorn_shutdown_hook, register_bot_task
 
@@ -44,6 +49,8 @@ async def lifespan(app: FastAPI):
     bind_event_loop(asyncio.get_running_loop())
     await init_db()
     logger.info("Database ready")
+    await ensure_primary_ready_at_startup()
+    logger.info("★ Primary ready — webhook server starting")
     await start_fulfillment_workers()
 
     bot_task = None
@@ -75,6 +82,14 @@ app = FastAPI(title="VPN Platega Bot", lifespan=lifespan)
 
 @app.get("/health")
 async def health():
+    if not await refresh_primary_ready():
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "unavailable",
+                "primary": primary_unavailable_reason(),
+            },
+        )
     return {"status": "ok"}
 
 

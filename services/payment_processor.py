@@ -8,6 +8,7 @@ from loguru import logger
 from db import database as db
 from db import tickets as tickets_db
 from services.fulfillment import fulfill_paid_order
+from services.primary_gate import require_primary_for_payment
 from services.payment_text import payment_failed_user_text, refund_chargeback_user_text
 from services.refund_reversal import apply_refund_reversal
 
@@ -149,6 +150,13 @@ async def handle_platega_status(
         return PaymentProcessResult(handled=True, already_paid=True)
 
     if status == "CONFIRMED":
+        if not await require_primary_for_payment():
+            logger.error(
+                "Payment [{}]: CONFIRMED отложен — ★ Primary недоступна, tx={}",
+                source,
+                tx_id,
+            )
+            return PaymentProcessResult(handled=False)
         if not await db.mark_order_paid_if_pending(tx_id):
             return PaymentProcessResult(handled=True, already_paid=True)
         try:

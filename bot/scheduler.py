@@ -11,6 +11,7 @@ from db import database as db
 from services.xui import disable_client
 from services.node_sync import sync_all_secondary_nodes
 from services.node_health import check_all_nodes_health
+from services.primary_gate import apply_primary_health_results
 from services.backup import run_scheduled_backup
 from services.expiry_reminders import send_expiry_reminders
 
@@ -74,6 +75,7 @@ async def expiry_reminder_job():
 
 async def check_nodes_health_job():
     results = await check_all_nodes_health()
+    await apply_primary_health_results(results)
     if not results:
         logger.info("Health нод: нет включённых нод")
         return
