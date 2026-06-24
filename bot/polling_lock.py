@@ -61,6 +61,20 @@ def acquire_polling_lock() -> None:
         ) from e
 
 
+def get_polling_lock_info() -> dict[str, int | bool | None]:
+    """Состояние файла .polling.lock (без захвата)."""
+    if not _LOCK_PATH.is_file():
+        return {"held": False, "pid": None, "alive": False, "own_process": False}
+    pid = _read_lock_pid()
+    alive = _pid_alive(pid) if pid is not None else False
+    return {
+        "held": True,
+        "pid": pid,
+        "alive": alive,
+        "own_process": pid == os.getpid() if pid is not None else False,
+    }
+
+
 def release_polling_lock() -> None:
     if not _LOCK_PATH.is_file():
         return

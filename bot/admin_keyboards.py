@@ -8,6 +8,7 @@ from .admin_users import subscription_picker_button_label
 def admin_menu_kb() -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="📊 Статистика", callback_data="adm:stats")],
+        [InlineKeyboardButton(text="🔍 Диагностика", callback_data="adm:diagnostics")],
         [
             InlineKeyboardButton(text="💰 Тарифы", callback_data="adm:plans"),
             InlineKeyboardButton(text="💳 Оплата", callback_data="adm:payments"),

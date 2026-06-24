@@ -222,6 +222,16 @@ async def stop_fulfillment_workers() -> None:
     logger.info("Fulfillment queue workers stopped")
 
 
+def fulfillment_workers_running() -> bool:
+    return _workers_started
+
+
+def fulfillment_queue_depth() -> int | None:
+    if _queue is None:
+        return None
+    return _queue.qsize()
+
+
 def enqueue_webhook_job(
     tx_id: str,
     status: str,
