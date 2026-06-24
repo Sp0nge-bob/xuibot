@@ -232,6 +232,21 @@ def fulfillment_queue_depth() -> int | None:
     return _queue.qsize()
 
 
+def fulfillment_queue_status() -> dict[str, Any]:
+    """Снимок очереди выдачи — для /health и диагностики из другого процесса."""
+    workers_cfg = max(1, int(settings.FULFILLMENT_QUEUE_WORKERS))
+    max_size = max(1, int(settings.FULFILLMENT_QUEUE_MAX_SIZE))
+    alive = sum(1 for t in _worker_tasks if not t.done()) if _worker_tasks else 0
+    return {
+        "workers_running": _workers_started,
+        "workers_configured": workers_cfg,
+        "workers_alive": alive,
+        "queue_depth": _queue.qsize() if _queue is not None else 0,
+        "queue_max_size": max_size,
+        "shutting_down": _shutdown.is_set(),
+    }
+
+
 def enqueue_webhook_job(
     tx_id: str,
     status: str,

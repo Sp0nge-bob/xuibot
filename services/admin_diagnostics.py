@@ -15,7 +15,7 @@ from loguru import logger
 from config.settings import settings
 from db import database as db
 from db import xui_nodes as nodes_db
-from services.fulfillment_queue import fulfillment_queue_depth, fulfillment_workers_running
+from services.fulfillment_queue import fulfillment_queue_status
 from services.node_health import check_all_nodes_health
 from services.primary_gate import (
     is_primary_ready,
@@ -52,6 +52,7 @@ async def _http_get_probe(
         latency_ms = int((time.monotonic() - started) * 1000)
         ok = resp.status_code < 500
         detail = f"HTTP {resp.status_code}"
+        body: dict[str, Any] = {}
         if parse_health_json:
             try:
                 body = resp.json()
@@ -66,7 +67,14 @@ async def _http_get_probe(
                 detail = _clip(str(body.get("primary") or detail))
             elif resp.status_code == 503:
                 ok = False
-        return {"ok": ok, "latency_ms": latency_ms, "detail": detail, "url": url}
+        return {
+            "ok": ok,
+            "latency_ms": latency_ms,
+            "detail": detail,
+            "url": url,
+            "body": body,
+            "reachable": True,
+        }
     except Exception as e:
         latency_ms = int((time.monotonic() - started) * 1000)
         return {
@@ -74,6 +82,8 @@ async def _http_get_probe(
             "latency_ms": latency_ms,
             "detail": _clip(f"{type(e).__name__}: {e}"),
             "url": url,
+            "body": {},
+            "reachable": False,
         }
 
 
@@ -187,8 +197,6 @@ async def collect_diagnostics(
         issues.append("polling lock (другой процесс)")
     if not is_primary_ready():
         issues.append("★ Primary")
-    if probes.get("local_webhook", {}).get("ok") is False:
-        issues.append("локальный webhook")
     pub_probe = probes.get("public_webhook")
     if public_health_url and pub_probe and pub_probe.get("ok") is False:
         issues.append("публичный webhook")
@@ -198,7 +206,24 @@ async def collect_diagnostics(
     if not scheduler.running:
         issues.append("планировщик")
 
+    local_probe = probes.get("local_webhook") or {}
+    local_body = local_probe.get("body") or {}
+    fulfillment_remote = local_body.get("fulfillment") or {}
+    webhook_remote = local_body.get("webhook") or {}
+
+    if local_probe.get("reachable"):
+        if not fulfillment_remote.get("workers_running"):
+            issues.append("очередь выдачи (воркеры)")
+        elif fulfillment_remote.get("workers_alive", 0) < fulfillment_remote.get(
+            "workers_configured", 1
+        ):
+            issues.append("очередь выдачи (не все воркеры)")
+    elif not settings.START_BOT_IN_WEBAPP:
+        issues.append("webhook-процесс (app.py)")
+
     overall_ok = len(issues) == 0
+
+    fulfillment_local = fulfillment_queue_status()
 
     return {
         "checked_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
@@ -211,8 +236,10 @@ async def collect_diagnostics(
         "primary_error": primary_unavailable_reason(),
         "scheduler_running": scheduler.running,
         "scheduler_jobs": len(scheduler.get_jobs()) if scheduler.running else 0,
-        "fulfillment_workers": fulfillment_workers_running(),
-        "fulfillment_queue_depth": fulfillment_queue_depth(),
+        "fulfillment": fulfillment_remote,
+        "fulfillment_local": fulfillment_local,
+        "webhook_process": webhook_remote,
+        "webhook_reachable": bool(local_probe.get("reachable")),
         "probes": probes,
         "public_webhook_configured": bool(public_health_url),
         "stats": stats,
@@ -289,11 +316,19 @@ def format_diagnostics_text(report: dict[str, Any]) -> str:
     probes = report.get("probes") or {}
     local = probes.get("local_webhook") or {}
     local_lat = f" · {local['latency_ms']} ms" if local.get("latency_ms") is not None else ""
-    lines.append(
-        f"{_icon(local.get('ok'))} Локальный "
-        f"<code>127.0.0.1:{report.get('config', {}).get('webhook_port', settings.WEBHOOK_PORT)}/health</code>"
-        f" — <code>{html.escape(str(local.get('detail') or '—'))}</code>{local_lat}"
+    local_addr = (
+        f"127.0.0.1:{report.get('config', {}).get('webhook_port', settings.WEBHOOK_PORT)}/health"
     )
+    if local.get("reachable") and (local.get("body") or {}).get("status") == "unavailable":
+        lines.append(
+            f"🟡 Локальный <code>{local_addr}</code> — app.py отвечает, "
+            f"Primary: <code>{html.escape(str(local.get('detail') or '—'))}</code>{local_lat}"
+        )
+    else:
+        lines.append(
+            f"{_icon(local.get('ok'))} Локальный <code>{local_addr}</code> — "
+            f"<code>{html.escape(str(local.get('detail') or '—'))}</code>{local_lat}"
+        )
 
     if report.get("public_webhook_configured"):
         pub = probes.get("public_webhook") or {}
@@ -312,19 +347,63 @@ def format_diagnostics_text(report: dict[str, Any]) -> str:
         f"<code>{html.escape(str(platega.get('detail') or '—'))}</code>{pl_lat}"
     )
 
-    ff_workers = report.get("fulfillment_workers")
-    ff_depth = report.get("fulfillment_queue_depth")
-    if ff_workers:
-        ff_detail = f"воркеры запущены"
-        if ff_depth is not None:
-            ff_detail += f", очередь {ff_depth}"
-        lines.append(f"{_icon(True)} Очередь выдачи — {ff_detail}")
+    wh_proc = report.get("webhook_process") or {}
+    wh_reachable = report.get("webhook_reachable")
+    wh_pid = wh_proc.get("pid")
+    if wh_reachable and wh_pid:
+        mono = " · монолит" if wh_proc.get("start_bot_in_webapp") else ""
+        lines.append(
+            f"{_icon(True)} Webhook-процесс — PID <code>{wh_pid}</code>"
+            f", порт <code>{wh_proc.get('port', settings.WEBHOOK_PORT)}</code>{mono}"
+        )
+    elif wh_reachable:
+        lines.append(f"{_icon(True)} Webhook-процесс — отвечает на /health")
+    else:
+        lines.append(
+            f"{_icon(False)} Webhook-процесс — "
+            f"<code>127.0.0.1:{settings.WEBHOOK_PORT}</code> недоступен "
+            f"(<code>python app.py</code> не запущен?)"
+        )
+
+    ff = report.get("fulfillment") or {}
+    ff_local = report.get("fulfillment_local") or {}
+    if wh_reachable and ff:
+        workers_run = ff.get("workers_running")
+        alive = ff.get("workers_alive", 0)
+        configured = ff.get("workers_configured", 0)
+        depth = ff.get("queue_depth", 0)
+        max_size = ff.get("queue_max_size", 0)
+        shutting = ff.get("shutting_down")
+        if workers_run and alive >= configured:
+            ff_ok = True
+        elif workers_run:
+            ff_ok = None
+        else:
+            ff_ok = False
+        ff_detail = (
+            f"воркеры <b>{alive}</b>/<b>{configured}</b>, "
+            f"очередь <b>{depth}</b>/<b>{max_size}</b>"
+        )
+        if shutting:
+            ff_detail += " · <i>останавливается</i>"
+        lines.append(f"{_icon(ff_ok)} Очередь выдачи — {ff_detail}")
+    elif settings.START_BOT_IN_WEBAPP and ff_local.get("workers_running"):
+        depth = ff_local.get("queue_depth", 0)
+        max_size = ff_local.get("queue_max_size", 0)
+        alive = ff_local.get("workers_alive", 0)
+        configured = ff_local.get("workers_configured", 0)
+        lines.append(
+            f"{_icon(True)} Очередь выдачи — воркеры <b>{alive}</b>/<b>{configured}</b>, "
+            f"очередь <b>{depth}</b>/<b>{max_size}</b> (этот процесс)"
+        )
     elif settings.START_BOT_IN_WEBAPP:
         lines.append(f"{_icon(False)} Очередь выдачи — воркеры не запущены")
     else:
+        lines.append(f"{_icon(False)} Очередь выдачи — данные недоступны (нет связи с app.py)")
+
+    if wh_proc.get("rate_limit_per_min") is not None:
         lines.append(
-            "🟡 Очередь выдачи — <i>в процессе app.py</i> "
-            f"(<code>python app.py</code>, порт {settings.WEBHOOK_PORT})"
+            f"Rate-limit webhook: <code>{wh_proc['rate_limit_per_min']}</code>/мин"
         )
     lines.append("")
 

@@ -80,17 +80,34 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="VPN Platega Bot", lifespan=lifespan)
 
 
+def _health_payload(*, primary_ok: bool) -> dict:
+    import os
+
+    from services.fulfillment_queue import fulfillment_queue_status
+
+    payload: dict = {
+        "status": "ok" if primary_ok else "unavailable",
+        "fulfillment": fulfillment_queue_status(),
+        "webhook": {
+            "pid": os.getpid(),
+            "port": settings.WEBHOOK_PORT,
+            "path": settings.WEBHOOK_PATH,
+            "start_bot_in_webapp": settings.START_BOT_IN_WEBAPP,
+            "rate_limit_per_min": settings.WEBHOOK_RATE_LIMIT_PER_MIN,
+        },
+    }
+    if not primary_ok:
+        payload["primary"] = primary_unavailable_reason()
+    return payload
+
+
 @app.get("/health")
 async def health():
-    if not await refresh_primary_ready():
-        return JSONResponse(
-            status_code=503,
-            content={
-                "status": "unavailable",
-                "primary": primary_unavailable_reason(),
-            },
-        )
-    return {"status": "ok"}
+    primary_ok = await refresh_primary_ready()
+    payload = _health_payload(primary_ok=primary_ok)
+    if not primary_ok:
+        return JSONResponse(status_code=503, content=payload)
+    return payload
 
 
 @app.post(settings.WEBHOOK_PATH)
