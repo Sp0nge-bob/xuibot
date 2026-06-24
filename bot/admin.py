@@ -27,6 +27,7 @@ from config.trial import is_trial_email
 from services.trial import admin_reset_all_trial_subscriptions, admin_reset_trial
 from .states import AdminPricingStates, AdminStates
 from services.subscription_admin import admin_delete_subscription
+from services.process_stats import fetch_process_usage_line
 from .admin_users import (
     admin_user_subs_text,
     admin_users_category_text,
@@ -68,15 +69,21 @@ def _user_label(username: str | None, first_name: str | None, tg_id: int) -> str
     return str(tg_id)
 
 
-def _admin_stats_block(stats: dict[str, int]) -> str:
-    return (
-        f"👥 Пользователей: <b>{stats['users']}</b>\n"
-        f"✅ Платных подписок: <b>{stats['paid_subs']}</b>\n"
-        f"🎁 Пробных подписок: <b>{stats['trial_subs']}</b>\n"
-        f"💰 Оплаченных заказов: <b>{stats['paid_orders']}</b>\n"
-        f"🎫 Открытых тикетов: <b>{stats['pending_tickets']}</b> "
-        f"(💸 {stats['pending_refunds']} · 🛠 {stats['pending_support']} · 📁 {stats['pending_other']})"
-    )
+def _admin_stats_block(stats: dict[str, int], *, usage_line: str = "") -> str:
+    lines = [
+        f"👥 Пользователей: <b>{stats['users']}</b>",
+        f"✅ Платных подписок: <b>{stats['paid_subs']}</b>",
+        f"🎁 Пробных подписок: <b>{stats['trial_subs']}</b>",
+        f"💰 Оплаченных заказов: <b>{stats['paid_orders']}</b>",
+        (
+            f"🎫 Открытых тикетов: <b>{stats['pending_tickets']}</b> "
+            f"(💸 {stats['pending_refunds']} · 🛠 {stats['pending_support']} · "
+            f"📁 {stats['pending_other']})"
+        ),
+    ]
+    if usage_line:
+        lines.append(usage_line)
+    return "\n".join(lines)
 
 
 async def _admin_menu_context() -> tuple[dict[str, int], str]:
@@ -84,6 +91,7 @@ async def _admin_menu_context() -> tuple[dict[str, int], str]:
     if orphans:
         logger.info("Admin menu: deactivated {} orphan subscription(s)", orphans)
     stats = await db.get_admin_stats()
+    usage_line = await fetch_process_usage_line()
     summary = await nodes_db.nodes_summary()
     primary = await nodes_db.get_primary_node()
     primary_name = primary["name"] if primary else "—"
@@ -95,7 +103,7 @@ async def _admin_menu_context() -> tuple[dict[str, int], str]:
     text = (
         "🛠 <b>Админ-панель</b>\n"
         "━━━━━━━━━━━━━━━━\n\n"
-        f"{_admin_stats_block(stats)}\n\n"
+        f"{_admin_stats_block(stats, usage_line=usage_line)}\n\n"
         f"{nodes_line}\n"
         f"★ Основная: <b>{primary_name}</b> · inbounds: <code>{primary_inbounds or '—'}</code>\n"
         f"Группа 3x-ui: <code>{settings.XUI_CLIENT_GROUP}</code>\n\n"
@@ -141,12 +149,13 @@ async def cb_admin_stats(cb: CallbackQuery):
     if not is_admin(cb.from_user.id):
         return
     stats = await db.get_admin_stats()
+    usage_line = await fetch_process_usage_line()
     summary = await nodes_db.nodes_summary()
     primary = await nodes_db.get_primary_node()
     text = (
         "📊 <b>Статистика</b>\n"
         "━━━━━━━━━━━━━━━━\n\n"
-        f"{_admin_stats_block(stats)}\n\n"
+        f"{_admin_stats_block(stats, usage_line=usage_line)}\n\n"
         f"🖧 Ноды: <b>{summary['total']}</b> · healthy <b>{summary['healthy']}</b>"
         f"/<b>{summary['enabled']}</b>\n"
         f"★ Основная: <b>{primary['name'] if primary else '—'}</b>"
