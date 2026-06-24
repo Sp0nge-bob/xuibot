@@ -1,5 +1,5 @@
 import json
-from typing import Annotated, Any, List
+from typing import Annotated, Any, List, Optional
 
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode
@@ -107,6 +107,8 @@ class Settings(BaseSettings):
     BACKUP_ENABLED: bool = True
     BACKUP_INTERVAL: str = "24h"
     BACKUP_LOCAL_RETAIN: int = 5
+    # Устарело: раньше час UTC ежедневного бэкапа. Игнорируется — используйте BACKUP_INTERVAL.
+    BACKUP_HOUR_UTC: Optional[int] = None
 
     # Защита от наложения нажатий (двойная оплата, параллельные callback)
     BOT_ACTION_LOCK_ENABLED: bool = True
