@@ -156,6 +156,42 @@ validate_project() {
     [[ -f "$APP_DIR/app.py" ]] || die "Не найден $APP_DIR/app.py"
     [[ -f "$APP_DIR/run_bot.py" ]] || die "Не найден $APP_DIR/run_bot.py"
     [[ -x "$PYTHON_BIN" ]] || die "Python не найден или не исполняемый: $PYTHON_BIN"
+    [[ -f "$APP_DIR/.env" ]] || die "Не найден $APP_DIR/.env — скопируйте из .env.example"
+}
+
+validate_service_user() {
+    if [[ "$SERVICE_USER" == "root" ]]; then
+        warn "Пользователь root не рекомендуется для systemd-сервисов"
+        warn "Лучше оставить vpnbot (Enter в меню установки)"
+    fi
+}
+
+validate_env_for_systemd() {
+    local env_file="$APP_DIR/.env"
+    if grep -Eq '^[[:space:]]*START_BOT_IN_WEBAPP[[:space:]]*=[[:space:]]*true' "$env_file"; then
+        die "В .env установлено START_BOT_IN_WEBAPP=true — для двух сервисов нужно false"
+    fi
+}
+
+validate_python_deps() {
+    log "Проверяем зависимости venv"
+    if ! sudo -u "$SERVICE_USER" env PATH="$VENV_BIN:$PATH" \
+        "$PYTHON_BIN" -c "import aiogram, fastapi, loguru" 2>/dev/null; then
+        die "В venv не хватает пакетов. Выполните: cd $APP_DIR && .venv/bin/pip install -e ."
+    fi
+}
+
+clear_stale_polling_lock() {
+    local lock="$APP_DIR/data/.polling.lock"
+    [[ -f "$lock" ]] || return
+    local pid
+    pid="$(tr -dc '0-9' <"$lock" 2>/dev/null || true)"
+    if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
+        log "Удаляем устаревший polling lock: $lock"
+        rm -f "$lock"
+    else
+        warn "Активен другой polling-процесс (PID $pid) — остановите его перед запуском"
+    fi
 }
 
 ensure_service_user() {
@@ -201,8 +237,11 @@ Type=simple
 User=$SERVICE_USER
 WorkingDirectory=$APP_DIR
 Environment=PATH=$VENV_BIN
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=journal
+StandardError=journal
 ExecStartPre=/bin/sleep 8
-ExecStart=$PYTHON_BIN $program
+ExecStart=$PYTHON_BIN $APP_DIR/$program
 Restart=always
 RestartSec=5
 
@@ -220,7 +259,10 @@ Type=simple
 User=$SERVICE_USER
 WorkingDirectory=$APP_DIR
 Environment=PATH=$VENV_BIN
-ExecStart=$PYTHON_BIN $program
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=journal
+StandardError=journal
+ExecStart=$PYTHON_BIN $APP_DIR/$program
 Restart=always
 RestartSec=5
 
@@ -232,7 +274,45 @@ EOF
     chmod 644 "$dst"
 }
 
+show_service_logs() {
+    local unit="$1"
+    local lines="${2:-25}"
+    if systemctl cat "$unit" &>/dev/null; then
+        warn "Последние строки журнала $unit:"
+        journalctl -u "$unit" -n "$lines" --no-pager 2>/dev/null || true
+    fi
+}
+
+wait_for_service() {
+    local unit="$1"
+    local attempts="${2:-6}"
+    local i
+    for ((i = 1; i <= attempts; i++)); do
+        if systemctl is-active --quiet "$unit" 2>/dev/null; then
+            return 0
+        fi
+        sleep 2
+    done
+    return 1
+}
+
+verify_services_after_start() {
+    local failed=0
+    if ! wait_for_service "$TELEGRAM_UNIT"; then
+        warn "$TELEGRAM_UNIT не перешёл в active"
+        show_service_logs "$TELEGRAM_UNIT" 40
+        failed=1
+    fi
+    if ! wait_for_service "$WEB_UNIT"; then
+        warn "$WEB_UNIT не перешёл в active"
+        show_service_logs "$WEB_UNIT" 40
+        failed=1
+    fi
+    return "$failed"
+}
+
 install_units() {
+    clear_stale_polling_lock
     write_unit "$TELEGRAM_UNIT" "run_bot.py"
     write_unit "$WEB_UNIT" "app.py"
 
@@ -248,6 +328,10 @@ install_units() {
         log "Запускаем сервисы (сначала Telegram, затем webhook)"
         systemctl restart "$TELEGRAM_UNIT"
         systemctl restart "$WEB_UNIT"
+        if ! verify_services_after_start; then
+            warn "Один или оба сервиса не запустились — см. journalctl выше"
+            return 1
+        fi
     fi
 }
 
@@ -265,32 +349,39 @@ uninstall_units() {
     ok "Unit-файлы удалены"
 }
 
+unit_state_label() {
+    local unit="$1"
+    if ! systemctl cat "$unit" &>/dev/null; then
+        printf 'не установлен'
+        return
+    fi
+    if systemctl is-active --quiet "$unit" 2>/dev/null; then
+        ok "active"
+    else
+        warn "inactive / ошибка"
+    fi
+}
+
 show_status() {
     echo
     printf '%s\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     printf '  %s\n' "vpn-bot-telegram"
     printf '%s\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    if systemctl is-active --quiet "$TELEGRAM_UNIT" 2>/dev/null; then
-        ok "active"
-    elif systemctl list-unit-files "$TELEGRAM_UNIT" 2>/dev/null | grep -q "$TELEGRAM_UNIT"; then
-        warn "inactive или ошибка"
-    else
-        warn "не установлен"
-    fi
+    unit_state_label "$TELEGRAM_UNIT"
     systemctl --no-pager status "$TELEGRAM_UNIT" 2>/dev/null || true
+    if systemctl cat "$TELEGRAM_UNIT" &>/dev/null && ! systemctl is-active --quiet "$TELEGRAM_UNIT" 2>/dev/null; then
+        show_service_logs "$TELEGRAM_UNIT" 15
+    fi
 
     echo
     printf '%s\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     printf '  %s\n' "vpn-bot-web"
     printf '%s\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    if systemctl is-active --quiet "$WEB_UNIT" 2>/dev/null; then
-        ok "active"
-    elif systemctl list-unit-files "$WEB_UNIT" 2>/dev/null | grep -q "$WEB_UNIT"; then
-        warn "inactive или ошибка"
-    else
-        warn "не установлен"
-    fi
+    unit_state_label "$WEB_UNIT"
     systemctl --no-pager status "$WEB_UNIT" 2>/dev/null || true
+    if systemctl cat "$WEB_UNIT" &>/dev/null && ! systemctl is-active --quiet "$WEB_UNIT" 2>/dev/null; then
+        show_service_logs "$WEB_UNIT" 15
+    fi
     echo
 }
 
@@ -298,8 +389,11 @@ cmd_install() {
     require_root
     resolve_paths
     validate_project
+    validate_service_user
+    validate_env_for_systemd
     ensure_service_user
     fix_permissions
+    validate_python_deps
     install_units
     show_status
     ok "Установка завершена"
@@ -330,6 +424,13 @@ prompt_install_settings() {
 
     read -r -p "Пользователь systemd [$default_user]: " input_user
     SERVICE_USER="${input_user:-$default_user}"
+    if [[ "$SERVICE_USER" == "root" ]]; then
+        read -r -p "root не рекомендуется. Продолжить с root? [y/N]: " root_ok
+        if [[ ! "$root_ok" =~ ^([yY]|yes|д|да)$ ]]; then
+            SERVICE_USER="$default_user"
+            ok "Используем пользователя $SERVICE_USER"
+        fi
+    fi
 
     PYTHON_BIN=""
     ENABLE_ON_BOOT=1
