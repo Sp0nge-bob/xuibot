@@ -34,22 +34,16 @@ python run_bot.py   # терминал 2 — Telegram polling
 
 ## systemd (пример)
 
-Интерактивное меню (создаёт пользователя `vpnbot`, unit-файлы, автозапуск):
+Интерактивное меню — **пункт 1 делает всё сам** (venv, `pip install`, пользователь `vpnbot`, unit-файлы, запуск):
 
 ```bash
 sudo bash deploy/install-systemd.sh
+# → 1
 ```
 
-Пункты меню: установить · проверить статус · остановить · удалить · выход.
+Перед первым запуском заполните `.env` (или скрипт создаст его из `.env.example`).
 
-Неинтерактивно:
-
-```bash
-sudo bash deploy/install-systemd.sh install -d /opt/vpn-bot -u vpnbot
-sudo bash deploy/install-systemd.sh status
-sudo bash deploy/install-systemd.sh stop
-sudo bash deploy/install-systemd.sh uninstall
-```
+Неинтерактивно: `sudo bash deploy/install-systemd.sh install`
 
 Ручная установка — шаблоны в [`deploy/systemd/`](../deploy/systemd/):
 
