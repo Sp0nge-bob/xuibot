@@ -27,7 +27,7 @@ from config.trial import is_trial_email
 from services.trial import admin_reset_all_trial_subscriptions, admin_reset_trial
 from .states import AdminPricingStates, AdminStates
 from services.subscription_admin import admin_delete_subscription
-from services.process_stats import fetch_process_usage_line
+from services.process_stats import fetch_bot_load_block
 from .admin_users import (
     admin_user_subs_text,
     admin_users_category_text,
@@ -91,7 +91,7 @@ async def _admin_menu_context() -> tuple[dict[str, int], str]:
     if orphans:
         logger.info("Admin menu: deactivated {} orphan subscription(s)", orphans)
     stats = await db.get_admin_stats()
-    usage_line = await fetch_process_usage_line()
+    usage_line = await fetch_bot_load_block()
     summary = await nodes_db.nodes_summary()
     primary = await nodes_db.get_primary_node()
     primary_name = primary["name"] if primary else "—"
@@ -149,7 +149,7 @@ async def cb_admin_stats(cb: CallbackQuery):
     if not is_admin(cb.from_user.id):
         return
     stats = await db.get_admin_stats()
-    usage_line = await fetch_process_usage_line()
+    usage_line = await fetch_bot_load_block()
     summary = await nodes_db.nodes_summary()
     primary = await nodes_db.get_primary_node()
     text = (
