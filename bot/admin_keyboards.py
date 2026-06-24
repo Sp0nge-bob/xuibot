@@ -346,6 +346,13 @@ def admin_back_kb() -> InlineKeyboardMarkup:
     ])
 
 
+def admin_stats_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔄 Обновить", callback_data="adm:stats:refresh")],
+        [InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")],
+    ])
+
+
 def admin_server_status_kb(items: list) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     for item in items:

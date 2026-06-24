@@ -41,6 +41,7 @@ from .admin_auth import is_admin
 from .admin_keyboards import (
     admin_menu_kb,
     admin_back_kb,
+    admin_stats_kb,
     admin_plans_kb,
     admin_promos_kb,
     admin_promo_detail_kb,
@@ -144,15 +145,12 @@ async def cb_admin_menu(cb: CallbackQuery, state: FSMContext):
     )
 
 
-@router.callback_query(F.data == "adm:stats")
-async def cb_admin_stats(cb: CallbackQuery):
-    if not is_admin(cb.from_user.id):
-        return
+async def _admin_stats_text() -> str:
     stats = await db.get_admin_stats()
     usage_line = await fetch_bot_load_block()
     summary = await nodes_db.nodes_summary()
     primary = await nodes_db.get_primary_node()
-    text = (
+    return (
         "📊 <b>Статистика</b>\n"
         "━━━━━━━━━━━━━━━━\n\n"
         f"{_admin_stats_block(stats, usage_line=usage_line)}\n\n"
@@ -160,8 +158,26 @@ async def cb_admin_stats(cb: CallbackQuery):
         f"/<b>{summary['enabled']}</b>\n"
         f"★ Основная: <b>{primary['name'] if primary else '—'}</b>"
     )
-    await safe_cb_answer(cb)
-    await send_or_edit(cb, text, admin_back_kb())
+
+
+async def _show_admin_stats(cb: CallbackQuery, *, refresh: bool) -> None:
+    await safe_cb_answer(cb, "Обновляем…" if refresh else None)
+    text = await _admin_stats_text()
+    await send_or_edit(cb, text, admin_stats_kb())
+
+
+@router.callback_query(F.data == "adm:stats")
+async def cb_admin_stats(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    await _show_admin_stats(cb, refresh=False)
+
+
+@router.callback_query(F.data == "adm:stats:refresh")
+async def cb_admin_stats_refresh(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    await _show_admin_stats(cb, refresh=True)
 
 
 _USERS_LIST_LIMIT = 25
