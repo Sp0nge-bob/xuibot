@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# Установка systemd-сервисов vpn-bot-telegram и vpn-bot-web.
+# Интерактивное управление systemd-сервисами vpn-bot-telegram и vpn-bot-web.
 #
-# Использование (на VPS, от root):
+# Меню (на VPS, от root):
 #   sudo bash deploy/install-systemd.sh
-#   sudo bash deploy/install-systemd.sh --app-dir /opt/vpn-bot --user vpnbot
+#
+# Неинтерактивно:
+#   sudo bash deploy/install-systemd.sh install
+#   sudo bash deploy/install-systemd.sh status
+#   sudo bash deploy/install-systemd.sh stop
 #   sudo bash deploy/install-systemd.sh uninstall
 #
-# Переменные окружения (альтернатива флагам):
+# Переменные окружения:
 #   APP_DIR, SERVICE_USER, PYTHON_BIN, ENABLE_ON_BOOT=1, START_NOW=1, CREATE_USER=1
 
 set -euo pipefail
@@ -15,7 +19,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SYSTEMD_DIR="/etc/systemd/system"
 
-APP_DIR="${APP_DIR:-$REPO_ROOT}"
+APP_DIR="${APP_DIR:-}"
 SERVICE_USER="${SERVICE_USER:-vpnbot}"
 PYTHON_BIN="${PYTHON_BIN:-}"
 ENABLE_ON_BOOT="${ENABLE_ON_BOOT:-1}"
@@ -27,37 +31,40 @@ WEB_UNIT="vpn-bot-web.service"
 
 log() { printf '==> %s\n' "$*"; }
 warn() { printf '!! %s\n' "$*" >&2; }
-die() { warn "$*"; exit 1; }
+ok() { printf '✓ %s\n' "$*"; }
+
+die() {
+    warn "$*"
+    exit 1
+}
 
 usage() {
     cat <<'EOF'
-VPN Bot — установка systemd-сервисов
+VPN Bot — управление systemd-сервисами
+
+Интерактивное меню:
+  sudo bash deploy/install-systemd.sh
 
 Команды:
-  install     Установить/обновить unit-файлы (по умолчанию)
+  install     Установить/обновить unit-файлы и запустить
+  status      Проверить состояние служб
+  stop        Остановить службы (без удаления)
   uninstall   Остановить, отключить и удалить unit-файлы
-  status      Показать статус сервисов
 
 Опции:
-  -d, --app-dir PATH     Каталог проекта (по умолчанию: корень репозитория)
+  -d, --app-dir PATH     Каталог проекта
   -u, --user NAME        Пользователь systemd (по умолчанию: vpnbot)
-  -p, --python PATH      Python из venv (по умолчанию: APP_DIR/.venv/bin/python)
+  -p, --python PATH      Python из venv
       --no-create-user   Не создавать пользователя
       --no-enable        Не включать автозапуск
       --no-start         Не запускать сервисы после установки
   -h, --help             Справка
-
-Примеры:
-  sudo bash deploy/install-systemd.sh
-  sudo bash deploy/install-systemd.sh -d /opt/vpn-bot -u vpnbot
-  sudo APP_DIR=/opt/vpn-bot bash deploy/install-systemd.sh install
-  sudo bash deploy/install-systemd.sh uninstall
 EOF
 }
 
 require_root() {
     if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-        die "Запустите скрипт от root: sudo bash deploy/install-systemd.sh"
+        die "Запустите от root: sudo bash deploy/install-systemd.sh"
     fi
 }
 
@@ -70,8 +77,16 @@ normalize_path() {
     fi
 }
 
+default_app_dir() {
+    if [[ -d /opt/vpn-bot ]]; then
+        echo /opt/vpn-bot
+    else
+        echo "$REPO_ROOT"
+    fi
+}
+
 parse_args() {
-    local cmd="install"
+    local cmd=""
     if [[ $# -gt 0 && "$1" != -* ]]; then
         cmd="$1"
         shift
@@ -79,7 +94,7 @@ parse_args() {
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            install|uninstall|status)
+            install|uninstall|status|stop|menu)
                 cmd="$1"
                 shift
                 ;;
@@ -124,6 +139,9 @@ parse_args() {
 }
 
 resolve_paths() {
+    if [[ -z "$APP_DIR" ]]; then
+        APP_DIR="$(default_app_dir)"
+    fi
     [[ -d "$APP_DIR" ]] || die "Каталог проекта не найден: $APP_DIR"
     APP_DIR="$(normalize_path "$APP_DIR")"
 
@@ -167,7 +185,6 @@ fix_permissions() {
 write_unit() {
     local name="$1"
     local program="$2"
-    local extra_after="${3:-}"
     local dst="$SYSTEMD_DIR/$name"
 
     log "Записываем $dst"
@@ -196,7 +213,7 @@ EOF
         cat >"$dst" <<EOF
 [Unit]
 Description=VPN Bot Telegram (polling + scheduler)
-After=network.target$extra_after
+After=network.target
 
 [Service]
 Type=simple
@@ -234,41 +251,190 @@ install_units() {
     fi
 }
 
+stop_units() {
+    log "Останавливаем сервисы"
+    systemctl stop "$WEB_UNIT" "$TELEGRAM_UNIT" 2>/dev/null || true
+    ok "Службы остановлены"
+}
+
 uninstall_units() {
     log "Останавливаем и отключаем сервисы"
     systemctl disable --now "$WEB_UNIT" "$TELEGRAM_UNIT" 2>/dev/null || true
     rm -f "$SYSTEMD_DIR/$TELEGRAM_UNIT" "$SYSTEMD_DIR/$WEB_UNIT"
     systemctl daemon-reload
-    log "Unit-файлы удалены"
+    ok "Unit-файлы удалены"
 }
 
 show_status() {
-    systemctl --no-pager status "$TELEGRAM_UNIT" "$WEB_UNIT" 2>/dev/null || true
+    echo
+    printf '%s\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    printf '  %s\n' "vpn-bot-telegram"
+    printf '%s\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    if systemctl is-active --quiet "$TELEGRAM_UNIT" 2>/dev/null; then
+        ok "active"
+    elif systemctl list-unit-files "$TELEGRAM_UNIT" 2>/dev/null | grep -q "$TELEGRAM_UNIT"; then
+        warn "inactive или ошибка"
+    else
+        warn "не установлен"
+    fi
+    systemctl --no-pager status "$TELEGRAM_UNIT" 2>/dev/null || true
+
+    echo
+    printf '%s\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    printf '  %s\n' "vpn-bot-web"
+    printf '%s\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    if systemctl is-active --quiet "$WEB_UNIT" 2>/dev/null; then
+        ok "active"
+    elif systemctl list-unit-files "$WEB_UNIT" 2>/dev/null | grep -q "$WEB_UNIT"; then
+        warn "inactive или ошибка"
+    else
+        warn "не установлен"
+    fi
+    systemctl --no-pager status "$WEB_UNIT" 2>/dev/null || true
+    echo
+}
+
+cmd_install() {
+    require_root
+    resolve_paths
+    validate_project
+    ensure_service_user
+    fix_permissions
+    install_units
+    show_status
+    ok "Установка завершена"
+}
+
+cmd_stop() {
+    require_root
+    stop_units
+}
+
+cmd_uninstall() {
+    require_root
+    uninstall_units
+}
+
+cmd_status() {
+    show_status
+}
+
+prompt_install_settings() {
+    local default_dir default_user
+    default_dir="$(default_app_dir)"
+    default_user="vpnbot"
+
+    echo
+    read -r -p "Каталог проекта [$default_dir]: " input_dir
+    APP_DIR="${input_dir:-$default_dir}"
+
+    read -r -p "Пользователь systemd [$default_user]: " input_user
+    SERVICE_USER="${input_user:-$default_user}"
+
+    PYTHON_BIN=""
+    ENABLE_ON_BOOT=1
+    START_NOW=1
+    CREATE_USER=1
+}
+
+pause_menu() {
+    echo
+    read -r -p "Нажмите Enter, чтобы вернуться в меню…" _
+}
+
+draw_menu() {
+    printf '\n'
+    printf '%s\n' '╔══════════════════════════════════════════╗'
+    printf '%s\n' '║       VPN Bot — управление systemd       ║'
+    printf '%s\n' '╠══════════════════════════════════════════╣'
+    printf '%s\n' '║  1) Установить systemd службы            ║'
+    printf '%s\n' '║  2) Проверить состояние служб            ║'
+    printf '%s\n' '║  3) Остановить systemd службы            ║'
+    printf '%s\n' '║  4) Удалить systemd службы               ║'
+    printf '%s\n' '║  5) Выход                                ║'
+    printf '%s\n' '╚══════════════════════════════════════════╝'
+    printf '\n'
+}
+
+interactive_menu() {
+    require_root
+    local choice
+
+    while true; do
+        draw_menu
+        read -r -p 'Выберите пункт [1-5]: ' choice
+
+        case "$choice" in
+            1)
+                prompt_install_settings
+                if (cmd_install); then
+                    ok "Готово"
+                else
+                    warn "Установка не выполнена"
+                fi
+                pause_menu
+                ;;
+            2)
+                cmd_status
+                pause_menu
+                ;;
+            3)
+                set +e
+                cmd_stop
+                set -e
+                pause_menu
+                ;;
+            4)
+                echo
+                read -r -p "Удалить unit-файлы и отключить автозапуск? [y/N]: " confirm
+                if [[ "$confirm" =~ ^([yY]|yes|д|да)$ ]]; then
+                    set +e
+                    cmd_uninstall
+                    set -e
+                else
+                    log "Отменено"
+                fi
+                pause_menu
+                ;;
+            5)
+                log "Выход"
+                exit 0
+                ;;
+            *)
+                warn "Неверный пункт. Введите число от 1 до 5."
+                pause_menu
+                ;;
+        esac
+    done
 }
 
 main() {
     parse_args "$@"
 
-    case "${COMMAND:-install}" in
+    if [[ -z "${COMMAND:-}" ]]; then
+        interactive_menu
+        return
+    fi
+
+    case "$COMMAND" in
         install)
-            require_root
-            resolve_paths
-            validate_project
-            ensure_service_user
-            fix_permissions
-            install_units
-            show_status
-            log "Готово"
-            ;;
-        uninstall)
-            require_root
-            uninstall_units
+            [[ -n "$APP_DIR" ]] || APP_DIR="$(default_app_dir)"
+            cmd_install
             ;;
         status)
-            show_status
+            cmd_status
+            ;;
+        stop)
+            cmd_stop
+            ;;
+        uninstall)
+            cmd_uninstall
+            ;;
+        menu)
+            interactive_menu
             ;;
         *)
-            die "Неизвестная команда: ${COMMAND}"
+            die "Неизвестная команда: $COMMAND (см. --help)"
             ;;
     esac
 }

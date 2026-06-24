@@ -34,12 +34,21 @@ python run_bot.py   # терминал 2 — Telegram polling
 
 ## systemd (пример)
 
-Автоматическая установка (создаёт пользователя `vpnbot`, unit-файлы, автозапуск):
+Интерактивное меню (создаёт пользователя `vpnbot`, unit-файлы, автозапуск):
 
 ```bash
 sudo bash deploy/install-systemd.sh
-# или с явными путями:
-sudo bash deploy/install-systemd.sh --app-dir /opt/vpn-bot --user vpnbot
+```
+
+Пункты меню: установить · проверить статус · остановить · удалить · выход.
+
+Неинтерактивно:
+
+```bash
+sudo bash deploy/install-systemd.sh install -d /opt/vpn-bot -u vpnbot
+sudo bash deploy/install-systemd.sh status
+sudo bash deploy/install-systemd.sh stop
+sudo bash deploy/install-systemd.sh uninstall
 ```
 
 Ручная установка — шаблоны в [`deploy/systemd/`](../deploy/systemd/):
