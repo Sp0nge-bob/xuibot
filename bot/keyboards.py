@@ -12,6 +12,7 @@ from ui.theme import (
     BTN_HOME,
     BTN_PAY,
     BTN_FAQ,
+    BTN_SERVER_STATUS,
     BTN_POLICY,
     BTN_PRIVACY_POLICY,
     BTN_PROMO,
@@ -60,6 +61,7 @@ def main_menu_kb(
             InlineKeyboardButton(text=BTN_PROMO, callback_data="promo_enter"),
             InlineKeyboardButton(text=BTN_FAQ, callback_data="faq_menu"),
         ],
+        [InlineKeyboardButton(text=BTN_SERVER_STATUS, callback_data="server_status")],
         [InlineKeyboardButton(text=BTN_POLICY, callback_data="project_policy")],
         [InlineKeyboardButton(text=BTN_SUPPORT_SHORT, callback_data="support")],
     ]
@@ -452,6 +454,12 @@ def expiry_reminder_kb() -> InlineKeyboardMarkup:
 def trial_confirm_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Активировать", callback_data="trial_confirm")],
+        [InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")],
+    ])
+
+
+def server_status_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")],
     ])
 

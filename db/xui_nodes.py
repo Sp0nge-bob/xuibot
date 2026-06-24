@@ -127,6 +127,7 @@ async def _init_xui_nodes_impl() -> None:
                 health_latency_ms INTEGER,
                 last_health_error TEXT,
                 consecutive_failures INTEGER NOT NULL DEFAULT 0,
+                public_available INTEGER NOT NULL DEFAULT 1,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -144,6 +145,12 @@ async def _init_xui_nodes_impl() -> None:
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_node_health_node ON node_health_checks(node_id, checked_at)"
         )
+        async with db.execute("PRAGMA table_info(xui_nodes)") as cur:
+            cols = {row[1] for row in await cur.fetchall()}
+        if "public_available" not in cols:
+            await db.execute(
+                "ALTER TABLE xui_nodes ADD COLUMN public_available INTEGER NOT NULL DEFAULT 1",
+            )
         await db.commit()
 
     count = await _count_nodes()
@@ -308,6 +315,28 @@ async def _sync_primary_from_env() -> None:
         invalidate_api_cache(primary_id)
 
 
+def _node_public_available(node: dict[str, Any]) -> bool:
+    return bool(int(node.get("public_available", 1)))
+
+
+async def list_public_status_nodes() -> list[dict[str, Any]]:
+    """Ноды для экрана «Доступность серверов» (только привязанные к боту)."""
+    nodes = await list_nodes(enabled_only=True)
+    return sorted(
+        nodes,
+        key=lambda n: (bool(n.get("is_primary")), int(n.get("sort_order") or 0), n.get("name") or ""),
+    )
+
+
+async def toggle_public_available(node_id: int) -> bool | None:
+    node = await get_node(node_id)
+    if not node:
+        return None
+    new_val = 0 if _node_public_available(node) else 1
+    await update_node(node_id, public_available=new_val)
+    return bool(new_val)
+
+
 async def list_nodes(*, enabled_only: bool = False) -> list[dict[str, Any]]:
     await _ensure_init()
     sql = "SELECT * FROM xui_nodes"
@@ -430,7 +459,7 @@ async def update_node(node_id: int, **fields: Any) -> bool:
         "name", "host", "username", "password", "token", "inbound_ids",
         "is_enabled", "sort_order", "last_sync_at", "last_sync_error",
         "is_healthy", "last_health_check_at", "health_latency_ms",
-        "last_health_error", "consecutive_failures",
+        "last_health_error", "consecutive_failures", "public_available",
     }
     parts: list[str] = []
     values: list[Any] = []

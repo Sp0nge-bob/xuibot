@@ -25,6 +25,7 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🖧 Ноды", callback_data="adm:nodes"),
             InlineKeyboardButton(text="📡 Inbounds", callback_data="adm:inbounds"),
         ],
+        [InlineKeyboardButton(text="🌐 Доступность серверов", callback_data="adm:server_status")],
         [
             InlineKeyboardButton(text="❓ FAQ", callback_data="adm:faq"),
             InlineKeyboardButton(text="🔐 Happ", callback_data="adm:happ_crypto"),
@@ -350,6 +351,24 @@ def admin_back_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")],
     ])
+
+
+def admin_server_status_kb(nodes: list) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for node in nodes:
+        nid = node["id"]
+        available = bool(int(node.get("public_available", 1)))
+        icon = "🟢" if available else "🔴"
+        star = "★ " if node.get("is_primary") else ""
+        name = (node.get("name") or f"#{nid}").strip()
+        if len(name) > 28:
+            name = name[:25] + "…"
+        rows.append([InlineKeyboardButton(
+            text=f"{icon} {star}{name}",
+            callback_data=f"adm:server_status:toggle:{nid}",
+        )])
+    rows.append([InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def admin_inbounds_kb(*, differs_from_env: bool = False) -> InlineKeyboardMarkup:
