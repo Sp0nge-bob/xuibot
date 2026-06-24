@@ -189,6 +189,10 @@ async def collect_diagnostics(
     elapsed_ms = int((time.monotonic() - started) * 1000)
     issues: list[str] = []
 
+    platega_probe = probes.get("platega") or {}
+    if platega_probe.get("ok") is False:
+        issues.append("Platega API")
+
     if not tg_info.get("ok"):
         issues.append("Telegram API")
     if lock.get("held") and not lock.get("alive"):
@@ -221,11 +225,16 @@ async def collect_diagnostics(
     elif not settings.START_BOT_IN_WEBAPP:
         issues.append("webhook-процесс (app.py)")
 
+    if not public_health_url and not settings.TEST_MODE:
+        issues.append("PUBLIC_WEBHOOK_URL не задан")
+    if settings.TEST_MODE and (settings.PUBLIC_WEBHOOK_URL or "").strip():
+        issues.append("TEST_MODE + PUBLIC_WEBHOOK_URL")
+
     overall_ok = len(issues) == 0
 
     fulfillment_local = fulfillment_queue_status()
 
-    return {
+    report: dict[str, Any] = {
         "checked_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
         "elapsed_ms": elapsed_ms,
         "overall_ok": overall_ok,
@@ -254,6 +263,138 @@ async def collect_diagnostics(
             "pid": os.getpid(),
         },
     }
+    report["recommendations"] = build_recommendations(report)
+    return report
+
+
+def build_recommendations(report: dict[str, Any]) -> list[str]:
+    """Практические шаги по исправлению обнаруженных проблем."""
+    recs: list[str] = []
+    cfg = report.get("config") or {}
+    port = cfg.get("webhook_port", settings.WEBHOOK_PORT)
+    probes = report.get("probes") or {}
+
+    tg = report.get("telegram") or {}
+    if tg.get("ok") is False:
+        recs.append(
+            "Telegram API: проверьте BOT_TOKEN в .env, затем "
+            "systemctl restart vpn-bot-telegram"
+        )
+
+    lock = report.get("polling_lock") or {}
+    if lock.get("held") and not lock.get("alive"):
+        recs.append(
+            "Мёртвый polling lock: удалите data/.polling.lock и выполните "
+            "systemctl restart vpn-bot-telegram"
+        )
+    elif lock.get("held") and not lock.get("own_process"):
+        pid = lock.get("pid")
+        recs.append(
+            f"Запущено два бота (lock PID {pid}): systemctl stop vpn-bot-telegram; "
+            "pkill -f run_bot.py; удалите data/.polling.lock; запустите снова"
+        )
+    elif not lock.get("held"):
+        recs.append(
+            "Polling lock не захвачен — перезапустите бота: "
+            "systemctl restart vpn-bot-telegram"
+        )
+
+    if not report.get("primary_ready"):
+        err = (report.get("primary_error") or "").lower()
+        if "не настроена" in err:
+            recs.append(
+                "★ Primary не настроена: Админка → Ноды → добавьте основную панель 3x-ui"
+            )
+        elif "отключена" in err:
+            recs.append("★ Primary отключена: Админка → Ноды → включите основную ноду")
+        else:
+            recs.append(
+                "★ Primary недоступна: Админка → Ноды → «Проверить»; "
+                "проверьте URL (без /panel/ в конце), логин/пароль и доступность панели с VPS"
+            )
+
+    if not report.get("webhook_reachable") and not cfg.get("start_bot_in_webapp"):
+        recs.append(
+            f"Webhook не запущен: systemctl start vpn-bot-web · "
+            f"curl http://127.0.0.1:{port}/health · "
+            "journalctl -u vpn-bot-web -n 50"
+        )
+        recs.append(
+            "Или: sudo bash deploy/vpn-bot-ctl.sh → пункт 1 (установка/обновление)"
+        )
+
+    ff = report.get("fulfillment") or {}
+    if report.get("webhook_reachable"):
+        if not ff.get("workers_running"):
+            recs.append(
+                "Очередь выдачи не работает: systemctl restart vpn-bot-web "
+                "(воркеры поднимаются при старте app.py)"
+            )
+        elif ff.get("workers_alive", 0) < ff.get("workers_configured", 1):
+            recs.append(
+                "Часть воркеров упала: journalctl -u vpn-bot-web -f, затем "
+                "systemctl restart vpn-bot-web"
+            )
+
+    pub_probe = probes.get("public_webhook")
+    pub_url = (cfg.get("public_webhook_url") or "").strip()
+    if pub_url and pub_probe and pub_probe.get("ok") is False:
+        recs.append(
+            f"Публичный webhook: nginx/Caddy должен проксировать на 127.0.0.1:{port}; "
+            "проверьте SSL, firewall (80/443)"
+        )
+        recs.append(f"Callback URL в ЛК Platega = {pub_url}")
+        health_check = _public_health_url()
+        if health_check:
+            recs.append(f"Проверка снаружи: curl {health_check}")
+    elif not pub_url and not cfg.get("test_mode"):
+        recs.append(
+            "Задайте PUBLIC_WEBHOOK_URL в .env (HTTPS + путь webhook) "
+            "и тот же URL в ЛК Platega"
+        )
+
+    platega = probes.get("platega") or {}
+    if platega.get("ok") is False:
+        recs.append(
+            "Platega недоступна: проверьте интернет на VPS и PLATEGA_BASE_URL в .env"
+        )
+
+    if not report.get("scheduler_running"):
+        recs.append(
+            "Планировщик остановлен: systemctl restart vpn-bot-telegram · "
+            "tail -f data/logs/bot.log"
+        )
+
+    summary = report.get("nodes_summary") or {}
+    if summary.get("total", 0) == 0:
+        recs.append(
+            "Нет нод в БД: Админка → Ноды → добавьте ★ Primary (URL, логин, инбаунды)"
+        )
+
+    bad_nodes = [
+        n for n in (report.get("nodes") or [])
+        if n.get("is_enabled") and n.get("ok") is False
+    ]
+    if bad_nodes:
+        sample = ", ".join(str(n.get("name") or "?") for n in bad_nodes[:3])
+        extra = f" (+{len(bad_nodes) - 3})" if len(bad_nodes) > 3 else ""
+        recs.append(
+            f"Ноды offline ({sample}{extra}): Админка → Ноды → «Проверить»; "
+            "сверьте host, токен/пароль; с VPS: curl -k https://ваш-host/"
+        )
+
+    if cfg.get("test_mode") and pub_url:
+        recs.append(
+            "TEST_MODE=true при заданном PUBLIC_WEBHOOK_URL — отключите тест-режим для боевых оплат"
+        )
+
+    seen: set[str] = set()
+    unique: list[str] = []
+    for item in recs:
+        if item not in seen:
+            seen.add(item)
+            unique.append(item)
+    return unique[:10]
 
 
 def format_diagnostics_text(report: dict[str, Any]) -> str:
@@ -456,7 +597,25 @@ def format_diagnostics_text(report: dict[str, Any]) -> str:
     wh_path = cfg.get("webhook_path") or settings.WEBHOOK_PATH
     lines.append(f"Webhook path: <code>{html.escape(wh_path)}</code>")
 
+    if not report.get("overall_ok"):
+        recs = report.get("recommendations") or build_recommendations(report)
+        if recs:
+            lines.append("")
+            lines.append("<b>━━ Рекомендации ━━</b>")
+            for idx, rec in enumerate(recs[:8], start=1):
+                lines.append(f"{idx}. {html.escape(rec)}")
+
     text = "\n".join(lines)
     if len(text) > 4000:
-        text = text[:3990] + "\n…"
+        # Сохраняем рекомендации, урезаем середину отчёта
+        head = lines[:20]
+        tail_labels = ("<b>━━ Рекомендации ━━</b>", "<b>━━ Конфиг ━━</b>")
+        tail = []
+        for i, line in enumerate(lines):
+            if any(line.startswith(lbl) for lbl in tail_labels):
+                tail = lines[i:]
+                break
+        text = "\n".join(head + ["<i>… отчёт сокращён …</i>"] + tail)
+        if len(text) > 4000:
+            text = text[:3990] + "\n…"
     return text
