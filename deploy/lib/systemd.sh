@@ -85,19 +85,26 @@ stop_services() {
     ok "Службы остановлены"
 }
 
+unit_is_installed() {
+    local unit="$1"
+    [[ -f "$SYSTEMD_DIR/$unit" ]]
+}
+
 uninstall_services() {
-    log "Удаляем unit-файлы"
+    log "Останавливаем и удаляем службы"
     systemctl disable --now "$WEB_UNIT" "$TELEGRAM_UNIT" 2>/dev/null || true
+    systemctl stop "$WEB_UNIT" "$TELEGRAM_UNIT" 2>/dev/null || true
     rm -f "$SYSTEMD_DIR/$TELEGRAM_UNIT" "$SYSTEMD_DIR/$WEB_UNIT"
     systemctl daemon-reload
+    systemctl reset-failed "$WEB_UNIT" "$TELEGRAM_UNIT" 2>/dev/null || true
     rm -f "$STATE_FILE"
-    ok "Службы удалены"
+    ok "Службы удалены (unit-файлов нет)"
 }
 
 unit_state_label() {
     local unit="$1"
-    if ! systemctl cat "$unit" &>/dev/null; then
-        warn "не установлен"
+    if ! unit_is_installed "$unit"; then
+        ok "не установлен"
         return
     fi
     if systemctl is-active --quiet "$unit" 2>/dev/null; then
@@ -107,28 +114,34 @@ unit_state_label() {
     fi
 }
 
-show_status() {
-    echo
-    printf '%s\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    printf '  vpn-bot-telegram\n'
-    printf '%s\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    unit_state_label "$TELEGRAM_UNIT"
-    systemctl --no-pager status "$TELEGRAM_UNIT" 2>/dev/null | head -n 12 || true
-    if systemctl cat "$TELEGRAM_UNIT" &>/dev/null && ! systemctl is-active --quiet "$TELEGRAM_UNIT" 2>/dev/null; then
-        show_service_logs "$TELEGRAM_UNIT" 15
-    fi
+show_unit_block() {
+    local unit="$1"
+    local title="$2"
 
     echo
     printf '%s\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    printf '  vpn-bot-web\n'
+    printf '  %s\n' "$title"
     printf '%s\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    unit_state_label "$WEB_UNIT"
-    systemctl --no-pager status "$WEB_UNIT" 2>/dev/null | head -n 12 || true
-    if systemctl cat "$WEB_UNIT" &>/dev/null && ! systemctl is-active --quiet "$WEB_UNIT" 2>/dev/null; then
-        show_service_logs "$WEB_UNIT" 15
+
+    if ! unit_is_installed "$unit"; then
+        ok "не установлен — $SYSTEMD_DIR/$unit отсутствует"
+        return
     fi
+
+    unit_state_label "$unit"
+    systemctl --no-pager status "$unit" 2>/dev/null | head -n 12 || true
+    if ! systemctl is-active --quiet "$unit" 2>/dev/null; then
+        show_service_logs "$unit" 15
+    fi
+}
+
+show_status() {
+    show_unit_block "$TELEGRAM_UNIT" "vpn-bot-telegram"
+    show_unit_block "$WEB_UNIT" "vpn-bot-web"
     echo
     if [[ -f "$STATE_FILE" ]]; then
-        log "Каталог: $APP_DIR | пользователь: $SERVICE_USER"
+        # shellcheck disable=SC1090
+        source "$STATE_FILE" 2>/dev/null || true
+        log "Каталог: ${APP_DIR:-?} | пользователь: ${SERVICE_USER:-vpnbot}"
     fi
 }
