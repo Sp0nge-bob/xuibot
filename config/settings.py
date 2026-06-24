@@ -1,7 +1,7 @@
 import json
-from typing import Annotated, List
+from typing import Annotated, Any, List
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode
 
 
@@ -134,6 +134,21 @@ class Settings(BaseSettings):
         def check(user_id: int) -> bool:
             return user_id in self.BOT_ADMINS
         return check
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_inbound_env_keys(cls, data: Any) -> Any:
+        """Частая ошибка в .env: список инбаундов в DEFAULT_INBOUND_ID вместо DEFAULT_SUBSCRIPTION_INBOUNDS."""
+        if not isinstance(data, dict):
+            return data
+        raw = data.get("DEFAULT_INBOUND_ID")
+        if isinstance(raw, str) and "," in raw:
+            parts = [p.strip() for p in raw.split(",") if p.strip()]
+            if parts:
+                data["DEFAULT_INBOUND_ID"] = int(parts[0])
+                if not str(data.get("DEFAULT_SUBSCRIPTION_INBOUNDS") or "").strip():
+                    data["DEFAULT_SUBSCRIPTION_INBOUNDS"] = ",".join(parts)
+        return data
 
     @field_validator("BOT_ADMINS", mode="before")
     @classmethod

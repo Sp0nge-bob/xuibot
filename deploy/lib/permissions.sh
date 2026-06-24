@@ -65,6 +65,12 @@ verify_service_user_access() {
         return 1
     fi
 
+    if ! sudo -u "$SERVICE_USER" -- bash -c "cd '$APP_DIR' && '$py' -c 'from config.settings import settings'" 2>/dev/null; then
+        warn "Ошибка в .env — проверьте DEFAULT_INBOUND_ID и DEFAULT_SUBSCRIPTION_INBOUNDS"
+        sudo -u "$SERVICE_USER" -- bash -c "cd '$APP_DIR' && '$py' -c 'from config.settings import settings'" 2>&1 | tail -n 8 >&2 || true
+        return 1
+    fi
+
     ok "Доступ $SERVICE_USER OK"
     return 0
 }
