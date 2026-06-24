@@ -80,6 +80,9 @@ def _admin_stats_block(stats: dict[str, int]) -> str:
 
 
 async def _admin_menu_text() -> str:
+    orphans = await db.deactivate_orphan_subscriptions()
+    if orphans:
+        logger.info("Admin menu: deactivated {} orphan subscription(s)", orphans)
     stats = await db.get_admin_stats()
     summary = await nodes_db.nodes_summary()
     primary = await nodes_db.get_primary_node()

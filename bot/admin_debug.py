@@ -7,6 +7,8 @@ from db import database as db
 from db import promo_codes as promo_db
 from db import promo_pending as pending_db
 from db import tickets as tickets_db
+from db import trial_grants as trial_db
+from services.xui import remove_client_everywhere
 from config.settings import settings
 from .admin_auth import is_admin
 from .admin_keyboards import (
@@ -220,8 +222,28 @@ async def cb_admin_debug_users_reset(cb: CallbackQuery):
         return
 
     await safe_cb_answer(cb, "Удаляем…")
+    await send_or_edit(cb, "⏳ Удаляем пользователей и подписки с панели…")
+    panel_removed = 0
+    panel_errors = 0
     try:
+        subs = await db.get_all_active_subscriptions()
+        for sub in subs:
+            email = sub.get("client_email")
+            if not email:
+                continue
+            try:
+                await remove_client_everywhere(email)
+                panel_removed += 1
+            except Exception as e:
+                panel_errors += 1
+                logger.error(
+                    "Users reset: panel remove failed for #{} ({}): {}",
+                    sub.get("id"),
+                    email,
+                    e,
+                )
         result = await db.reset_all_users()
+        grants_deleted = await trial_db.reset_all_trial_grants()
     except Exception as e:
         logger.exception("Users reset error: {}", e)
         await send_or_edit(
@@ -233,6 +255,12 @@ async def cb_admin_debug_users_reset(cb: CallbackQuery):
 
     text = (
         "✅ <b>Учёт пользователей очищен</b>\n\n"
-        f"Удалено записей: <b>{result['users_deleted']}</b>"
+        f"Удалено users: <b>{result['users_deleted']}</b>\n"
+        f"Деактивировано подписок: <b>{result.get('subs_deactivated', 0)}</b>\n"
+        f"С панели 3x-ui: <b>{panel_removed}</b>"
     )
+    if panel_errors:
+        text += f"\nОшибок на панели: <b>{panel_errors}</b>"
+    if grants_deleted:
+        text += f"\nСброшено пробных лимитов: <b>{grants_deleted}</b>"
     await send_or_edit(cb, text, admin_debug_kb())

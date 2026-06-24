@@ -260,18 +260,37 @@ async def count_users() -> int:
 
 
 async def reset_all_users() -> dict[str, int]:
-    """Удалить все записи из users (для отладки). Подписки и заказы не трогаются."""
+    """Удалить users и деактивировать все активные подписки (для отладки)."""
     async with get_db() as db:
         await _apply_pragmas(db)
         async with db.execute("SELECT COUNT(*) FROM users") as cur:
             users_count = int((await cur.fetchone())[0])
+        cur = await db.execute(
+            "UPDATE subscriptions SET is_active = 0 WHERE is_active = 1",
+        )
+        subs_deactivated = int(cur.rowcount)
         cur = await db.execute("DELETE FROM users")
         users_deleted = cur.rowcount
         await db.commit()
     return {
         "users_deleted": users_deleted,
         "users_count": users_count,
+        "subs_deactivated": subs_deactivated,
     }
+
+
+async def deactivate_orphan_subscriptions() -> int:
+    """Деактивировать активные подписки без записи в users (после частичного сброса)."""
+    async with get_db() as db:
+        await _apply_pragmas(db)
+        cur = await db.execute(
+            """UPDATE subscriptions SET is_active = 0
+               WHERE is_active = 1
+                 AND tg_id NOT IN (SELECT tg_id FROM users)""",
+        )
+        count = int(cur.rowcount)
+        await db.commit()
+    return count
 
 
 async def count_orders() -> int:
@@ -632,8 +651,9 @@ async def count_active_trial_subscriptions() -> int:
     async with get_db() as db:
         await _apply_pragmas(db)
         async with db.execute(
-            """SELECT COUNT(*) FROM subscriptions
-               WHERE is_active = 1 AND client_email LIKE 'tgfree%'"""
+            """SELECT COUNT(*) FROM subscriptions s
+               INNER JOIN users u ON u.tg_id = s.tg_id
+               WHERE s.is_active = 1 AND s.client_email LIKE 'tgfree%'"""
         ) as cur:
             row = await cur.fetchone()
             return int(row[0]) if row else 0
@@ -701,13 +721,15 @@ async def get_admin_stats() -> Dict[str, int]:
         async with db.execute("SELECT COUNT(*) FROM users") as cur:
             users = (await cur.fetchone())[0]
         async with db.execute(
-            """SELECT COUNT(*) FROM subscriptions
-               WHERE is_active = 1 AND client_email NOT LIKE 'tgfree%'""",
+            """SELECT COUNT(*) FROM subscriptions s
+               INNER JOIN users u ON u.tg_id = s.tg_id
+               WHERE s.is_active = 1 AND s.client_email NOT LIKE 'tgfree%'""",
         ) as cur:
             paid_subs = (await cur.fetchone())[0]
         async with db.execute(
-            """SELECT COUNT(*) FROM subscriptions
-               WHERE is_active = 1 AND client_email LIKE 'tgfree%'""",
+            """SELECT COUNT(*) FROM subscriptions s
+               INNER JOIN users u ON u.tg_id = s.tg_id
+               WHERE s.is_active = 1 AND s.client_email LIKE 'tgfree%'""",
         ) as cur:
             trial_subs = (await cur.fetchone())[0]
         async with db.execute("SELECT COUNT(*) FROM orders WHERE status = 'paid'") as cur:
@@ -786,6 +808,7 @@ async def count_connected_users(*, trial_only: Optional[bool] = None) -> int:
     async with get_db() as db:
         async with db.execute(
             f"""SELECT COUNT(DISTINCT s.tg_id) FROM subscriptions s
+                INNER JOIN users u ON u.tg_id = s.tg_id
                 WHERE s.is_active = 1{clause}""",
         ) as cur:
             return (await cur.fetchone())[0]
