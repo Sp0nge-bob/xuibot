@@ -47,13 +47,12 @@ async def list_subscription_inbounds_status() -> list[dict[str, Any]]:
     remarks = await _fetch_inbound_remarks(inbound_ids)
 
     items: list[dict[str, Any]] = []
-    for idx, inbound_id in enumerate(inbound_ids):
+    for inbound_id in inbound_ids:
         remark = remarks.get(inbound_id) or f"Inbound #{inbound_id}"
         items.append({
             "id": inbound_id,
             "remark": remark,
             "available": status_map.get(inbound_id, True),
-            "is_main": idx == 0,
         })
     return items
 
@@ -85,9 +84,7 @@ def format_user_server_status_text(items: list[dict[str, Any]]) -> str:
         available = bool(item.get("available", True))
         icon = _status_icon(available)
         status = "работает" if available else "временно недоступен"
-        star = "★ " if item.get("is_main") else ""
-        main_hint = " · <i>главный</i>" if item.get("is_main") else ""
-        lines.append(f"{icon} {star}{_inbound_title(item)} — {status}{main_hint}")
+        lines.append(f"{icon} {_inbound_title(item)} — {status}")
 
     return "\n".join(lines)
 
@@ -114,6 +111,5 @@ def format_admin_server_status_text(items: list[dict[str, Any]]) -> str:
     for item in items:
         available = bool(item.get("available", True))
         icon = _status_icon(available)
-        star = "★ " if item.get("is_main") else ""
-        lines.append(f"{icon} {star}{_inbound_title(item, show_id=True)}")
+        lines.append(f"{icon} {_inbound_title(item, show_id=True)}")
     return "\n".join(lines)

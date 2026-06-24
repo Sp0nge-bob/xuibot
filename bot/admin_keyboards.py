@@ -359,12 +359,11 @@ def admin_server_status_kb(items: list) -> InlineKeyboardMarkup:
         inbound_id = int(item["id"])
         available = bool(item.get("available", True))
         icon = "🟢" if available else "🔴"
-        star = "★ " if item.get("is_main") else ""
         label = (item.get("remark") or f"#{inbound_id}").strip()
         if len(label) > 24:
             label = label[:21] + "…"
         rows.append([InlineKeyboardButton(
-            text=f"{icon} {star}{label}",
+            text=f"{icon} {label}",
             callback_data=f"adm:server_status:toggle:{inbound_id}",
         )])
     rows.append([InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")])
