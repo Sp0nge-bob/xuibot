@@ -8,8 +8,13 @@ from loguru import logger
 
 from db import xui_nodes as nodes_db
 from db import bot_settings as bot_settings_db
+from config.settings import settings
 from db.bot_settings import (
+    SETTING_SUBSCRIPTION_INBOUNDS,
+    get_setting,
+    get_subscription_inbound_ids,
     get_subscription_inbounds_display,
+    reset_subscription_inbounds_to_env,
     set_subscription_inbound_ids,
 )
 from services.node_health import check_all_nodes_health, check_node_health
@@ -229,8 +234,22 @@ async def node_detail_text(node: dict) -> str:
     return "\n".join(lines)
 
 
+def _env_inbounds_display() -> str:
+    return ", ".join(str(x) for x in settings.subscription_inbound_ids())
+
+
+async def _inbounds_differs_from_env() -> bool:
+    env_ids = settings.subscription_inbound_ids()
+    current_ids = await get_subscription_inbound_ids()
+    if current_ids != env_ids:
+        return True
+    stored = await get_setting(SETTING_SUBSCRIPTION_INBOUNDS)
+    return bool(stored and stored.strip())
+
+
 async def inbounds_page_text() -> str:
     current = await get_subscription_inbounds_display()
+    env_display = _env_inbounds_display()
     primary = await nodes_db.get_primary_node()
     primary_name = (primary or {}).get("name") or "—"
     lines = [
@@ -238,6 +257,7 @@ async def inbounds_page_text() -> str:
         "━━━━━━━━━━━━━━━━",
         "",
         f"Текущие ID: <code>{current or '—'}</code>",
+        f"В .env: <code>{env_display}</code>",
         f"★ Основная нода: <b>{primary_name}</b>",
         "",
         "<i>Используются при создании новых клиентов на основной панели.</i>",
@@ -373,13 +393,37 @@ async def cb_nodes_sync_toggle(cb: CallbackQuery):
     await send_or_edit(cb, text, nodes_list_kb(nodes, sync_disabled=sync_disabled))
 
 
+async def _show_inbounds_page(cb: CallbackQuery) -> None:
+    differs = await _inbounds_differs_from_env()
+    await send_or_edit(
+        cb,
+        await inbounds_page_text(),
+        admin_inbounds_kb(differs_from_env=differs),
+    )
+
+
 @router.callback_query(F.data == "adm:inbounds")
 async def cb_inbounds_page(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
         return
     await state.clear()
     await safe_cb_answer(cb)
-    await send_or_edit(cb, await inbounds_page_text(), admin_inbounds_kb())
+    await _show_inbounds_page(cb)
+
+
+@router.callback_query(F.data == "adm:inbounds:reset_env")
+async def cb_inbounds_reset_env(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    await state.clear()
+    try:
+        value = await reset_subscription_inbounds_to_env()
+    except Exception as e:
+        logger.exception("Inbounds reset to env failed: {}", e)
+        await safe_cb_answer(cb, f"Ошибка: {str(e)[:80]}", show_alert=True)
+        return
+    await safe_cb_answer(cb, f"Сброшено: {value}")
+    await _show_inbounds_page(cb)
 
 
 @router.callback_query(F.data == "adm:inbounds:edit")
@@ -428,9 +472,10 @@ async def msg_inbounds_edit(message: Message, state: FSMContext):
         return
     await state.clear()
     value = ", ".join(str(x) for x in ids)
+    differs = await _inbounds_differs_from_env()
     await message.answer(
         f"✅ Inbounds обновлены: <code>{value}</code>",
-        reply_markup=admin_inbounds_kb(),
+        reply_markup=admin_inbounds_kb(differs_from_env=differs),
     )
 
 
@@ -444,7 +489,7 @@ async def cb_node_wizard_cancel(cb: CallbackQuery, state: FSMContext):
     await state.clear()
     await safe_cb_answer(cb, "Отменено")
     if inbound_edit:
-        await send_or_edit(cb, await inbounds_page_text(), admin_inbounds_kb())
+        await _show_inbounds_page(cb)
         return
     if edit_id:
         node = await nodes_db.get_node(edit_id)

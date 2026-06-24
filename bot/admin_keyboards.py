@@ -352,11 +352,17 @@ def admin_back_kb() -> InlineKeyboardMarkup:
     ])
 
 
-def admin_inbounds_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
+def admin_inbounds_kb(*, differs_from_env: bool = False) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = [
         [InlineKeyboardButton(text="✏️ Изменить инбаунды", callback_data="adm:inbounds:edit")],
-        [InlineKeyboardButton(text="« Назад", callback_data="adm:menu")],
-    ])
+    ]
+    if differs_from_env:
+        rows.append([InlineKeyboardButton(
+            text="↩️ Сбросить до .env",
+            callback_data="adm:inbounds:reset_env",
+        )])
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data="adm:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def admin_users_menu_kb(*, paid_count: int, trial_count: int) -> InlineKeyboardMarkup:

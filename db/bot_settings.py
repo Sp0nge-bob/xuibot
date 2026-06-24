@@ -81,6 +81,32 @@ async def set_subscription_inbound_ids(inbound_ids: List[int]) -> str:
     return value
 
 
+async def clear_subscription_inbound_ids_override() -> None:
+    """Убрать runtime-переопределение из bot_settings."""
+    async with get_db() as db:
+        await db.execute(
+            "DELETE FROM bot_settings WHERE key = ?",
+            (SETTING_SUBSCRIPTION_INBOUNDS,),
+        )
+        await db.commit()
+
+
+async def reset_subscription_inbounds_to_env() -> str:
+    """Сбросить инбаунды подписки к DEFAULT_SUBSCRIPTION_INBOUNDS из .env."""
+    env_ids = settings.subscription_inbound_ids()
+    await clear_subscription_inbound_ids_override()
+    try:
+        from db import xui_nodes as nodes_db
+
+        primary = await nodes_db.get_primary_node()
+        node_id = int((primary or {}).get("id") or 0)
+        if node_id > 0:
+            await nodes_db.update_node(node_id, inbound_ids=env_ids)
+    except Exception:
+        pass
+    return ", ".join(str(x) for x in env_ids)
+
+
 async def get_subscription_inbounds_display() -> str:
     ids = await get_subscription_inbound_ids()
     return ", ".join(str(x) for x in ids)
