@@ -85,6 +85,24 @@ stop_services() {
     ok "Службы остановлены"
 }
 
+restart_services() {
+    load_config
+    if ! unit_is_installed "$TELEGRAM_UNIT" || ! unit_is_installed "$WEB_UNIT"; then
+        warn "Службы не установлены — сначала пункт 1 (установить / обновить)"
+        return 1
+    fi
+    log "Быстрый перезапуск (без обновления venv и unit-файлов)"
+    rm -f "$APP_DIR/data/.polling.lock"
+    systemctl restart "$TELEGRAM_UNIT"
+    systemctl restart "$WEB_UNIT"
+    if verify_services; then
+        ok "Службы перезапущены"
+        return 0
+    fi
+    warn "После перезапуска не все службы active — см. journalctl выше"
+    return 1
+}
+
 unit_is_installed() {
     local unit="$1"
     [[ -f "$SYSTEMD_DIR/$unit" ]]

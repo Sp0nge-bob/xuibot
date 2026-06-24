@@ -32,10 +32,11 @@ draw_menu() {
     printf '%s\n' '║       VPN Bot — управление systemd       ║'
     printf '%s\n' '╠══════════════════════════════════════════╣'
     printf '%s\n' '║  1) Установить / обновить службы         ║'
-    printf '%s\n' '║  2) Проверить состояние служб            ║'
-    printf '%s\n' '║  3) Логи в реальном времени              ║'
-    printf '%s\n' '║  4) Остановить systemd службы            ║'
-    printf '%s\n' '║  5) Удалить systemd службы               ║'
+    printf '%s\n' '║  2) Перезапустить службы (быстро)        ║'
+    printf '%s\n' '║  3) Проверить состояние служб            ║'
+    printf '%s\n' '║  4) Логи в реальном времени              ║'
+    printf '%s\n' '║  5) Остановить systemd службы            ║'
+    printf '%s\n' '║  6) Удалить systemd службы               ║'
     printf '%s\n' '║  0) Выход                                ║'
     printf '%s\n' '╚══════════════════════════════════════════╝'
     printf '\n'
@@ -55,7 +56,7 @@ interactive_menu() {
 
     while true; do
         draw_menu
-        read -r -p 'Выберите пункт [0-5]: ' choice </dev/tty
+        read -r -p 'Выберите пункт [0-6]: ' choice </dev/tty
 
         case "$choice" in
             1)
@@ -65,19 +66,24 @@ interactive_menu() {
                 pause_menu
                 ;;
             2)
+                echo
+                run_action restart_services
+                pause_menu
+                ;;
+            3)
                 load_config 2>/dev/null || true
                 show_status
                 pause_menu
                 ;;
-            3)
+            4)
                 run_action follow_all_logs
                 pause_menu
                 ;;
-            4)
+            5)
                 run_action stop_services
                 pause_menu
                 ;;
-            5)
+            6)
                 read -r -p "Удалить службы? [y/N]: " confirm </dev/tty
                 if [[ "$confirm" =~ ^([yY]|yes|д|да)$ ]]; then
                     run_action uninstall_services
@@ -90,7 +96,7 @@ interactive_menu() {
                 exit 0
                 ;;
             *)
-                warn "Введите 0 или число 1–5"
+                warn "Введите 0 или число 1–6"
                 pause_menu
                 ;;
         esac
@@ -105,6 +111,10 @@ main() {
             ;;
         install|reconcile)
             cmd_reconcile
+            ;;
+        restart)
+            require_root
+            restart_services
             ;;
         status)
             load_config 2>/dev/null || true
@@ -128,6 +138,7 @@ VPN Bot — systemd
 
   sudo bash deploy/vpn-bot-ctl.sh          # меню
   sudo bash deploy/vpn-bot-ctl.sh install  # установить / обновить
+  sudo bash deploy/vpn-bot-ctl.sh restart  # быстрый перезапуск служб
   sudo bash deploy/vpn-bot-ctl.sh status
   sudo bash deploy/vpn-bot-ctl.sh logs     # tail -f data/logs/bot.log
   sudo bash deploy/vpn-bot-ctl.sh stop
