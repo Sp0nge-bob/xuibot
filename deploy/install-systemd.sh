@@ -196,13 +196,32 @@ ensure_venv() {
     ok "Virtualenv создан"
 }
 
+fix_repo_ownership_for_git() {
+    # После старых версий скрипта .git мог уйти к vpnbot — возвращаем root для git pull.
+    if [[ -d "$APP_DIR/.git" ]]; then
+        chown -R root:root "$APP_DIR/.git"
+        git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
+    fi
+    chown root:root "$APP_DIR" 2>/dev/null || true
+}
+
 fix_permissions() {
-    log "Права на $APP_DIR → $SERVICE_USER"
+    log "Права для $SERVICE_USER (исходники остаются у root, .git не трогаем)"
     mkdir -p "$APP_DIR/data/logs" "$APP_DIR/.cache/pip"
-    chown -R "$SERVICE_USER:$SERVICE_USER" "$APP_DIR"
+    fix_repo_ownership_for_git
+
+    # vpnbot читает код как «other», пишет только в runtime-каталоги
+    chmod -R a+rX "$APP_DIR"
+    find "$APP_DIR" -type d -exec chmod a+x {} + 2>/dev/null || true
+
+    if [[ -d "$APP_DIR/.venv" ]]; then
+        chown -R "$SERVICE_USER:$SERVICE_USER" "$APP_DIR/.venv"
+    fi
+    chown -R "$SERVICE_USER:$SERVICE_USER" "$APP_DIR/data" "$APP_DIR/.cache"
+
     if [[ -f "$APP_DIR/.env" ]]; then
-        chmod 600 "$APP_DIR/.env"
         chown "$SERVICE_USER:$SERVICE_USER" "$APP_DIR/.env"
+        chmod 600 "$APP_DIR/.env"
     fi
 }
 
@@ -407,6 +426,7 @@ cmd_install() {
     auto_configure_install
     log "Каталог: $APP_DIR"
     log "Пользователь: $SERVICE_USER"
+    fix_repo_ownership_for_git
     resolve_paths
     validate_project
     ensure_service_user
