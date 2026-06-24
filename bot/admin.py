@@ -145,9 +145,9 @@ async def cb_admin_menu(cb: CallbackQuery, state: FSMContext):
     )
 
 
-async def _admin_stats_text() -> str:
+async def _admin_stats_text(*, refresh: bool = False) -> str:
     stats = await db.get_admin_stats()
-    usage_line = await fetch_bot_load_block()
+    usage_line = await fetch_bot_load_block(cpu_sample_sec=0.35 if refresh else 0.15)
     summary = await nodes_db.nodes_summary()
     primary = await nodes_db.get_primary_node()
     return (
@@ -162,7 +162,7 @@ async def _admin_stats_text() -> str:
 
 async def _show_admin_stats(cb: CallbackQuery, *, refresh: bool) -> None:
     await safe_cb_answer(cb, "Обновляем…" if refresh else None)
-    text = await _admin_stats_text()
+    text = await _admin_stats_text(refresh=refresh)
     await send_or_edit(cb, text, admin_stats_kb())
 
 

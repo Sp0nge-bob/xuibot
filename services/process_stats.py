@@ -6,6 +6,7 @@ import os
 import sys
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -23,6 +24,26 @@ class ProcessUsage:
     role: str
     cpu_percent: float
     rss_mb: float
+
+
+@dataclass(frozen=True)
+class BotLoadSnapshot:
+    usages: list[ProcessUsage]
+    sampled_at: datetime
+    cpu_sample_sec: float = 0.15
+
+
+def _fmt_cpu(cpu: float) -> str:
+    if cpu < 0.05:
+        return "<0.1"
+    if cpu < 10:
+        text = f"{cpu:.2f}".rstrip("0").rstrip(".")
+        return text or "0"
+    return f"{cpu:.1f}"
+
+
+def _fmt_ram(mb: float) -> str:
+    return f"{mb:.2f}"
 
 
 def _normalize_path(text: str) -> str:
@@ -172,11 +193,22 @@ def get_bot_processes_usage(*, cpu_sample_sec: float = 0.1) -> Optional[list[Pro
             ProcessUsage(
                 pid=proc.pid,
                 role=role,
-                cpu_percent=round(cpu, 1),
-                rss_mb=round(rss, 1),
+                cpu_percent=cpu,
+                rss_mb=rss,
             )
         )
     return usages
+
+
+def get_bot_load_snapshot(*, cpu_sample_sec: float = 0.15) -> Optional[BotLoadSnapshot]:
+    usages = get_bot_processes_usage(cpu_sample_sec=cpu_sample_sec)
+    if usages is None:
+        return None
+    return BotLoadSnapshot(
+        usages=usages,
+        sampled_at=datetime.utcnow(),
+        cpu_sample_sec=cpu_sample_sec,
+    )
 
 
 def _expected_roles() -> list[str]:
@@ -185,10 +217,11 @@ def _expected_roles() -> list[str]:
     return [role for _, role in _SCRIPT_ROLES]
 
 
-def format_bot_processes_block(usages: Optional[list[ProcessUsage]]) -> str:
-    if usages is None:
+def format_bot_processes_block(snapshot: Optional[BotLoadSnapshot]) -> str:
+    if snapshot is None:
         return "💻 Нагрузка бота: <i>недоступно</i> (установите <code>psutil</code>)"
 
+    usages = snapshot.usages
     expected = _expected_roles()
     by_role = {u.role: u for u in usages}
     rows: list[str] = []
@@ -199,15 +232,18 @@ def format_bot_processes_block(usages: Optional[list[ProcessUsage]]) -> str:
             rows.append(f"├ {role}: <i>не запущен</i>")
             continue
         rows.append(
-            f"├ {usage.role}: CPU <b>{usage.cpu_percent}%</b> · "
-            f"RAM <b>{usage.rss_mb} MB</b> (pid {usage.pid})"
+            f"├ {usage.role}: CPU <b>{_fmt_cpu(usage.cpu_percent)}%</b> · "
+            f"RAM <b>{_fmt_ram(usage.rss_mb)} MB</b> (pid {usage.pid})"
         )
 
     active = [by_role[r] for r in expected if r in by_role]
     if len(active) >= 2:
-        total_cpu = round(sum(u.cpu_percent for u in active), 1)
-        total_ram = round(sum(u.rss_mb for u in active), 1)
-        rows.append(f"└ Итого бот: CPU <b>{total_cpu}%</b> · RAM <b>{total_ram} MB</b>")
+        total_cpu = sum(u.cpu_percent for u in active)
+        total_ram = sum(u.rss_mb for u in active)
+        rows.append(
+            f"└ Итого бот: CPU <b>{_fmt_cpu(total_cpu)}%</b> · "
+            f"RAM <b>{_fmt_ram(total_ram)} MB</b>"
+        )
     elif rows:
         rows[-1] = rows[-1].replace("├", "└", 1)
 
@@ -219,18 +255,23 @@ def format_bot_processes_block(usages: Optional[list[ProcessUsage]]) -> str:
             f"(текущий: <code>{name}</code>)</i>"
         )
 
-    return "💻 <b>Нагрузка бота на VPS</b>\n" + "\n".join(rows)
+    stamp = snapshot.sampled_at.strftime("%H:%M:%S")
+    window = f"{snapshot.cpu_sample_sec:.1f}".rstrip("0").rstrip(".")
+    return (
+        "💻 <b>Нагрузка бота на VPS</b>\n"
+        + "\n".join(rows)
+        + f"\n<i>замер {stamp} UTC · окно CPU {window} с</i>"
+    )
 
 
-def build_bot_load_block(*, cpu_sample_sec: float = 0.1) -> str:
-    usages = get_bot_processes_usage(cpu_sample_sec=cpu_sample_sec)
-    return format_bot_processes_block(usages)
+def build_bot_load_block(*, cpu_sample_sec: float = 0.15) -> str:
+    return format_bot_processes_block(get_bot_load_snapshot(cpu_sample_sec=cpu_sample_sec))
 
 
-async def fetch_bot_load_block(*, cpu_sample_sec: float = 0.1) -> str:
+async def fetch_bot_load_block(*, cpu_sample_sec: float = 0.15) -> str:
     return await asyncio.to_thread(build_bot_load_block, cpu_sample_sec=cpu_sample_sec)
 
 
 # Совместимость со старым именем
-async def fetch_process_usage_line(*, cpu_sample_sec: float = 0.1) -> str:
+async def fetch_process_usage_line(*, cpu_sample_sec: float = 0.15) -> str:
     return await fetch_bot_load_block(cpu_sample_sec=cpu_sample_sec)
