@@ -32,6 +32,7 @@ class AdminStates(StatesGroup):
     waiting_paid_limit_ip = State()
     waiting_privacy_policy_url = State()
     waiting_terms_of_service_url = State()
+    waiting_backup_interval = State()
 
 
 class AdminPricingStates(StatesGroup):

@@ -8,6 +8,8 @@ from pydantic_settings import BaseSettings, NoDecode
 class Settings(BaseSettings):
     # Telegram
     BOT_TOKEN: str
+    # Название в /start и пользовательских экранах (заголовок главного меню)
+    BOT_BRAND: str = "VPN Bot"
     # NoDecode: иначе pydantic-settings парсит List как JSON и падает на "id1,id2"
     BOT_ADMINS: Annotated[List[int], NoDecode] = []
 
@@ -46,6 +48,10 @@ class Settings(BaseSettings):
     FULL_SYNC_INTERVAL_HOURS: int = 24
     # Проверка истекших подписок (disable на панели) — bot/scheduler.py
     EXPIRED_CHECK_INTERVAL_HOURS: int = 1
+    # Удаление неактивных подписок и клиентов на панели (дней после end_date) — bot/scheduler.py
+    EXPIRED_PURGE_ENABLED: bool = True
+    EXPIRED_PURGE_AFTER_DAYS: int = 14
+    EXPIRED_PURGE_INTERVAL_HOURS: int = 24
     # Напоминание об окончании подписки (за N дней, не чаще раза в сутки)
     EXPIRY_REMINDER_ENABLED: bool = True
     EXPIRY_REMINDER_DAYS: int = 3
@@ -97,9 +103,9 @@ class Settings(BaseSettings):
     LOG_ARCHIVE_RETAIN: int = 5
     LOG_HEARTBEAT_INTERVAL_MINUTES: int = 60
 
-    # Ежедневный бэкап БД в ЛС админам (run_bot.py + планировщик)
+    # Автобэкап БД в ЛС админам (run_bot.py + планировщик)
     BACKUP_ENABLED: bool = True
-    BACKUP_HOUR_UTC: int = 3
+    BACKUP_INTERVAL: str = "24h"
     BACKUP_LOCAL_RETAIN: int = 5
 
     # Защита от наложения нажатий (двойная оплата, параллельные callback)

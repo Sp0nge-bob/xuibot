@@ -1,47 +1,13 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from config.settings import settings
 from config.trial import is_trial_email
 from .admin_users import subscription_picker_button_label
 
 
-def admin_menu_kb() -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(text="📊 Статистика", callback_data="adm:stats")],
-        [InlineKeyboardButton(text="🔍 Диагностика", callback_data="adm:diagnostics")],
-        [
-            InlineKeyboardButton(text="💰 Тарифы", callback_data="adm:plans"),
-            InlineKeyboardButton(text="💳 Оплата", callback_data="adm:payments"),
-        ],
-        [
-            InlineKeyboardButton(text="🎟 Промокоды", callback_data="adm:promos"),
-            InlineKeyboardButton(text="🎁 Пробный", callback_data="adm:trial"),
-        ],
-        [
-            InlineKeyboardButton(text="👥 Клиенты", callback_data="adm:users"),
-            InlineKeyboardButton(text="🎫 Тикеты", callback_data="adm:tickets"),
-        ],
-        [
-            InlineKeyboardButton(text="🖧 Ноды", callback_data="adm:nodes"),
-            InlineKeyboardButton(text="📡 Inbounds", callback_data="adm:inbounds"),
-        ],
-        [InlineKeyboardButton(text="🌐 Доступность инбаундов", callback_data="adm:server_status")],
-        [
-            InlineKeyboardButton(text="❓ FAQ", callback_data="adm:faq"),
-            InlineKeyboardButton(text="🔐 Happ", callback_data="adm:happ_crypto"),
-        ],
-        [
-            InlineKeyboardButton(text="📱 Лимит IP", callback_data="adm:limit_ip"),
-        ],
-        [
-            InlineKeyboardButton(text="📢 /start", callback_data="adm:start_text"),
-            InlineKeyboardButton(text="📄 Документы", callback_data="adm:legal"),
-        ],
-        [InlineKeyboardButton(text="💾 Бэкап", callback_data="adm:backup")],
-    ]
-    if settings.ALLOW_DEBUG_ADMIN:
-        rows.append([InlineKeyboardButton(text="🧪 Отладка", callback_data="adm:debug")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+def admin_menu_kb(*, pending_tickets: int = 0) -> InlineKeyboardMarkup:
+    from .admin_menu import admin_hub_root_kb
+
+    return admin_hub_root_kb(pending_tickets=pending_tickets)
 
 
 def admin_legal_kb(
@@ -208,19 +174,36 @@ def admin_backup_kb(
     *,
     backup_enabled: bool = True,
     env_disabled: bool = False,
+    interval: str = "24h",
+    interval_overridden: bool = False,
 ) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="📤 Отправить бэкап сейчас", callback_data="adm:backup:now")],
     ]
     if not env_disabled:
+        rows.append([InlineKeyboardButton(
+            text=f"⏱ Интервал: {interval}",
+            callback_data="adm:backup:interval:edit",
+        )])
         toggle_label = (
-            "⏸ Выключить ежедневный бэкап"
+            "⏸ Выключить автобэкап"
             if backup_enabled
-            else "▶️ Включить ежедневный бэкап"
+            else "▶️ Включить автобэкап"
         )
         rows.append([InlineKeyboardButton(text=toggle_label, callback_data="adm:backup:toggle")])
+        if interval_overridden:
+            rows.append([InlineKeyboardButton(
+                text="↩️ Интервал из .env",
+                callback_data="adm:backup:interval:reset",
+            )])
     rows.append([InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_backup_interval_edit_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="« Отмена", callback_data="adm:backup")],
+    ])
 
 
 def admin_debug_entry_confirm_kb() -> InlineKeyboardMarkup:
@@ -332,10 +315,20 @@ def admin_limit_ip_kb() -> InlineKeyboardMarkup:
     ])
 
 
-def admin_payment_methods_kb(enabled: dict[str, bool]) -> InlineKeyboardMarkup:
+def admin_payment_methods_kb(
+    enabled: dict[str, bool],
+    *,
+    admin_notify_enabled: bool = True,
+) -> InlineKeyboardMarkup:
     from config.payments import all_payment_method_definitions
 
-    rows: list[list[InlineKeyboardButton]] = []
+    notify_flag = "✅" if admin_notify_enabled else "❌"
+    rows: list[list[InlineKeyboardButton]] = [
+        [InlineKeyboardButton(
+            text=f"{notify_flag} Уведомления об оплатах",
+            callback_data="adm:payments:notify_toggle",
+        )],
+    ]
     for m in all_payment_method_definitions():
         is_on = enabled.get(m["key"], False)
         status = "✅" if is_on else "❌"

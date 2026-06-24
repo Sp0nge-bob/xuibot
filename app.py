@@ -25,6 +25,7 @@ from config.settings import settings, warn_unsafe_runtime_config
 warn_unsafe_runtime_config()
 from db.database import init_db
 from db.connection import close_connection
+from services.platega import normalize_platega_status
 from services.platega_client import verify_callback_headers
 from services.webhook_guard import acquire_webhook, webhook_rate_limited
 from services.fulfillment_queue import (
@@ -130,7 +131,7 @@ async def platega_webhook(
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     tx_id = body.get("id")
-    status = body.get("status")
+    status = normalize_platega_status(body.get("status") or "")
     payment_method = body.get("paymentMethod")
 
     if not tx_id or not status:

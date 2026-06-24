@@ -522,16 +522,10 @@ async def _purge_email_from_all_inbound_settings(api: AsyncApi, email: str) -> l
 
 
 async def _ensure_email_absent_on_panel(api: AsyncApi, email: str) -> list[int]:
-    """Полная очистка перед add: unified del + settings всех инбаундов."""
-    await _delete_client_by_email(api, email)
-    try:
-        purged = await _purge_email_from_all_inbound_settings(api, email)
-    except Exception as e:
-        logger.warning("settings purge {} на панели: {}", email, e)
-        purged = []
-    if purged:
-        await asyncio.sleep(0.5)
-    return purged
+    """Полная очистка перед add: unified del + settings всех инбаундов (только если есть следы)."""
+    if not await _is_client_present_on_panel(api, email):
+        return []
+    return await _purge_client_from_panel(api, email)
 
 
 async def _locate_client_inbounds(
@@ -540,6 +534,50 @@ async def _locate_client_inbounds(
     cache = get_panel_cache(api)
     await cache.refresh(api, force=force)
     return cache.locate(email)
+
+
+async def _is_client_present_on_panel(api: AsyncApi, email: str) -> bool:
+    """Следы клиента на панели (unified, кэш инбаундов, groups) — без clients/del."""
+    _assert_bot_client_email(email)
+    key = email.lower()
+    if await _unified_get_client_info(api, email):
+        return True
+    if await _locate_client_inbounds(api, email, force=False):
+        return True
+    cache = get_panel_cache(api)
+    for inbound in await cache.refresh(api, force=False):
+        for client in inbound.settings.clients or []:
+            if (client.email or "").lower() == key:
+                return True
+    if key in await _list_bot_group_emails_on_panel(api):
+        return True
+    return False
+
+
+async def _purge_client_from_panel(
+    api: AsyncApi,
+    email: str,
+    *,
+    inbound_ids: list[int] | None = None,
+) -> list[int]:
+    """clients/del + settings purge (вызывать только если клиент найден на панели)."""
+    panel_cache.invalidate()
+    await _delete_client_by_email(api, email)
+    purged: list[int] = []
+    try:
+        if inbound_ids:
+            for iid in inbound_ids:
+                if await _remove_email_from_inbound_settings(api, email, iid):
+                    purged.append(iid)
+        else:
+            purged = await _purge_email_from_all_inbound_settings(api, email)
+    except Exception as e:
+        logger.warning("settings purge {} на панели: {}", email, e)
+        purged = []
+    if purged:
+        await asyncio.sleep(0.5)
+    panel_cache.invalidate()
+    return sorted(set(purged))
 
 
 async def _missing_inbound_ids(
@@ -909,16 +947,13 @@ async def is_client_present_on_any_node(email: str) -> bool:
     from db.xui_nodes import list_nodes
 
     _assert_bot_client_email(email)
-    key = email.lower()
     nodes = _dedupe_nodes_by_host(await list_nodes(enabled_only=True))
     targets = nodes or [{"host": settings.XUI_HOST}]
 
     for node in targets:
         try:
             api = await get_api_for_node(node) if nodes else await get_api()
-            if await _unified_get_client_info(api, email):
-                return True
-            if key in await list_bot_client_emails_on_panel(api):
+            if await _is_client_present_on_panel(api, email):
                 return True
         except Exception as e:
             logger.debug(
@@ -956,7 +991,6 @@ async def purge_client_on_secondaries(email: str) -> list[str]:
     from db.xui_nodes import get_secondary_nodes
 
     _assert_bot_client_email(email)
-    key = email.lower()
     purged_nodes: list[str] = []
     nodes = _dedupe_nodes_by_host(await get_secondary_nodes(healthy_only=False))
 
@@ -966,8 +1000,7 @@ async def purge_client_on_secondaries(email: str) -> list[str]:
         name = node.get("name") or str(node.get("id"))
         try:
             api = await get_api_for_node(node)
-            on_panel = key in await list_bot_client_emails_on_panel(api)
-            if not on_panel and not await _unified_get_client_info(api, email):
+            if not await _is_client_present_on_panel(api, email):
                 continue
             await remove_bot_client_on_panel(api, email)
             purged_nodes.append(name)
@@ -1248,35 +1281,18 @@ async def _remove_client_on_node(
     *,
     inbound_ids: list[int] | None = None,
 ) -> list[int]:
-    """Быстрое удаление на ноде: unified del + purge только нужных инбаундов."""
-    panel_cache.invalidate()
-    await _delete_client_by_email(api, email)
-    purged: list[int] = []
-    if inbound_ids:
-        for iid in inbound_ids:
-            if await _remove_email_from_inbound_settings(api, email, iid):
-                purged.append(iid)
-    else:
-        purged = await _purge_email_from_all_inbound_settings(api, email)
-    panel_cache.invalidate()
-    return sorted(set(purged))
+    """Удаление на ноде: только если клиент найден (unified del + settings purge)."""
+    if not await _is_client_present_on_panel(api, email):
+        return []
+    return await _purge_client_from_panel(api, email, inbound_ids=inbound_ids)
 
 
 async def _remove_client_on_panel(api: AsyncApi, email: str) -> list[int]:
-    panel_cache.invalidate()
-    located = await _locate_client_inbounds(api, email, force=False)
-    if (
-        not located
-        and not await _unified_get_client_info(api, email)
-        and not any(
-            (c.email or "").lower() == email.lower()
-            for ib in (await panel_cache.refresh(api, force=True))
-            for c in (ib.settings.clients or [])
-        )
-    ):
+    if not await _is_client_present_on_panel(api, email):
         return []
+    located = await _locate_client_inbounds(api, email, force=False)
     removed = set(located.keys())
-    purged = await _ensure_email_absent_on_panel(api, email)
+    purged = await _purge_client_from_panel(api, email)
     removed.update(purged)
     await panel_cache.refresh(api, force=True)
     return sorted(removed)

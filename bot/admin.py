@@ -79,7 +79,7 @@ def _admin_stats_block(stats: dict[str, int]) -> str:
     )
 
 
-async def _admin_menu_text() -> str:
+async def _admin_menu_context() -> tuple[dict[str, int], str]:
     orphans = await db.deactivate_orphan_subscriptions()
     if orphans:
         logger.info("Admin menu: deactivated {} orphan subscription(s)", orphans)
@@ -92,15 +92,21 @@ async def _admin_menu_text() -> str:
         f"🖧 Ноды: <b>{summary['total']}</b> "
         f"(healthy <b>{summary['healthy']}</b>/<b>{summary['enabled']}</b>)"
     )
-    return (
+    text = (
         "🛠 <b>Админ-панель</b>\n"
         "━━━━━━━━━━━━━━━━\n\n"
         f"{_admin_stats_block(stats)}\n\n"
         f"{nodes_line}\n"
         f"★ Основная: <b>{primary_name}</b> · inbounds: <code>{primary_inbounds or '—'}</code>\n"
         f"Группа 3x-ui: <code>{settings.XUI_CLIENT_GROUP}</code>\n\n"
-        "<i>Тарифы · оплата · клиенты · ноды · контент</i>"
+        "<i>Выберите раздел ниже</i>"
     )
+    return stats, text
+
+
+async def _admin_menu_text() -> str:
+    _, text = await _admin_menu_context()
+    return text
 
 
 @router.message(Command("admin"))
@@ -109,7 +115,11 @@ async def cmd_admin(message: Message, state: FSMContext):
         return
     await state.clear()
     await state.set_state(None)
-    await message.answer(await _admin_menu_text(), reply_markup=admin_menu_kb())
+    stats, text = await _admin_menu_context()
+    await message.answer(
+        text,
+        reply_markup=admin_menu_kb(pending_tickets=stats.get("pending_tickets", 0)),
+    )
 
 
 @router.callback_query(F.data == "adm:menu")
@@ -118,7 +128,12 @@ async def cb_admin_menu(cb: CallbackQuery, state: FSMContext):
         return
     await state.clear()
     await safe_cb_answer(cb)
-    await send_or_edit(cb, await _admin_menu_text(), admin_menu_kb())
+    stats, text = await _admin_menu_context()
+    await send_or_edit(
+        cb,
+        text,
+        admin_menu_kb(pending_tickets=stats.get("pending_tickets", 0)),
+    )
 
 
 @router.callback_query(F.data == "adm:stats")

@@ -26,6 +26,7 @@ def payment_failed_user_text(
     status_titles = {
         "CANCELED": "❌ <b>Платёж отменён</b>",
         "FAILED": "❌ <b>Платёж не прошёл</b>",
+        "CHARGEBACK": "❌ <b>Платёж возвращён</b>",
         "CHARGEBACKED": "❌ <b>Платёж возвращён</b>",
     }
     header = title or status_titles.get(status_upper, "❌ <b>Платёж не прошёл</b>")

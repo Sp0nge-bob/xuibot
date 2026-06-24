@@ -10,6 +10,8 @@ from db import tickets as tickets_db
 from services.fulfillment import fulfill_paid_order
 from services.primary_gate import require_primary_for_payment
 from services.payment_text import payment_failed_user_text, refund_chargeback_user_text
+from services.payment_alerts import notify_admins_payment_success
+from services.platega import normalize_platega_status
 from services.refund_reversal import apply_refund_reversal
 
 
@@ -81,7 +83,7 @@ async def handle_platega_status(
     Обрабатывает статус транзакции Platega.
     notify=False — только обновить БД, без текста для пользователя (webhook шлёт сам).
     """
-    status = (status or "").upper()
+    status = normalize_platega_status(status)
     order = await db.get_order_by_platega_tx(tx_id)
     if not order:
         logger.warning("Payment [{}]: order not found for tx {}", source, tx_id)
@@ -162,6 +164,10 @@ async def handle_platega_status(
         try:
             fresh_order = await db.get_order_by_platega_tx(tx_id) or order
             fulfillment = await fulfill_paid_order(fresh_order)
+            try:
+                await notify_admins_payment_success(fresh_order)
+            except Exception as e:
+                logger.error("Payment admin notify failed [{}] tx={}: {}", source, tx_id, e)
             if notify:
                 return PaymentProcessResult(
                     handled=True,

@@ -1,6 +1,7 @@
 """Runtime-настройки бота (хранятся в SQLite, перекрывают .env)."""
 import json
-from typing import List, Optional
+import re
+from typing import Any, List, Optional
 
 
 from config.settings import settings
@@ -12,11 +13,13 @@ SETTING_START_ANNOUNCEMENT = "start_announcement"
 SETTING_START_GREETING = "start_greeting"
 SETTING_SYNC_DISABLED = "sync_disabled"
 SETTING_BACKUP_DISABLED = "backup_disabled"
+SETTING_BACKUP_INTERVAL = "backup_interval"
 SETTING_HAPP_CRYPTO_MODE = "happ_crypto_mode"
 SETTING_TRIAL_LIMIT_IP = "trial_limit_ip"
 SETTING_PAID_LIMIT_IP = "paid_limit_ip"
 SETTING_PRIVACY_POLICY_URL = "privacy_policy_url"
 SETTING_TERMS_OF_SERVICE_URL = "terms_of_service_url"
+SETTING_PAYMENT_ADMIN_NOTIFY = "payment_admin_notify_enabled"
 
 _SYNC_DISABLED_TRUTHY = frozenset({"1", "true", "yes", "on"})
 
@@ -206,13 +209,142 @@ async def set_sync_disabled(disabled: bool) -> None:
 
 
 async def is_backup_disabled() -> bool:
-    """Админка: отключить ежедневную отправку бэкапа в ЛС."""
+    """Админка: отключить автоматическую отправку бэкапа в ЛС."""
     raw = await get_setting(SETTING_BACKUP_DISABLED)
     return (raw or "").strip().lower() in _SYNC_DISABLED_TRUTHY
 
 
 async def set_backup_disabled(disabled: bool) -> None:
     await set_setting(SETTING_BACKUP_DISABLED, "1" if disabled else "0")
+
+
+_BACKUP_INTERVAL_RE = re.compile(
+    r"^(\d+)\s*("
+    r"m|min|mins|minute|minutes|"
+    r"h|hr|hrs|hour|hours|"
+    r"d|day|days|"
+    r"w|week|weeks"
+    r")$",
+    re.IGNORECASE,
+)
+_BACKUP_UNIT_SUFFIX = {
+    "m": "m", "min": "m", "mins": "m", "minute": "m", "minutes": "m",
+    "h": "h", "hr": "h", "hrs": "h", "hour": "h", "hours": "h",
+    "d": "d", "day": "d", "days": "d",
+    "w": "w", "week": "w", "weeks": "w",
+}
+_BACKUP_MIN_MINUTES = 30
+_BACKUP_MAX_MINUTES = 30 * 24 * 60
+
+
+def _interval_total_minutes(amount: int, unit: str) -> int:
+    if unit == "m":
+        return amount
+    if unit == "h":
+        return amount * 60
+    if unit == "d":
+        return amount * 24 * 60
+    if unit == "w":
+        return amount * 7 * 24 * 60
+    raise ValueError(unit)
+
+
+def _normalize_backup_interval(value: Any) -> str | None:
+    parsed = parse_backup_interval_input(str(value or ""))
+    return parsed
+
+
+def parse_backup_interval_input(raw: str) -> str | None:
+    """
+    Разбор интервала автобэкапа → нормализованная строка: 30m, 6h, 7d, 1w.
+    Минимум 30m, максимум 30d.
+    """
+    text = (raw or "").strip().lower().replace(" ", "")
+    if not text:
+        return None
+    match = _BACKUP_INTERVAL_RE.match(text)
+    if not match:
+        return None
+    amount = int(match.group(1))
+    if amount < 1:
+        return None
+    unit = _BACKUP_UNIT_SUFFIX.get(match.group(2).lower())
+    if not unit:
+        return None
+    total = _interval_total_minutes(amount, unit)
+    if total < _BACKUP_MIN_MINUTES or total > _BACKUP_MAX_MINUTES:
+        return None
+    return f"{amount}{unit}"
+
+
+def format_backup_interval_label(interval: str) -> str:
+    """30m → каждые 30 мин, 6h → каждые 6 ч."""
+    match = re.match(r"^(\d+)([mhdw])$", (interval or "").strip().lower())
+    if not match:
+        return interval or "—"
+    amount = int(match.group(1))
+    unit = match.group(2)
+    labels = {"m": "мин", "h": "ч", "d": "дн", "w": "нед"}
+    return f"каждые {amount} {labels[unit]}"
+
+
+def backup_interval_to_scheduler_kwargs(interval: str) -> dict[str, int]:
+    """Строка 6h → kwargs для APScheduler interval."""
+    match = re.match(r"^(\d+)([mhdw])$", interval.strip().lower())
+    if not match:
+        raise ValueError(f"Invalid backup interval: {interval}")
+    amount = int(match.group(1))
+    unit = match.group(2)
+    mapping = {"m": "minutes", "h": "hours", "d": "days", "w": "weeks"}
+    return {mapping[unit]: amount}
+
+
+async def get_backup_interval() -> str:
+    """Интервал автобэкапа: из админки или BACKUP_INTERVAL из .env."""
+    raw = await get_setting(SETTING_BACKUP_INTERVAL)
+    if raw is None or not str(raw).strip():
+        return _normalize_backup_interval(settings.BACKUP_INTERVAL) or "24h"
+    normalized = _normalize_backup_interval(raw)
+    if normalized:
+        return normalized
+    env_norm = _normalize_backup_interval(settings.BACKUP_INTERVAL)
+    return env_norm or "24h"
+
+
+async def is_backup_interval_overridden() -> bool:
+    raw = await get_setting(SETTING_BACKUP_INTERVAL)
+    return raw is not None and str(raw).strip() != ""
+
+
+async def set_backup_interval(interval: str) -> None:
+    normalized = parse_backup_interval_input(interval)
+    if not normalized:
+        raise ValueError(
+            "Интервал от 30m до 30d. Примеры: 30m, 6h, 24h, 7d"
+        )
+    await set_setting(SETTING_BACKUP_INTERVAL, normalized)
+
+
+async def clear_backup_interval() -> None:
+    """Сбросить переопределение — снова BACKUP_INTERVAL из .env."""
+    async with get_db() as db:
+        await db.execute(
+            "DELETE FROM bot_settings WHERE key = ?",
+            (SETTING_BACKUP_INTERVAL,),
+        )
+        await db.commit()
+
+
+async def is_payment_admin_notify_enabled() -> bool:
+    """Уведомления админам об успешных оплатах (по умолчанию включены)."""
+    raw = await get_setting(SETTING_PAYMENT_ADMIN_NOTIFY)
+    if raw is None:
+        return True
+    return (raw or "").strip().lower() in _SYNC_DISABLED_TRUTHY
+
+
+async def set_payment_admin_notify_enabled(enabled: bool) -> None:
+    await set_setting(SETTING_PAYMENT_ADMIN_NOTIFY, "1" if enabled else "0")
 
 
 async def get_happ_crypto_mode() -> str | None:

@@ -75,6 +75,14 @@ def format_request_preview(path: str, body: Dict[str, Any]) -> str:
     )
 
 
+def normalize_platega_status(status: str) -> str:
+    """Приводит статус к внутреннему виду (документация Platega: CHARGEBACK → CHARGEBACKED)."""
+    s = (status or "").upper()
+    if s == "CHARGEBACK":
+        return "CHARGEBACKED"
+    return s
+
+
 def parse_create_response(data: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "tx_id": data.get("transactionId") or data.get("id"),
@@ -86,7 +94,7 @@ def parse_create_response(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def parse_status_response(data: Dict[str, Any]) -> Dict[str, Any]:
-    status = (data.get("status") or "").upper()
+    status = normalize_platega_status(data.get("status") or "")
     details = data.get("paymentDetails") or {}
     return {
         "tx_id": data.get("id") or data.get("transactionId"),

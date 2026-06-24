@@ -15,6 +15,7 @@ from services.node_health import check_all_nodes_health
 from services.primary_gate import apply_primary_health_results
 from services.backup import run_scheduled_backup
 from services.expiry_reminders import send_expiry_reminders
+from services.expired_purge import purge_stale_expired_subscriptions
 
 scheduler = AsyncIOScheduler()
 
@@ -54,6 +55,17 @@ async def check_expired_subscriptions():
                 logger.error("Ошибка отключения подписки #{}: {}", sub["id"], e)
 
     await asyncio.gather(*[_one(sub) for sub in expired])
+
+
+async def purge_stale_expired_subscriptions_job():
+    stats = await purge_stale_expired_subscriptions()
+    if stats.get("enabled") and stats.get("subs"):
+        logger.info(
+            "Очистка истёкших (итог): удалено={} ошибок={} panel inbounds={}",
+            stats.get("deleted", 0),
+            stats.get("failed", 0),
+            stats.get("panel_inbounds", 0),
+        )
 
 
 async def expire_stale_pending_orders_job():
@@ -124,6 +136,39 @@ async def scheduled_full_nodes_sync():
     await run_full_nodes_sync(source=f"каждые {settings.FULL_SYNC_INTERVAL_HOURS}ч")
 
 
+async def reschedule_backup_job() -> str | None:
+    """Перечитать интервал и вкл/выкл из bot_settings, обновить задачу auto_backup."""
+    from db import bot_settings as bot_settings_db
+
+    try:
+        scheduler.remove_job("auto_backup")
+    except Exception:
+        pass
+
+    if not settings.BACKUP_ENABLED:
+        return None
+    if await bot_settings_db.is_backup_disabled():
+        logger.info("Автобэкап выключен в админке — задача снята")
+        return None
+
+    interval = await bot_settings_db.get_backup_interval()
+    kwargs = bot_settings_db.backup_interval_to_scheduler_kwargs(interval)
+    if scheduler.running:
+        scheduler.add_job(
+            run_scheduled_backup,
+            "interval",
+            id="auto_backup",
+            replace_existing=True,
+            **kwargs,
+        )
+        logger.info(
+            "Автобэкап: {} ({})",
+            bot_settings_db.format_backup_interval_label(interval),
+            interval,
+        )
+    return interval
+
+
 def start_scheduler():
     heartbeat_min = max(1, int(settings.LOG_HEARTBEAT_INTERVAL_MINUTES))
     scheduler.add_job(heartbeat_job, "interval", minutes=heartbeat_min, id="heartbeat")
@@ -140,6 +185,13 @@ def start_scheduler():
         hours=settings.EXPIRED_CHECK_INTERVAL_HOURS,
         id="check_expired",
     )
+    if settings.EXPIRED_PURGE_ENABLED:
+        scheduler.add_job(
+            purge_stale_expired_subscriptions_job,
+            "interval",
+            hours=settings.EXPIRED_PURGE_INTERVAL_HOURS,
+            id="purge_stale_expired",
+        )
     scheduler.add_job(expire_stale_pending_orders_job, "interval", hours=6, id="expire_stale_pending")
     if settings.EXPIRY_REMINDER_ENABLED:
         scheduler.add_job(
@@ -148,23 +200,20 @@ def start_scheduler():
             hours=settings.EXPIRY_REMINDER_INTERVAL_HOURS,
             id="expiry_reminder",
         )
-    if settings.BACKUP_ENABLED:
-        scheduler.add_job(
-            run_scheduled_backup,
-            "cron",
-            hour=settings.BACKUP_HOUR_UTC,
-            minute=0,
-            id="daily_backup",
-        )
     scheduler.start()
+    purge_label = (
+        f"{settings.EXPIRED_PURGE_AFTER_DAYS}д / {settings.EXPIRED_PURGE_INTERVAL_HOURS}ч"
+        if settings.EXPIRED_PURGE_ENABLED
+        else "выкл"
+    )
     logger.info(
         "Планировщик: пульс {}мин, health 5мин, синк {}ч, истечение {}ч, "
-        "напоминания {}, pending 6ч, бэкап {}:00 UTC → tail -f data/logs/bot.log",
+        "очистка истёкших {}, напоминания {}, pending 6ч, бэкап — после init → tail -f data/logs/bot.log",
         heartbeat_min,
         settings.FULL_SYNC_INTERVAL_HOURS,
         settings.EXPIRED_CHECK_INTERVAL_HOURS,
+        purge_label,
         f"{settings.EXPIRY_REMINDER_INTERVAL_HOURS}ч" if settings.EXPIRY_REMINDER_ENABLED else "выкл",
-        settings.BACKUP_HOUR_UTC if settings.BACKUP_ENABLED else "выкл",
     )
 
 

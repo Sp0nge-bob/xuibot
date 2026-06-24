@@ -12,6 +12,7 @@ from services.node_sync import start_secondary_sync_workers, stop_secondary_sync
 from .handlers import router as main_router
 from .tickets import router as tickets_router
 from .admin import router as admin_router
+from .admin_menu import router as admin_menu_router
 from .admin_tickets import router as admin_tickets_router
 from .admin_debug import router as admin_debug_router
 from .admin_start_text import router as admin_start_text_router
@@ -29,7 +30,7 @@ from .faq import router as faq_router
 from .policy import router as policy_router
 from .middlewares import ActionLockMiddleware, PrimaryGateMiddleware
 from services.primary_gate import ensure_primary_ready_at_startup
-from .scheduler import run_full_nodes_sync, start_scheduler
+from .scheduler import reschedule_backup_job, run_full_nodes_sync, start_scheduler
 from .sender import send_message
 from .shutdown import graceful_shutdown, register_bot_task
 
@@ -50,6 +51,7 @@ dp.include_router(main_router)
 dp.include_router(server_status_router)
 dp.include_router(tickets_router)
 dp.include_router(admin_router)
+dp.include_router(admin_menu_router)
 dp.include_router(admin_tickets_router)
 dp.include_router(admin_debug_router)
 dp.include_router(admin_start_text_router)
@@ -91,6 +93,7 @@ async def start_bot():
         raise
 
     start_scheduler()
+    await reschedule_backup_job()
 
     try:
         await asyncio.wait_for(initialize_nodes_at_startup(), timeout=90)

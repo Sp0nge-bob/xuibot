@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from ui.theme import (
-    BRAND,
+    brand_name,
     days_left,
     format_date,
     money,
@@ -112,7 +112,7 @@ def main_menu_text(
 
     footer = "⚠️ <i>Тестовый режим включён</i>" if settings.TEST_MODE else None
     return screen(
-        f"🌐 <b>{BRAND}</b>",
+        f"🌐 <b>{brand_name()}</b>",
         *blocks,
         hint="Выберите действие ниже 👇",
         footer=footer,
@@ -137,12 +137,10 @@ def faq_empty_text() -> str:
 
 
 def project_policy_text() -> str:
-    from ui.theme import BRAND
-
     return screen(
         "📋 <b>Политика проекта</b>",
         "\n".join([
-            f"Официальные документы сервиса <b>{BRAND}</b>:",
+            f"Официальные документы сервиса <b>{brand_name()}</b>:",
             "",
             "📄 <b>Политика конфиденциальности</b>",
             "   Какие данные собираем, как храним и защищаем.",
@@ -727,12 +725,21 @@ def admin_happ_crypto_text(mode: str) -> str:
     return "\n".join(lines)
 
 
-def admin_payment_methods_text(enabled: dict[str, bool]) -> str:
+def admin_payment_methods_text(
+    enabled: dict[str, bool],
+    *,
+    admin_notify_enabled: bool = True,
+) -> str:
     from config.payments import all_payment_method_definitions
 
+    notify_flag = "✅" if admin_notify_enabled else "❌"
+    notify_status = "включены" if admin_notify_enabled else "выключены"
     lines = [
         "💳 <b>Способы оплаты</b>",
         "━━━━━━━━━━━━━━━━",
+        "",
+        f"🔔 Уведомления об оплатах: {notify_flag} <b>{notify_status}</b>",
+        "<i>Кто, сумма, тариф — всем из BOT_ADMINS.</i>",
         "",
         "Нажмите на способ, чтобы включить или отключить.",
         "Пользователи видят только <b>включённые</b> методы.",
@@ -755,27 +762,50 @@ def admin_payment_methods_text(enabled: dict[str, bool]) -> str:
     return "\n".join(lines)
 
 
+def admin_hub_section_text(*, title: str, description: str) -> str:
+    from ui.theme import screen
+
+    return screen(title, description, hint="Выберите пункт ниже.")
+
+
 def admin_backup_menu_text(
     *,
     backup_enabled: bool,
-    hour_utc: int,
+    interval: str,
+    interval_label: str,
     local_retain: int,
     env_disabled: bool = False,
     admin_disabled: bool = False,
+    interval_overridden: bool = False,
+    env_interval: str | None = None,
 ) -> str:
     if env_disabled:
         status = "⛔ <b>Отключён в .env</b> (<code>BACKUP_ENABLED=false</code>)"
     elif admin_disabled:
-        status = "⏸ <b>Ежедневный бэкап выключен</b> (вручную в админке)"
+        status = "⏸ <b>Автобэкап выключен</b> (вручную в админке)"
     elif backup_enabled:
-        status = f"✅ <b>Ежедневный бэкап включён</b> — {hour_utc:02d}:00 UTC"
+        status = (
+            f"✅ <b>Автобэкап включён</b>\n"
+            f"⏱ <b>{interval_label}</b> (<code>{interval}</code>)"
+        )
     else:
-        status = "⏸ <b>Ежедневный бэкап выключен</b>"
+        status = "⏸ <b>Автобэкап выключен</b>"
+
+    interval_note = ""
+    if not env_disabled and env_interval:
+        if interval_overridden:
+            interval_note = (
+                f"\n<i>Интервал задан в админке (в .env: <code>{env_interval}</code>).</i>"
+            )
+        else:
+            interval_note = (
+                f"\n<i>Интервал из .env (<code>BACKUP_INTERVAL={env_interval}</code>).</i>"
+            )
 
     return (
         "💾 <b>Бэкап</b>\n"
         "━━━━━━━━━━━━━━━━\n\n"
-        f"{status}\n\n"
+        f"{status}{interval_note}\n\n"
         "Архив содержит:\n"
         "• <code>bot.db</code> — снимок SQLite\n"
         "• <code>manifest.json</code> — статистика\n"
@@ -784,6 +814,25 @@ def admin_backup_menu_text(
         f"Локальные копии: <code>data/backups/</code> (хранится <b>{local_retain}</b>)\n"
         "Получатели: все ID из <code>BOT_ADMINS</code>.\n\n"
         "Выберите действие:"
+    )
+
+
+def admin_backup_interval_edit_prompt_text(
+    *,
+    interval: str,
+    interval_label: str,
+) -> str:
+    return (
+        "⏱ <b>Интервал автобэкапа</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        f"Сейчас: <b>{interval_label}</b> (<code>{interval}</code>)\n\n"
+        "Введите новый интервал:\n\n"
+        "• <code>30m</code> — каждые 30 минут\n"
+        "• <code>6h</code> — каждые 6 часов\n"
+        "• <code>24h</code> — раз в сутки\n"
+        "• <code>7d</code> — раз в 7 дней\n\n"
+        "Допустимо от <b>30m</b> до <b>30d</b>.\n"
+        "<i>Отмена — кнопка ниже.</i>"
     )
 
 

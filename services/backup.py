@@ -176,7 +176,7 @@ async def run_scheduled_backup() -> None:
     if not settings.BACKUP_ENABLED:
         return
     if await bot_settings_db.is_backup_disabled():
-        logger.debug("Scheduled backup skipped — disabled in admin")
+        logger.debug("Auto backup skipped — disabled in admin")
         return
     try:
         result = await send_backup_to_admins(source="auto")

@@ -7,8 +7,15 @@ from typing import Iterable, Optional
 
 from config.plans import Plan
 
-BRAND = "VPN Bot"
 SEP = "────────────────"
+
+
+def brand_name() -> str:
+    """Отображаемое имя сервиса (BOT_BRAND в .env)."""
+    from config.settings import settings
+
+    name = (settings.BOT_BRAND or "").strip()
+    return name or "VPN Bot"
 
 # Подписи inline-кнопок
 BTN_HOME = "🏠 Главное меню"

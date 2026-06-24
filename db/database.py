@@ -170,6 +170,13 @@ def is_db_init_complete() -> bool:
     """Полный init_db завершён (файл-маркер + bot.db)."""
     return Path(DB_PATH).is_file() and _INIT_MARKER.is_file()
 
+async def get_user(tg_id: int) -> Optional[Dict[str, Any]]:
+    async with get_db() as db:
+        async with db.execute("SELECT * FROM users WHERE tg_id = ?", (tg_id,)) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
 async def get_or_create_user(tg_id: int, username: Optional[str] = None, first_name: Optional[str] = None):
     async with get_db() as db:
 
@@ -714,6 +721,51 @@ async def deactivate_subscription(sub_id: int):
     async with get_db() as db:
         await db.execute("UPDATE subscriptions SET is_active = 0 WHERE id = ?", (sub_id,))
         await db.commit()
+
+
+async def get_stale_inactive_subscriptions(*, after_days: int) -> List[Dict[str, Any]]:
+    """Неактивные подписки, истёкшие более after_days назад (кандидаты на удаление)."""
+    cutoff = (datetime.utcnow() - timedelta(days=after_days)).isoformat()
+    async with get_db() as db:
+        async with db.execute(
+            """SELECT * FROM subscriptions
+               WHERE is_active = 0 AND end_date < ?
+               ORDER BY end_date ASC""",
+            (cutoff,),
+        ) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+
+async def delete_subscription_record(subscription_id: int) -> bool:
+    """Удалить неактивную запись подписки (отвязать ссылки, затем DELETE)."""
+    async with get_db() as db:
+        await db.execute(
+            "UPDATE tickets SET subscription_id = NULL WHERE subscription_id = ?",
+            (subscription_id,),
+        )
+        async with db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='trial_grants'",
+        ) as cur:
+            if await cur.fetchone():
+                await db.execute(
+                    "UPDATE trial_grants SET subscription_id = NULL WHERE subscription_id = ?",
+                    (subscription_id,),
+                )
+        async with db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='refund_requests'",
+        ) as cur:
+            if await cur.fetchone():
+                await db.execute(
+                    "UPDATE refund_requests SET subscription_id = NULL WHERE subscription_id = ?",
+                    (subscription_id,),
+                )
+        cur = await db.execute(
+            "DELETE FROM subscriptions WHERE id = ? AND is_active = 0",
+            (subscription_id,),
+        )
+        await db.commit()
+        return cur.rowcount > 0
 
 
 async def get_admin_stats() -> Dict[str, int]:
