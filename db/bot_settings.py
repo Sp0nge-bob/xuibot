@@ -1,4 +1,5 @@
 """Runtime-настройки бота (хранятся в SQLite, перекрывают .env)."""
+import json
 from typing import List, Optional
 
 
@@ -6,6 +7,7 @@ from config.settings import settings
 from db.connection import get_db
 
 SETTING_SUBSCRIPTION_INBOUNDS = "subscription_inbounds"
+SETTING_INBOUND_PUBLIC_STATUS = "inbound_public_status"
 SETTING_START_ANNOUNCEMENT = "start_announcement"
 SETTING_START_GREETING = "start_greeting"
 SETTING_SYNC_DISABLED = "sync_disabled"
@@ -114,6 +116,44 @@ async def get_subscription_inbounds_display() -> str:
 
 async def get_subscription_inbound_count() -> int:
     return len(await get_subscription_inbound_ids())
+
+
+async def get_inbound_public_status_map() -> dict[int, bool]:
+    """Ручной статус инбаундов подписки для экрана /start (по умолчанию — доступен)."""
+    raw = await get_setting(SETTING_INBOUND_PUBLIC_STATUS)
+    if not raw or not str(raw).strip():
+        return {}
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    result: dict[int, bool] = {}
+    for key, val in data.items():
+        try:
+            result[int(key)] = bool(val)
+        except (TypeError, ValueError):
+            continue
+    return result
+
+
+async def _save_inbound_public_status_map(status: dict[int, bool]) -> None:
+    payload = {str(k): int(v) for k, v in sorted(status.items())}
+    await set_setting(SETTING_INBOUND_PUBLIC_STATUS, json.dumps(payload, separators=(",", ":")))
+
+
+async def is_inbound_publicly_available(inbound_id: int) -> bool:
+    return (await get_inbound_public_status_map()).get(int(inbound_id), True)
+
+
+async def toggle_inbound_public_available(inbound_id: int) -> bool:
+    inbound_id = int(inbound_id)
+    status = await get_inbound_public_status_map()
+    new_val = not status.get(inbound_id, True)
+    status[inbound_id] = new_val
+    await _save_inbound_public_status_map(status)
+    return new_val
 
 
 async def get_start_announcement() -> Optional[str]:

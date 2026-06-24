@@ -315,28 +315,6 @@ async def _sync_primary_from_env() -> None:
         invalidate_api_cache(primary_id)
 
 
-def _node_public_available(node: dict[str, Any]) -> bool:
-    return bool(int(node.get("public_available", 1)))
-
-
-async def list_public_status_nodes() -> list[dict[str, Any]]:
-    """Ноды для экрана «Доступность серверов» (только привязанные к боту)."""
-    nodes = await list_nodes(enabled_only=True)
-    return sorted(
-        nodes,
-        key=lambda n: (bool(n.get("is_primary")), int(n.get("sort_order") or 0), n.get("name") or ""),
-    )
-
-
-async def toggle_public_available(node_id: int) -> bool | None:
-    node = await get_node(node_id)
-    if not node:
-        return None
-    new_val = 0 if _node_public_available(node) else 1
-    await update_node(node_id, public_available=new_val)
-    return bool(new_val)
-
-
 async def list_nodes(*, enabled_only: bool = False) -> list[dict[str, Any]]:
     await _ensure_init()
     sql = "SELECT * FROM xui_nodes"

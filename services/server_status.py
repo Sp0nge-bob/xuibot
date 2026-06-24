@@ -1,56 +1,119 @@
-"""Публичный статус доступности серверов (нод) для пользователей."""
+"""Публичный статус инбаундов подписки для пользователей (/start)."""
 from __future__ import annotations
 
 import html
 from typing import Any
+
+from loguru import logger
+
+from db.bot_settings import get_inbound_public_status_map, get_subscription_inbound_ids
 
 
 def _status_icon(available: bool) -> str:
     return "🟢" if available else "🔴"
 
 
-def format_user_server_status_text(nodes: list[dict[str, Any]]) -> str:
+async def _fetch_inbound_remarks(inbound_ids: list[int]) -> dict[int, str]:
+    if not inbound_ids:
+        return {}
+    remarks: dict[int, str] = {}
+    try:
+        from db.xui_nodes import get_primary_node
+        from services.panel_inbounds import fetch_inbounds_list
+        from services.xui import get_api_for_node
+
+        primary = await get_primary_node()
+        if not primary:
+            return {}
+        api = await get_api_for_node(primary)
+        for ib in await fetch_inbounds_list(api):
+            iid = int(ib.id)
+            if iid in inbound_ids:
+                label = (getattr(ib, "remark", "") or "").strip()
+                if label:
+                    remarks[iid] = label
+    except Exception as e:
+        logger.debug("Inbound remarks fetch failed: {}", e)
+    return remarks
+
+
+async def list_subscription_inbounds_status() -> list[dict[str, Any]]:
+    """Инбаунды из настроек подписки бота + ручной статус доступности."""
+    inbound_ids = await get_subscription_inbound_ids()
+    if not inbound_ids:
+        return []
+
+    status_map = await get_inbound_public_status_map()
+    remarks = await _fetch_inbound_remarks(inbound_ids)
+
+    items: list[dict[str, Any]] = []
+    for idx, inbound_id in enumerate(inbound_ids):
+        remark = remarks.get(inbound_id) or f"Inbound #{inbound_id}"
+        items.append({
+            "id": inbound_id,
+            "remark": remark,
+            "available": status_map.get(inbound_id, True),
+            "is_main": idx == 0,
+        })
+    return items
+
+
+def _inbound_title(item: dict[str, Any], *, show_id: bool = False) -> str:
+    iid = item.get("id")
+    remark = (item.get("remark") or "").strip()
+    if remark and not remark.lower().startswith("inbound #"):
+        title = html.escape(remark)
+        if show_id:
+            return f"{title} <code>(#{iid})</code>"
+        return title
+    return html.escape(f"Inbound #{iid}")
+
+
+def format_user_server_status_text(items: list[dict[str, Any]]) -> str:
     lines = [
         "🌐 <b>Доступность серверов</b>",
         "━━━━━━━━━━━━━━━━",
         "",
+        "<i>Каналы подписки VPN. Статус обновляет администратор.</i>",
+        "",
     ]
-    if not nodes:
-        lines.append("<i>Список серверов пока не настроен.</i>")
+    if not items:
+        lines.append("<i>Инбаунды подписки не настроены.</i>")
         return "\n".join(lines)
 
-    for node in nodes:
-        available = bool(int(node.get("public_available", 1)))
+    for item in items:
+        available = bool(item.get("available", True))
         icon = _status_icon(available)
         status = "работает" if available else "временно недоступен"
-        star = "★ " if node.get("is_primary") else ""
-        name = html.escape((node.get("name") or "—").strip())
-        lines.append(f"{icon} {star}<b>{name}</b> — {status}")
+        star = "★ " if item.get("is_main") else ""
+        main_hint = " · <i>главный</i>" if item.get("is_main") else ""
+        lines.append(f"{icon} {star}{_inbound_title(item)} — {status}{main_hint}")
 
-    lines += ["", "<i>Статус обновляется администратором.</i>"]
     return "\n".join(lines)
 
 
-def format_admin_server_status_text(nodes: list[dict[str, Any]]) -> str:
+def format_admin_server_status_text(items: list[dict[str, Any]]) -> str:
     lines = [
-        "🌐 <b>Доступность серверов</b>",
+        "🌐 <b>Доступность инбаундов</b>",
         "━━━━━━━━━━━━━━━━",
         "",
-        "Пользователи видят этот статус в главном меню (/start).",
-        "Нажмите на сервер, чтобы переключить 🟢 / 🔴.",
+        "Список из настроек подписки бота (📡 Inbounds).",
+        "Пользователи видят его в главном меню (/start).",
+        "Нажмите на канал, чтобы переключить 🟢 / 🔴.",
         "",
     ]
-    if not nodes:
-        lines.append("<i>Нет привязанных нод — добавьте в разделе «Ноды».</i>")
+    if not items:
+        lines.append(
+            "<i>Инбаунды не заданы — укажите в Админка → Inbounds или .env</i>"
+        )
         return "\n".join(lines)
 
-    working = sum(1 for n in nodes if int(n.get("public_available", 1)))
-    lines.append(f"Работает: <b>{working}</b> из <b>{len(nodes)}</b>")
+    working = sum(1 for item in items if item.get("available", True))
+    lines.append(f"Работает: <b>{working}</b> из <b>{len(items)}</b>")
     lines.append("")
-    for node in nodes:
-        available = bool(int(node.get("public_available", 1)))
+    for item in items:
+        available = bool(item.get("available", True))
         icon = _status_icon(available)
-        star = "★ " if node.get("is_primary") else ""
-        name = html.escape((node.get("name") or "—").strip())
-        lines.append(f"{icon} {star}{name}")
+        star = "★ " if item.get("is_main") else ""
+        lines.append(f"{icon} {star}{_inbound_title(item, show_id=True)}")
     return "\n".join(lines)
