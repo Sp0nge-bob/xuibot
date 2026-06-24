@@ -105,25 +105,26 @@ find_system_python() {
     return 1
 }
 
-ensure_os_python_venv() {
-    local py_cmd="$1"
-    local probe
-    probe="$(mktemp -d /tmp/vpnbot-venv-probe.XXXXXX)"
-    if "$py_cmd" -m venv "$probe" >/dev/null 2>&1; then
-        rm -rf "$probe"
+ensure_os_python_packages() {
+    if ! command -v apt-get >/dev/null 2>&1; then
         return 0
     fi
-    rm -rf "$probe" 2>/dev/null || true
-
-    warn "Пакет python3-venv не найден — ставим через apt"
-    if ! command -v apt-get >/dev/null 2>&1; then
-        die "Установите python3-venv для $py_cmd и запустите скрипт снова"
-    fi
+    log "Проверяем системные пакеты Python (Debian/Ubuntu)"
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq
-    apt-get install -y python3-venv python3-pip \
-        python3.11-venv python3.12-venv 2>/dev/null \
-        || apt-get install -y python3-venv python3-pip
+    apt-get install -y \
+        python3-venv python3-pip python3-full \
+        python3.11-venv python3.11-full 2>/dev/null \
+        || apt-get install -y python3-venv python3-pip python3-full
+}
+
+venv_is_healthy() {
+    local py="$APP_DIR/.venv/bin/python"
+    [[ -x "$py" ]] || return 1
+    # Должен быть именно venv, не системный Python (PEP 668).
+    "$py" -c 'import sys; raise SystemExit(0 if sys.prefix != sys.base_prefix else 1)' 2>/dev/null || return 1
+    "$py" -m pip --version >/dev/null 2>&1 || return 1
+    return 0
 }
 
 ensure_env_file() {
@@ -165,24 +166,39 @@ ensure_service_user() {
 
 ensure_venv() {
     local venv_py="$APP_DIR/.venv/bin/python"
-    if [[ -x "$venv_py" ]]; then
+    local py_cmd
+
+    py_cmd="$(find_system_python)" || die "Python 3.11+ не найден"
+    ensure_os_python_packages
+
+    if [[ -d "$APP_DIR/.venv" ]] && ! venv_is_healthy; then
+        warn "Старый .venv неполный (нет pip) — пересоздаём"
+        rm -rf "$APP_DIR/.venv"
+    fi
+
+    if venv_is_healthy; then
         PYTHON_BIN="$venv_py"
+        ok "Virtualenv готов: $APP_DIR/.venv"
         return
     fi
 
-    local py_cmd
-    py_cmd="$(find_system_python)" || die "Python 3.11+ не найден"
-
-    ensure_os_python_venv "$py_cmd"
     log "Создаём virtualenv: $APP_DIR/.venv"
     "$py_cmd" -m venv "$APP_DIR/.venv"
     PYTHON_BIN="$venv_py"
     [[ -x "$PYTHON_BIN" ]] || die "Не удалось создать venv"
+
+    if ! "$PYTHON_BIN" -m pip --version >/dev/null 2>&1; then
+        log "Bootstrap pip через ensurepip"
+        "$PYTHON_BIN" -m ensurepip --upgrade
+    fi
+
+    venv_is_healthy || die "venv создан, но pip недоступен — нужен python3.11-full"
+    ok "Virtualenv создан"
 }
 
 fix_permissions() {
     log "Права на $APP_DIR → $SERVICE_USER"
-    mkdir -p "$APP_DIR/data/logs"
+    mkdir -p "$APP_DIR/data/logs" "$APP_DIR/.cache/pip"
     chown -R "$SERVICE_USER:$SERVICE_USER" "$APP_DIR"
     if [[ -f "$APP_DIR/.env" ]]; then
         chmod 600 "$APP_DIR/.env"
@@ -190,28 +206,39 @@ fix_permissions() {
     fi
 }
 
+venv_python() {
+    echo "$APP_DIR/.venv/bin/python"
+}
+
 python_deps_ok() {
-    sudo -u "$SERVICE_USER" env \
-        PATH="$VENV_BIN:$PATH" \
-        VIRTUAL_ENV="$APP_DIR/.venv" \
-        "$PYTHON_BIN" -c "import aiogram, fastapi, loguru" 2>/dev/null
+    local py
+    py="$(venv_python)"
+    "$py" -c "import aiogram, fastapi, loguru" 2>/dev/null
+}
+
+run_venv_pip() {
+    local py
+    py="$(venv_python)"
+    # Ставим от root напрямую в venv — обход PEP 668 и проблем с правами vpnbot.
+    env PIP_DISABLE_PIP_VERSION_CHECK=1 \
+        "$py" -m pip "$@"
 }
 
 ensure_python_deps() {
+    local py
+    py="$(venv_python)"
+    venv_is_healthy || die "venv не готов — не удалось установить зависимости"
+
     log "Проверяем зависимости Python"
     if python_deps_ok; then
         ok "Зависимости уже установлены"
         return
     fi
-    log "Устанавливаем зависимости (pip install -e .) — может занять 1–3 мин"
-    sudo -u "$SERVICE_USER" env \
-        PATH="$VENV_BIN:$PATH" \
-        VIRTUAL_ENV="$APP_DIR/.venv" \
-        "$PYTHON_BIN" -m pip install -U pip wheel
-    sudo -u "$SERVICE_USER" env \
-        PATH="$VENV_BIN:$PATH" \
-        VIRTUAL_ENV="$APP_DIR/.venv" \
-        "$PYTHON_BIN" -m pip install -e "$APP_DIR"
+
+    log "Устанавливаем зависимости (pip install -e .) — 1–3 мин"
+    run_venv_pip install -U pip wheel
+    run_venv_pip install -e "$APP_DIR"
+
     python_deps_ok || die "Не удалось установить зависимости (проверьте интернет)"
     ok "Зависимости установлены"
 }
@@ -385,8 +412,8 @@ cmd_install() {
     ensure_service_user
     ensure_venv
     resolve_paths
-    fix_permissions
     ensure_python_deps
+    fix_permissions
     install_units
     echo
     ok "Установка завершена"
