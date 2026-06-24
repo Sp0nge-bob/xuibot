@@ -8,6 +8,7 @@ from loguru import logger
 
 from config.settings import settings
 from db import xui_nodes as nodes_db
+from services.node_alerts import process_health_transitions
 from services.node_health import check_all_nodes_health
 from services.xui import (
     ensure_bot_group_on_node,
@@ -59,6 +60,7 @@ async def initialize_nodes_at_startup() -> dict[str, Any]:
         logger.warning("Node startup: инбаунды primary: {}", e)
 
     results = await check_all_nodes_health()
+    await process_health_transitions(results)
     await _ensure_groups_on_healthy_nodes(results)
 
     healthy = sum(1 for r in results if r.get("ok"))

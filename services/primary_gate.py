@@ -7,6 +7,7 @@ from typing import Any, Optional
 from loguru import logger
 
 from db import xui_nodes as nodes_db
+from services.node_alerts import process_health_transitions
 from services.node_health import check_node_health
 
 _ready: bool = False
@@ -59,6 +60,7 @@ async def refresh_primary_ready() -> bool:
         return False
 
     result = await check_node_health(primary)
+    await process_health_transitions([result])
     if result.get("ok"):
         _set_state(ok=True)
         return True
