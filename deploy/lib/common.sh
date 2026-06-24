@@ -67,6 +67,9 @@ load_config() {
     SERVICE_USER="${SERVICE_USER:-vpnbot}"
     VENV_BIN="$APP_DIR/.venv/bin"
     PYTHON_BIN="$VENV_BIN/python"
+    if [[ "$APP_DIR" == /root/* ]]; then
+        warn "Проект в $APP_DIR — для продакшена лучше /opt/vpn-bot (скрипт починит права /root)"
+    fi
 }
 
 save_state() {

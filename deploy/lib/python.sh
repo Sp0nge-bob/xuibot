@@ -81,17 +81,31 @@ run_venv_pip() {
         "$py" -m pip "$@"
 }
 
+install_python_deps() {
+    log "pip install -e . (1–3 мин)"
+    run_venv_pip install -U pip wheel
+    run_venv_pip install -e "$APP_DIR" || return 1
+    python_deps_ok
+}
+
 ensure_python_deps() {
     venv_is_healthy || die "venv не готов"
 
     if python_deps_ok; then
         ok "Зависимости Python установлены"
-        return
+        return 0
     fi
 
-    log "pip install -e . (1–3 мин)"
-    run_venv_pip install -U pip wheel
-    run_venv_pip install -e "$APP_DIR"
-    python_deps_ok || die "Не удалось установить зависимости (интернет?)"
+    install_python_deps || die "Не удалось установить зависимости (интернет?)"
     ok "Зависимости установлены"
+}
+
+ensure_python_deps_as_service_user() {
+    local py="$APP_DIR/.venv/bin/python"
+    if sudo -u "$SERVICE_USER" -- "$py" -c "import loguru, aiogram, fastapi" 2>/dev/null; then
+        return 0
+    fi
+    warn "Повтор pip install от root (после смены прав на .venv)"
+    install_python_deps || return 1
+    sudo -u "$SERVICE_USER" -- "$py" -c "import loguru, aiogram, fastapi" 2>/dev/null
 }

@@ -16,6 +16,11 @@ cmd_reconcile() {
     ensure_python_deps
     fix_permissions
 
+    if ! verify_service_user_access; then
+        ensure_python_deps_as_service_user || die "loguru/aiogram не импортируются от $SERVICE_USER"
+        verify_service_user_access || die "Проверка доступа $SERVICE_USER не прошла"
+    fi
+
     if ! start_services; then
         warn "Сервисы не запустились — см. journalctl выше"
         show_status
