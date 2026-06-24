@@ -34,8 +34,9 @@ class BotLoadSnapshot:
 
 
 def _fmt_cpu(cpu: float) -> str:
+    """Без символа «<» — иначе ломается HTML-разметка Telegram."""
     if cpu < 0.05:
-        return "<0.1"
+        return "менее 0.1"
     if cpu < 10:
         text = f"{cpu:.2f}".rstrip("0").rstrip(".")
         return text or "0"

@@ -124,11 +124,17 @@ async def cmd_admin(message: Message, state: FSMContext):
         return
     await state.clear()
     await state.set_state(None)
-    stats, text = await _admin_menu_context()
-    await message.answer(
-        text,
-        reply_markup=admin_menu_kb(pending_tickets=stats.get("pending_tickets", 0)),
-    )
+    try:
+        stats, text = await _admin_menu_context()
+        await message.answer(
+            text,
+            reply_markup=admin_menu_kb(pending_tickets=stats.get("pending_tickets", 0)),
+        )
+    except Exception as e:
+        logger.exception("Admin menu failed for tg_id={}: {}", message.from_user.id, e)
+        await message.answer(
+            "❌ Не удалось открыть админ-панель. Подробности в <code>data/logs/bot.log</code>.",
+        )
 
 
 @router.callback_query(F.data == "adm:menu")
