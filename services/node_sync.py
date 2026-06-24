@@ -406,23 +406,16 @@ async def stop_secondary_sync_workers() -> None:
 
 
 async def _enqueue_secondary_sync(sub_id: int) -> None:
-    from db import bot_settings as bot_settings_db
-
-    if await bot_settings_db.is_sync_disabled():
-        return
-    try:
-        _get_secondary_sync_queue().put_nowait(sub_id)
-    except asyncio.QueueFull:
-        logger.warning("Secondary sync queue full — dropping sub #{}", sub_id)
+    """Зарезервировано: воркеры отключены — панель синхронизирует с Primary сама."""
+    return
 
 
 def schedule_secondary_sync(sub_id: int) -> None:
-    """Очередь после оплаты/пробного — не блокирует бота и не ломает выдачу ключа."""
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(_enqueue_secondary_sync(sub_id))
-    except Exception as e:
-        logger.error("schedule_secondary_sync failed for #{}: {}", sub_id, e)
+    """
+    No-op: параметры клиента панель 3x-ui разносит с Primary без push с бота.
+    Вызовы после оплаты оставлены для совместимости и не трогают память/панель.
+    """
+    del sub_id
 
 
 # обратная совместимость

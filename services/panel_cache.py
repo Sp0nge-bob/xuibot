@@ -83,6 +83,13 @@ def get_panel_cache(api: AsyncApi) -> PanelCache:
     return cache
 
 
+def drop_panel_cache_for_host(host: str) -> None:
+    """Убрать кэш хоста (удаление/смена ноды) — не влияет на другие панели."""
+    key = (host or "").rstrip("/").lower() or "_default"
+    _host_caches.pop(key, None)
+    _email_list_cache.pop(key, None)
+
+
 def invalidate_panel_cache(api: AsyncApi | None = None) -> None:
     if api is None:
         for cache in _host_caches.values():

@@ -214,6 +214,12 @@ async def _notify_admins(text: str):
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
+    from bot.faq_album import clear_faq_album
+    from bot.ticket_chat import clear_active_session
+
+    if message.from_user:
+        clear_active_session(message.from_user.id)
+    await clear_faq_album(message.bot, message.chat.id)
     await state.clear()
     await _show_main_menu(message, state=state)
 
@@ -237,7 +243,10 @@ async def cb_promo_enter(cb: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "main_menu")
 async def cb_main_menu(cb: CallbackQuery, state: FSMContext):
     from bot.faq_album import clear_faq_album
+    from bot.ticket_chat import clear_active_session
 
+    if cb.from_user:
+        clear_active_session(cb.from_user.id)
     await clear_faq_album(cb.bot, cb.message.chat.id)
     await _clear_promo_input_state(state)
     await _show_main_menu(cb, edit=True, state=state)

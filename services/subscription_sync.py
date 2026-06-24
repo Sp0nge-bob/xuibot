@@ -42,12 +42,24 @@ def _client_traffic_limit_gb(client) -> int:
     return int(total_bytes / (1024 ** 3))
 
 
+def _prune_last_sync_by_tg(now: float) -> None:
+    """Как promo_redeem: не держать tg_id вечно (только debounce-map)."""
+    if len(_last_sync_by_tg) <= 10_000:
+        return
+    debounce = float(settings.SUBSCRIPTION_SYNC_DEBOUNCE_SEC)
+    stale_after = debounce * 20
+    for tg_id, ts in list(_last_sync_by_tg.items()):
+        if now - ts > stale_after:
+            _last_sync_by_tg.pop(tg_id, None)
+
+
 def _should_debounce_sync(tg_id: int) -> bool:
     now = time.monotonic()
     last = _last_sync_by_tg.get(tg_id, 0.0)
     if now - last < float(settings.SUBSCRIPTION_SYNC_DEBOUNCE_SEC):
         return True
     _last_sync_by_tg[tg_id] = now
+    _prune_last_sync_by_tg(now)
     return False
 
 

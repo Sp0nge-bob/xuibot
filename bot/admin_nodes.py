@@ -313,6 +313,12 @@ async def _save_node_from_draft(
         )
         if (node_before or {}).get("is_primary") and inbound_ids:
             await set_subscription_inbound_ids(inbound_ids)
+        old_host = normalize_xui_host((node_before or {}).get("host") or "")
+        new_host = normalize_xui_host(draft.get("host") or "")
+        if old_host and old_host != new_host:
+            from services.panel_cache import drop_panel_cache_for_host
+
+            drop_panel_cache_for_host(old_host)
         invalidate_api_cache(edit_id)
         node = await nodes_db.get_node(edit_id)
         await state.clear()

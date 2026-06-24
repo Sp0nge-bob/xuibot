@@ -42,6 +42,7 @@ VE0tje7twWXL5Gb1sfcXRzsCAwEAAQ==
 _RSA_MAX_PLAIN_BYTES: Final[int] = 501
 
 _cache: dict[tuple[str, str], str] = {}
+_CACHE_MAX_ENTRIES = 2_000
 _cache_lock = asyncio.Lock()
 _rsa_public_key = None
 
@@ -140,6 +141,8 @@ async def encrypt_happ_subscription_link(plain_url: str, *, mode: str | None = N
                 e,
             )
             return url
+        if len(_cache) >= _CACHE_MAX_ENTRIES:
+            _cache.pop(next(iter(_cache)))
         _cache[cache_key] = encrypted
         logger.debug("Happ crypto {} → {}", resolved_mode, encrypted[:40])
         return encrypted

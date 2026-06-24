@@ -31,6 +31,9 @@ def webhook_rate_limited(client_ip: str) -> bool:
     bucket = _rate_hits.setdefault(ip, deque())
     while bucket and now - bucket[0] > 60.0:
         bucket.popleft()
+    if not bucket:
+        _rate_hits.pop(ip, None)
+        bucket = _rate_hits.setdefault(ip, deque())
     if len(bucket) >= limit:
         return True
     bucket.append(now)

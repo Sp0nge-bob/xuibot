@@ -514,7 +514,10 @@ async def delete_node(node_id: int) -> tuple[bool, str]:
         await db.execute("DELETE FROM xui_nodes WHERE id = ?", (node_id,))
         await db.commit()
     try:
-        from services.xui import invalidate_api_cache
+        from services.panel_cache import drop_panel_cache_for_host
+        from services.xui import invalidate_api_cache, normalize_xui_host
+
+        drop_panel_cache_for_host(normalize_xui_host(node.get("host") or ""))
         invalidate_api_cache(node_id)
     except Exception:
         pass
