@@ -1,0 +1,20 @@
+[Unit]
+Description=VPN Bot Telegram (polling + scheduler)
+After=network.target
+
+[Service]
+Type=simple
+User=@SERVICE_USER@
+WorkingDirectory=@APP_DIR@
+Environment=VIRTUAL_ENV=@APP_DIR@/.venv
+Environment=PIP_CACHE_DIR=@APP_DIR@/.cache/pip
+Environment=PATH=@VENV_BIN@:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=journal
+StandardError=journal
+ExecStart=@APP_DIR@/.venv/bin/python @APP_DIR@/run_bot.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

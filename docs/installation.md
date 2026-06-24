@@ -34,29 +34,21 @@ python run_bot.py   # терминал 2 — Telegram polling
 
 ## systemd (пример)
 
-Интерактивное меню — **пункт 1 делает всё сам** (venv, `pip install`, пользователь `vpnbot`, unit-файлы, запуск):
+Меню systemd — **пункт 1 делает всё сам** (venv, pip, права, unit-файлы, запуск). Подходит и для первой установки, и после `git pull`:
 
 ```bash
-sudo bash deploy/install-systemd.sh
+git pull
+sudo bash deploy/vpn-bot-ctl.sh
 # → 1
 ```
 
+Алиас: `sudo bash deploy/install-systemd.sh` (то же самое).
+
 Перед первым запуском заполните `.env` (или скрипт создаст его из `.env.example`).
 
-Неинтерактивно: `sudo bash deploy/install-systemd.sh install`
+Неинтерактивно: `sudo bash deploy/vpn-bot-ctl.sh install`
 
-Ручная установка — шаблоны в [`deploy/systemd/`](../deploy/systemd/):
-
-- `vpn-bot-web.service` — webhook Platega
-- `vpn-bot-telegram.service` — Telegram polling
-
-```bash
-sudo cp deploy/systemd/vpn-bot-web.service /etc/systemd/system/
-sudo cp deploy/systemd/vpn-bot-telegram.service /etc/systemd/system/
-# При необходимости отредактируйте User и WorkingDirectory
-sudo systemctl daemon-reload
-sudo systemctl enable --now vpn-bot-web vpn-bot-telegram
-```
+Unit-шаблоны: [`deploy/systemd/*.template`](../deploy/systemd/) — подставляются скриптом автоматически.
 
 ---
 
