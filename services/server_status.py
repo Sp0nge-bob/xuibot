@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html
+import re
 from typing import Any
 
 from loguru import logger
@@ -11,6 +12,14 @@ from db.bot_settings import get_inbound_public_status_map, get_subscription_inbo
 
 def _status_icon(available: bool) -> str:
     return "🟢" if available else "🔴"
+
+
+_WHITELIST_LABEL_RE = re.compile(r"белые\s+списки", re.IGNORECASE)
+
+
+def _user_facing_inbound_label(remark: str) -> str:
+    """Публичные подписи для пользователей (цензура/нейминг в боте)."""
+    return _WHITELIST_LABEL_RE.sub("Премиум подключение", remark)
 
 
 async def _fetch_inbound_remarks(inbound_ids: list[int]) -> dict[int, str]:
@@ -57,9 +66,16 @@ async def list_subscription_inbounds_status() -> list[dict[str, Any]]:
     return items
 
 
-def _inbound_title(item: dict[str, Any], *, show_id: bool = False) -> str:
+def _inbound_title(
+    item: dict[str, Any],
+    *,
+    show_id: bool = False,
+    for_user: bool = False,
+) -> str:
     iid = item.get("id")
     remark = (item.get("remark") or "").strip()
+    if for_user and remark:
+        remark = _user_facing_inbound_label(remark)
     if remark and not remark.lower().startswith("inbound #"):
         title = html.escape(remark)
         if show_id:
@@ -84,7 +100,7 @@ def format_user_server_status_text(items: list[dict[str, Any]]) -> str:
         available = bool(item.get("available", True))
         icon = _status_icon(available)
         status = "работает" if available else "временно недоступен"
-        lines.append(f"{icon} {_inbound_title(item)} — {status}")
+        lines.append(f"{icon} {_inbound_title(item, for_user=True)} — {status}")
 
     return "\n".join(lines)
 
