@@ -34,10 +34,18 @@ python run_bot.py   # терминал 2 — Telegram polling
 
 ## systemd (пример)
 
-Готовые unit-файлы в репозитории:
+Автоматическая установка (создаёт пользователя `vpnbot`, unit-файлы, автозапуск):
 
-- [`deploy/systemd/vpn-bot-web.service`](../deploy/systemd/vpn-bot-web.service) — webhook Platega
-- [`deploy/systemd/vpn-bot-telegram.service`](../deploy/systemd/vpn-bot-telegram.service) — Telegram polling
+```bash
+sudo bash deploy/install-systemd.sh
+# или с явными путями:
+sudo bash deploy/install-systemd.sh --app-dir /opt/vpn-bot --user vpnbot
+```
+
+Ручная установка — шаблоны в [`deploy/systemd/`](../deploy/systemd/):
+
+- `vpn-bot-web.service` — webhook Platega
+- `vpn-bot-telegram.service` — Telegram polling
 
 ```bash
 sudo cp deploy/systemd/vpn-bot-web.service /etc/systemd/system/
