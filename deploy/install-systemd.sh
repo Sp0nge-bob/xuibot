@@ -155,7 +155,7 @@ resolve_paths() {
 validate_project() {
     [[ -f "$APP_DIR/app.py" ]] || die "Не найден $APP_DIR/app.py"
     [[ -f "$APP_DIR/run_bot.py" ]] || die "Не найден $APP_DIR/run_bot.py"
-    [[ -x "$PYTHON_BIN" ]] || die "Python не найден или не исполняемый: $PYTHON_BIN"
+    [[ -f "$APP_DIR/pyproject.toml" ]] || die "Не найден $APP_DIR/pyproject.toml"
     [[ -f "$APP_DIR/.env" ]] || die "Не найден $APP_DIR/.env — скопируйте из .env.example"
 }
 
@@ -173,12 +173,52 @@ validate_env_for_systemd() {
     fi
 }
 
-validate_python_deps() {
-    log "Проверяем зависимости venv"
-    if ! sudo -u "$SERVICE_USER" env PATH="$VENV_BIN:$PATH" \
-        "$PYTHON_BIN" -c "import aiogram, fastapi, loguru" 2>/dev/null; then
-        die "В venv не хватает пакетов. Выполните: cd $APP_DIR && .venv/bin/pip install -e ."
+python_deps_ok() {
+    sudo -u "$SERVICE_USER" env PATH="$VENV_BIN:$PATH" \
+        "$PYTHON_BIN" -c "import aiogram, fastapi, loguru" 2>/dev/null
+}
+
+ensure_venv() {
+    local venv_py="$APP_DIR/.venv/bin/python"
+    if [[ -x "$venv_py" ]]; then
+        PYTHON_BIN="$venv_py"
+        VENV_BIN="$(dirname "$PYTHON_BIN")"
+        return
     fi
+
+    log "Создаём virtualenv в $APP_DIR/.venv"
+    local py_cmd=""
+    for c in python3.13 python3.12 python3.11 python3; do
+        if command -v "$c" >/dev/null 2>&1; then
+            py_cmd="$c"
+            break
+        fi
+    done
+    [[ -n "$py_cmd" ]] || die "Python 3.11+ не найден — установите python3.11-venv"
+
+    "$py_cmd" -m venv "$APP_DIR/.venv"
+    PYTHON_BIN="$venv_py"
+    VENV_BIN="$(dirname "$PYTHON_BIN")"
+    [[ -x "$PYTHON_BIN" ]] || die "Не удалось создать venv: $PYTHON_BIN"
+}
+
+ensure_python_deps() {
+    log "Проверяем зависимости Python"
+    if python_deps_ok; then
+        ok "Зависимости уже установлены"
+        return
+    fi
+
+    log "Устанавливаем зависимости: pip install -e ."
+    sudo -u "$SERVICE_USER" env PATH="$VENV_BIN:$PATH" \
+        "$PYTHON_BIN" -m pip install -U pip wheel
+    sudo -u "$SERVICE_USER" env PATH="$VENV_BIN:$PATH" \
+        "$PYTHON_BIN" -m pip install -e "$APP_DIR"
+
+    if ! python_deps_ok; then
+        die "Не удалось установить зависимости. Проверьте интернет и pip в $APP_DIR/.venv"
+    fi
+    ok "Зависимости установлены"
 }
 
 clear_stale_polling_lock() {
@@ -392,8 +432,9 @@ cmd_install() {
     validate_service_user
     validate_env_for_systemd
     ensure_service_user
+    ensure_venv
     fix_permissions
-    validate_python_deps
+    ensure_python_deps
     install_units
     show_status
     ok "Установка завершена"
