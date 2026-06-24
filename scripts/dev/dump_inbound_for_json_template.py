@@ -11,10 +11,7 @@ from services.xui import get_api
 
 
 def _parse_inbound_ids() -> list[int]:
-    raw = (settings.DEFAULT_SUBSCRIPTION_INBOUNDS or "").strip()
-    if raw:
-        return [int(x.strip()) for x in raw.split(",") if x.strip()]
-    return [settings.DEFAULT_INBOUND_ID]
+    return settings.subscription_inbound_ids()
 
 
 async def _dump_raw(api, iid: int) -> None:

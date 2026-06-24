@@ -60,10 +60,7 @@ async def get_subscription_inbound_ids_from_settings() -> List[int]:
     stored = await get_setting(SETTING_SUBSCRIPTION_INBOUNDS)
     if stored and stored.strip():
         return _parse_inbound_ids(stored)
-    env_raw = (settings.DEFAULT_SUBSCRIPTION_INBOUNDS or "").strip()
-    if env_raw:
-        return _parse_inbound_ids(env_raw)
-    return [settings.DEFAULT_INBOUND_ID]
+    return settings.subscription_inbound_ids()
 
 
 async def get_subscription_inbound_ids() -> List[int]:

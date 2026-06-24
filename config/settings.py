@@ -33,7 +33,6 @@ class Settings(BaseSettings):
     XUI_USERNAME: str = ""
     XUI_PASSWORD: str = ""
     XUI_TOKEN: str = ""
-    DEFAULT_INBOUND_ID: int = 1
 
     # Нагрузка на панель 3x-ui (для 1000+ клиентов)
     XUI_PANEL_CONCURRENCY: int = 5
@@ -73,12 +72,9 @@ class Settings(BaseSettings):
     TRIAL_LIMIT_IP: int = 3
     PAID_LIMIT_IP: int = 5
 
-    # Список ID инбаундов (через запятую), которые будут включены в дефолтную подписку.
-    # Это позволяет указывать по 1 инбаунду с каждой ноды (как у тебя сейчас).
-    # Пример: 5,12,23
-    # Формат в .env: DEFAULT_SUBSCRIPTION_INBOUNDS=5,12,23
-    # Если не указано — будет использован только DEFAULT_INBOUND_ID (для совместимости).
-    DEFAULT_SUBSCRIPTION_INBOUNDS: str = ""
+    # ID инбаундов в подписке (через запятую). Первый — главный на ★ Primary.
+    # Пример: 1,13,16,25,28
+    DEFAULT_SUBSCRIPTION_INBOUNDS: str = "1"
 
     # Группа клиентов 3x-ui (v3.2+) — все tg* клиенты бота попадают сюда
     XUI_CLIENT_GROUP: str = "telegram-bot"
@@ -137,18 +133,28 @@ class Settings(BaseSettings):
 
     @model_validator(mode="before")
     @classmethod
-    def migrate_inbound_env_keys(cls, data: Any) -> Any:
-        """Частая ошибка в .env: список инбаундов в DEFAULT_INBOUND_ID вместо DEFAULT_SUBSCRIPTION_INBOUNDS."""
+    def unify_inbound_env_keys(cls, data: Any) -> Any:
+        """Одна переменная DEFAULT_SUBSCRIPTION_INBOUNDS; DEFAULT_INBOUND_ID — legacy alias."""
         if not isinstance(data, dict):
             return data
-        raw = data.get("DEFAULT_INBOUND_ID")
-        if isinstance(raw, str) and "," in raw:
-            parts = [p.strip() for p in raw.split(",") if p.strip()]
-            if parts:
-                data["DEFAULT_INBOUND_ID"] = int(parts[0])
-                if not str(data.get("DEFAULT_SUBSCRIPTION_INBOUNDS") or "").strip():
-                    data["DEFAULT_SUBSCRIPTION_INBOUNDS"] = ",".join(parts)
+        sub = str(data.get("DEFAULT_SUBSCRIPTION_INBOUNDS") or "").strip()
+        legacy = data.get("DEFAULT_INBOUND_ID")
+        if not sub and legacy is not None and str(legacy).strip():
+            data["DEFAULT_SUBSCRIPTION_INBOUNDS"] = str(legacy).strip()
+        data.pop("DEFAULT_INBOUND_ID", None)
         return data
+
+    def subscription_inbound_ids(self) -> List[int]:
+        raw = (self.DEFAULT_SUBSCRIPTION_INBOUNDS or "").strip()
+        if not raw:
+            return [1]
+        return [int(x.strip()) for x in raw.split(",") if x.strip()]
+
+    @property
+    def DEFAULT_INBOUND_ID(self) -> int:
+        """Первый инбаунд из списка (совместимость со старым кодом)."""
+        ids = self.subscription_inbound_ids()
+        return ids[0] if ids else 1
 
     @field_validator("BOT_ADMINS", mode="before")
     @classmethod

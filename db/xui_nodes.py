@@ -355,7 +355,7 @@ async def get_primary_node() -> Optional[dict[str, Any]]:
             "username": settings.XUI_USERNAME or "",
             "password": settings.XUI_PASSWORD or "",
             "token": settings.XUI_TOKEN or "",
-            "inbound_ids": settings.DEFAULT_SUBSCRIPTION_INBOUNDS or str(settings.DEFAULT_INBOUND_ID),
+            "inbound_ids": format_inbound_ids(settings.subscription_inbound_ids()),
             "is_primary": 1,
             "is_enabled": 1,
         }
@@ -373,7 +373,7 @@ async def get_secondary_nodes(*, healthy_only: bool = False) -> list[dict[str, A
 async def get_primary_inbound_ids() -> list[int]:
     primary = await get_primary_node()
     if not primary:
-        return [settings.DEFAULT_INBOUND_ID]
+        return settings.subscription_inbound_ids()
     return parse_inbound_ids(primary.get("inbound_ids") or "")
 
 
