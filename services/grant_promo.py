@@ -66,6 +66,7 @@ async def fulfill_grant_promo(
 
     from db import database as db
 
+    bonus_sub_id: int | None = None
     if mode == "new":
         result = await fulfill_plan_for_tg(
             tg_id,
@@ -78,6 +79,7 @@ async def fulfill_grant_promo(
             title_extend="Промокод применён — подписка продлена!",
             log_context=f"Grant promo {promo['code']} (new sub)",
         )
+        bonus_sub_id = result.subscription_id
     else:
         target_sub = None
         if subscription_id:
@@ -104,6 +106,10 @@ async def fulfill_grant_promo(
             title_extend="Промокод применён — подписка продлена!",
             log_context=f"Grant promo {promo['code']} (extend #{target_sub['id']})",
         )
+        bonus_sub_id = target_sub["id"]
+
+    if bonus_sub_id:
+        await db.add_grant_bonus_days(bonus_sub_id, plan["days"])
 
     await promo_db.record_grant_promo_use(promo["id"], tg_id)
     logger.info("Grant promo {} redeemed by tg_id={} mode={}", promo["code"], tg_id, mode)

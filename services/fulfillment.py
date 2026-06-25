@@ -40,6 +40,7 @@ class FulfillmentResult:
     link_message: Optional[str] = None
     setup_text: Optional[str] = None
     setup_photos: List[FSInputFile] = field(default_factory=list)
+    subscription_id: Optional[int] = None
 
 
 async def fulfill_paid_order(order: dict) -> FulfillmentResult:
@@ -165,6 +166,7 @@ async def _fulfill_extend(
         text=text,
         photo=photo,
         link_message=sub_link_standalone_message(sub_link),
+        subscription_id=target_sub["id"],
     )
 
 
@@ -219,6 +221,7 @@ async def _fulfill_new(
         text=text,
         photo=photo,
         link_message=sub_link_standalone_message(sub_link),
+        subscription_id=sub_db_id,
     )
 
 

@@ -141,6 +141,10 @@ async def _init_db_impl():
             await db.execute(
                 "ALTER TABLE subscriptions ADD COLUMN expiry_reminder_sent_at TIMESTAMP"
             )
+        if "grant_bonus_days" not in sub_cols:
+            await db.execute(
+                "ALTER TABLE subscriptions ADD COLUMN grant_bonus_days INTEGER NOT NULL DEFAULT 0"
+            )
         await _create_indexes(db)
         await db.commit()
 
@@ -560,6 +564,21 @@ async def get_subscription_by_order_id(order_id: int) -> Optional[Dict[str, Any]
         ) as cur:
             row = await cur.fetchone()
             return dict(row) if row else None
+
+
+async def add_grant_bonus_days(subscription_id: int, days: int) -> None:
+    """Дни подписки, добавленные grant-промокодом (для границы оплаченного периода)."""
+    extra = int(days)
+    if extra <= 0:
+        return
+    async with get_db() as db:
+        await db.execute(
+            """UPDATE subscriptions
+               SET grant_bonus_days = COALESCE(grant_bonus_days, 0) + ?
+               WHERE id = ?""",
+            (extra, subscription_id),
+        )
+        await db.commit()
 
 
 async def extend_subscription_record(subscription_id: int, additional_days: int) -> str:

@@ -6,6 +6,7 @@ from aiogram.fsm.context import FSMContext
 from config.trial import is_trial_email
 from db import database as db
 from db import tickets as tickets_db
+from services.refund_eligibility import refund_denied_alert
 from services.subscription_sync import get_active_subscriptions_for_ui
 from .keyboards import (
     main_menu_kb,
@@ -65,16 +66,29 @@ async def _refund_ui_state(tg_id: int, sub_id: int) -> tuple[list[dict], bool]:
     open_tickets = (
         await tickets_db.get_open_refund_tickets_by_subscription_for_user(tg_id)
     ).get(sub_id, [])
-    blocked_orders = await tickets_db.get_refund_blocked_order_ids_for_subscription(sub_id)
-    paid_orders = await db.get_paid_orders_for_user(tg_id)
-    eligible = [o for o in paid_orders if o["id"] not in blocked_orders]
+    eligible = await _eligible_refund_orders(tg_id, sub_id)
     return open_tickets, bool(eligible)
 
 
-async def _eligible_refund_orders(tg_id: int, sub_id: int) -> list[dict]:
-    blocked = await tickets_db.get_refund_blocked_order_ids_for_subscription(sub_id)
+async def _paid_orders_for_user_subscription(tg_id: int, sub_id: int) -> list[dict]:
     paid = await db.get_paid_orders_for_subscription(sub_id)
-    return [o for o in paid if o["tg_id"] == tg_id and o["id"] not in blocked]
+    return [o for o in paid if o["tg_id"] == tg_id]
+
+
+async def _refund_denied_message(sub: dict, tg_id: int) -> str | None:
+    user_paid = await _paid_orders_for_user_subscription(tg_id, int(sub["id"]))
+    return refund_denied_alert(sub, has_paid_orders=bool(user_paid))
+
+
+async def _eligible_refund_orders(tg_id: int, sub_id: int) -> list[dict]:
+    sub = await db.get_subscription_by_id(sub_id)
+    if not sub:
+        return []
+    user_paid = await _paid_orders_for_user_subscription(tg_id, sub_id)
+    if refund_denied_alert(sub, has_paid_orders=bool(user_paid)):
+        return []
+    blocked = await tickets_db.get_refund_blocked_order_ids_for_subscription(sub_id)
+    return [o for o in user_paid if o["id"] not in blocked]
 
 
 async def _enter_ticket_session(
@@ -288,7 +302,12 @@ async def cb_refund(cb: CallbackQuery):
 
     orders = await _eligible_refund_orders(cb.from_user.id, sub_id)
     if not orders:
-        await safe_cb_answer(cb, "Нет оплат для возврата", show_alert=True)
+        denied = await _refund_denied_message(sub, cb.from_user.id)
+        await safe_cb_answer(
+            cb,
+            denied or "Нет оплат для возврата",
+            show_alert=True,
+        )
         return
 
     await safe_cb_answer(cb)
@@ -311,6 +330,10 @@ async def cb_refund_pick(cb: CallbackQuery):
     sub = await db.get_subscription_by_id(sub_id)
     if not sub or sub["tg_id"] != cb.from_user.id:
         await safe_cb_answer(cb, "Подписка не найдена", show_alert=True)
+        return
+    denied = await _refund_denied_message(sub, cb.from_user.id)
+    if denied:
+        await safe_cb_answer(cb, denied, show_alert=True)
         return
     order = await db.get_order_by_id(order_id)
     if not order or order["tg_id"] != cb.from_user.id or order.get("status") != "paid":
@@ -339,6 +362,10 @@ async def cb_refund_confirm(cb: CallbackQuery, state: FSMContext):
         return
     if not sub.get("is_active"):
         await safe_cb_answer(cb, "Подписка неактивна", show_alert=True)
+        return
+    denied = await _refund_denied_message(sub, cb.from_user.id)
+    if denied:
+        await safe_cb_answer(cb, denied, show_alert=True)
         return
     order = await db.get_order_by_id(order_id)
     if not order or order["tg_id"] != cb.from_user.id or order.get("status") != "paid":
