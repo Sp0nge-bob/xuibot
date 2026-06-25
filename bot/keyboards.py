@@ -258,6 +258,10 @@ def subscriptions_picker_kb(subs: list[dict]) -> InlineKeyboardMarkup:
             text="🔍 Поиск по email",
             callback_data="sub_search_email",
         )])
+    rows.append([InlineKeyboardButton(
+        text="➕ Купить еще одну",
+        callback_data="tariffs",
+    )])
     rows.append([InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -281,11 +285,17 @@ def subscription_manage_kb(
     rows = [
         [InlineKeyboardButton(text="🔗 Ссылка и QR", callback_data=f"sub_link:{sub_id}")],
     ]
+    purchase_extend_row: list[InlineKeyboardButton] = []
     if not is_trial and can_extend:
-        rows.append([InlineKeyboardButton(
+        purchase_extend_row.append(InlineKeyboardButton(
             text="🔄 Продлить подписку",
             callback_data=f"extend_sub:{sub_id}",
-        )])
+        ))
+    purchase_extend_row.append(InlineKeyboardButton(
+        text="➕ Купить еще одну",
+        callback_data="tariffs",
+    ))
+    rows.append(purchase_extend_row)
     if not is_trial:
         rows.append([InlineKeyboardButton(
             text="✏️ Переименовать",
