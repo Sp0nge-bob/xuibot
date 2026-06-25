@@ -51,7 +51,7 @@ def _pending_discount_menu_lines(promo: Dict[str, Any], expires_at: str) -> List
         f"   └ Код: <code>{promo['code']}</code> · <b>−{_promo_discount_label(promo)}</b>",
         f"   └ Тарифы: {plans_hint}",
         f"   └ Действует до: <b>{expires} UTC</b>",
-        "   └ Применится при оплате в «Тарифы»",
+        "   └ Применится при оплате в «Покупка»",
     ]
 
 
@@ -138,7 +138,7 @@ def faq_empty_text() -> str:
 
 def project_policy_text() -> str:
     return screen(
-        "📋 <b>Политика проекта</b>",
+        "📄 <b>Документы</b>",
         "\n".join([
             f"Официальные документы сервиса <b>{brand_name()}</b>:",
             "",
@@ -167,7 +167,7 @@ def _ru_articles_word(n: int) -> str:
 def plans_menu_text(*, has_active_sub: bool = False) -> str:
     hint = renewal_hint(has_active_sub=has_active_sub) or None
     return screen(
-        "📦 <b>Тарифы</b>",
+        "🛒 <b>Покупка</b>",
         "Выберите подходящий план.",
         hint=hint,
     )
@@ -530,7 +530,7 @@ def admin_legal_menu_text(
     return (
         "📄 <b>Юридические ссылки</b>\n"
         "━━━━━━━━━━━━━━━━\n\n"
-        "Кнопки в разделе «Политика проекта» открывают эти URL.\n\n"
+        "Кнопки в разделе «Документы» открывают эти URL.\n\n"
         f"🔒 <b>Политика конфиденциальности</b> ({privacy_src})\n"
         f"<code>{_legal_url_display(privacy_url)}</code>\n\n"
         f"📜 <b>Пользовательское соглашение</b> ({terms_src})\n"

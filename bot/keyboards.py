@@ -61,9 +61,11 @@ def main_menu_kb(
             InlineKeyboardButton(text=BTN_PROMO, callback_data="promo_enter"),
             InlineKeyboardButton(text=BTN_FAQ, callback_data="faq_menu"),
         ],
+        [
+            InlineKeyboardButton(text=BTN_SUPPORT_SHORT, callback_data="support"),
+            InlineKeyboardButton(text=BTN_POLICY, callback_data="project_policy"),
+        ],
         [InlineKeyboardButton(text=BTN_SERVER_STATUS, callback_data="server_status")],
-        [InlineKeyboardButton(text=BTN_POLICY, callback_data="project_policy")],
-        [InlineKeyboardButton(text=BTN_SUPPORT_SHORT, callback_data="support")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

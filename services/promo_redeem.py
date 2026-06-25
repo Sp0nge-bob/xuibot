@@ -98,6 +98,6 @@ async def redeem_promo_code(tg_id: int, code: str) -> PromoRedeemResult:
         f"{plans_hint}\n\n"
         f"Скидка применится к <b>ближайшей успешной оплате</b> "
         f"до <b>{expires.strftime('%d.%m.%Y %H:%M')} UTC</b>.\n\n"
-        "Перейдите в «Тарифы» и оформите подписку — цена будет с учётом скидки."
+        "Перейдите в «Покупка» и оформите подписку — цена будет с учётом скидки."
     )
     return PromoRedeemResult(kind="discount", message=message)
