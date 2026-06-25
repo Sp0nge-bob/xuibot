@@ -1,7 +1,6 @@
 import logging
 
 from aiogram import Bot, Dispatcher
-from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from loguru import logger
@@ -38,7 +37,7 @@ bot = Bot(
     token=settings.BOT_TOKEN,
     default=DefaultBotProperties(parse_mode=ParseMode.HTML)
 )
-dp = Dispatcher(storage=MemoryStorage())
+dp = Dispatcher()
 
 _primary_gate = PrimaryGateMiddleware()
 _action_lock = ActionLockMiddleware()
@@ -132,6 +131,14 @@ async def start_bot():
         logging.getLogger("aiogram").setLevel(logging.DEBUG)
         logging.getLogger("aiohttp").setLevel(logging.DEBUG)
         logger.debug("DEBUG-логи aiogram и aiohttp включены")
+
+    from bot.fsm_storage import configure_dispatcher_storage
+
+    try:
+        await configure_dispatcher_storage(dp)
+    except RuntimeError as e:
+        release_polling_lock()
+        raise
 
     logger.info("Polling started")
     try:

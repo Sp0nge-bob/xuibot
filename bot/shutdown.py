@@ -128,6 +128,13 @@ async def graceful_shutdown(*, reason: str = "shutdown") -> None:
         except Exception:
             pass
 
+        from bot.fsm_storage import close_fsm_storage
+
+        try:
+            await close_fsm_storage()
+        except Exception as e:
+            logger.debug("close_fsm_storage: {}", e)
+
         from services.node_sync import stop_secondary_sync_workers
         from services.fulfillment_queue import drain_fulfillment_queue, stop_fulfillment_workers
         from db.connection import close_connection

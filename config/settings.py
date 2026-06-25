@@ -127,6 +127,12 @@ class Settings(BaseSettings):
     # Продакшен: false — отдельно `python run_bot.py` + `python app.py`.
     START_BOT_IN_WEBAPP: bool = False
 
+    # FSM aiogram: Redis убирает пассивное накопление RAM (MemoryStorage).
+    # Пусто — MemoryStorage (локальная разработка без redis-server).
+    REDIS_URL: str = ""
+    FSM_STATE_TTL_SEC: int = 86400
+    FSM_DATA_TTL_SEC: int = 86400
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
