@@ -407,6 +407,36 @@ def refund_confirm_kb(sub_id: int, order_id: int) -> InlineKeyboardMarkup:
     ])
 
 
+def grant_promo_choice_kb(promo_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="🔄 Продлить текущую подписку",
+            callback_data=f"grant_promo:extend:{promo_id}",
+        )],
+        [InlineKeyboardButton(
+            text="➕ Новая подписка бесплатно",
+            callback_data=f"grant_promo:new:{promo_id}",
+        )],
+        [InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")],
+    ])
+
+
+def grant_promo_extend_picker_kb(promo_id: int, subs: list[dict]) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(
+            text=subscription_short_label(sub),
+            callback_data=f"grant_promo:extend_sub:{promo_id}:{sub['id']}",
+        )]
+        for sub in subs
+    ]
+    rows.append([InlineKeyboardButton(
+        text="◀️ Назад",
+        callback_data=f"grant_promo:back:{promo_id}",
+    )])
+    rows.append([InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def extend_sub_picker_kb(
     subs: list[dict],
     *,

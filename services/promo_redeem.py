@@ -9,7 +9,7 @@ from db import promo_codes as promo_db
 from db import promo_pending as pending_db
 from db.promo_codes import is_grant_promo
 from services.fulfillment import FulfillmentResult
-from services.grant_promo import redeem_grant_promo
+from services.grant_promo import fulfill_grant_promo
 from services.pricing import _validate_promo_common, calc_discount
 
 
@@ -18,6 +18,7 @@ class PromoRedeemResult:
     kind: str
     fulfillment: Optional[FulfillmentResult] = None
     message: Optional[str] = None
+    promo_id: Optional[int] = None
 
 
 def _discount_label(promo: dict) -> str:
@@ -53,7 +54,27 @@ async def redeem_promo_code(tg_id: int, code: str) -> PromoRedeemResult:
         raise ValueError("Промокод не найден")
 
     if is_grant_promo(promo):
-        fulfillment = await redeem_grant_promo(tg_id, code)
+        from config.plans import get_plan
+        from db import database as db
+        from services.grant_promo import grant_promo_choice_text
+
+        err = await _validate_promo_common(promo, tg_id=tg_id)
+        if err:
+            raise ValueError(err)
+        plan_id = promo_db.grant_plan_id(promo)
+        plan = get_plan(plan_id or "")
+        if not plan:
+            raise ValueError("Тариф промокода не настроен")
+
+        paid_subs = await db.get_active_paid_subscriptions(tg_id)
+        if paid_subs:
+            return PromoRedeemResult(
+                kind="grant_choice",
+                message=grant_promo_choice_text(promo, plan, paid_subs),
+                promo_id=int(promo["id"]),
+            )
+
+        fulfillment = await fulfill_grant_promo(tg_id, int(promo["id"]), mode="new")
         return PromoRedeemResult(kind="grant", fulfillment=fulfillment)
 
     err = await _validate_promo_common(promo, tg_id=tg_id)

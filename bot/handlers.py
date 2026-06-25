@@ -61,6 +61,8 @@ from .keyboards import (
     extend_sub_picker_kb,
     purchase_action_kb,
     sub_name_prompt_kb,
+    grant_promo_choice_kb,
+    grant_promo_extend_picker_kb,
 )
 from .messages import (
     EXTEND_BLOCKED_REFUND_PENDING_MSG,
@@ -1417,8 +1419,143 @@ async def msg_promo_code(message: Message, state: FSMContext):
         )
         return
 
+    if result.kind == "grant_choice" and result.promo_id and result.message:
+        await message.answer(
+            result.message,
+            reply_markup=grant_promo_choice_kb(result.promo_id),
+        )
+        return
+
     if result.message:
         await message.answer(result.message, reply_markup=back_to_main_kb())
+
+
+async def _deliver_grant_fulfillment(cb: CallbackQuery, fulfillment) -> None:
+    await deliver_fulfillment(
+        cb.bot,
+        cb.message.chat.id,
+        text=fulfillment.text,
+        photo=fulfillment.photo,
+        link_message=fulfillment.link_message,
+        reply_markup=fulfillment_success_kb(),
+    )
+
+
+async def _show_grant_promo_choice(cb: CallbackQuery, promo_id: int) -> None:
+    from config.plans import get_plan
+    from db import promo_codes as promo_db
+    from services.grant_promo import grant_promo_choice_text
+
+    promo = await promo_db.get_promo_by_id(promo_id)
+    if not promo:
+        await safe_cb_answer(cb, "Промокод не найден", show_alert=True)
+        return
+    plan = get_plan(promo_db.grant_plan_id(promo) or "")
+    if not plan:
+        await safe_cb_answer(cb, "Тариф промокода не настроен", show_alert=True)
+        return
+    paid_subs = await db.get_active_paid_subscriptions(cb.from_user.id)
+    if not paid_subs:
+        await safe_cb_answer(cb, "Нет активной платной подписки", show_alert=True)
+        return
+    await safe_cb_answer(cb)
+    await send_or_edit(
+        cb,
+        grant_promo_choice_text(promo, plan, paid_subs),
+        grant_promo_choice_kb(promo_id),
+    )
+
+
+@router.callback_query(F.data.regexp(r"^grant_promo:back:\d+$"))
+async def cb_grant_promo_back(cb: CallbackQuery):
+    promo_id = int(cb.data.rsplit(":", 1)[1])
+    await _show_grant_promo_choice(cb, promo_id)
+
+
+@router.callback_query(F.data.regexp(r"^grant_promo:extend:\d+$"))
+async def cb_grant_promo_extend(cb: CallbackQuery):
+    from services.grant_promo import fulfill_grant_promo, grant_promo_extend_picker_text
+
+    promo_id = int(cb.data.rsplit(":", 1)[1])
+    paid_subs = await db.get_active_paid_subscriptions(cb.from_user.id)
+    if not paid_subs:
+        await safe_cb_answer(cb, "Нет активной платной подписки", show_alert=True)
+        return
+    if len(paid_subs) > 1:
+        await safe_cb_answer(cb)
+        await send_or_edit(
+            cb,
+            grant_promo_extend_picker_text(paid_subs),
+            grant_promo_extend_picker_kb(promo_id, paid_subs),
+        )
+        return
+    try:
+        fulfillment = await fulfill_grant_promo(
+            cb.from_user.id,
+            promo_id,
+            mode="extend",
+            subscription_id=paid_subs[0]["id"],
+        )
+    except ValueError as e:
+        await safe_cb_answer(cb, str(e), show_alert=True)
+        return
+    except Exception as e:
+        logger.exception("Grant promo extend: {}", e)
+        await safe_cb_answer(cb, "Не удалось применить промокод", show_alert=True)
+        return
+    await safe_cb_answer(cb)
+    await _deliver_grant_fulfillment(cb, fulfillment)
+
+
+@router.callback_query(F.data.regexp(r"^grant_promo:extend_sub:\d+:\d+$"))
+async def cb_grant_promo_extend_sub(cb: CallbackQuery):
+    from services.grant_promo import fulfill_grant_promo
+
+    _, promo_id_str, sub_id_str = cb.data.split(":", 2)
+    promo_id = int(promo_id_str)
+    sub_id = int(sub_id_str)
+    sub = await db.get_subscription_by_id(sub_id)
+    if not sub or sub["tg_id"] != cb.from_user.id or not sub.get("is_active"):
+        await safe_cb_answer(cb, "Подписка не найдена", show_alert=True)
+        return
+    try:
+        fulfillment = await fulfill_grant_promo(
+            cb.from_user.id,
+            promo_id,
+            mode="extend",
+            subscription_id=sub_id,
+        )
+    except ValueError as e:
+        await safe_cb_answer(cb, str(e), show_alert=True)
+        return
+    except Exception as e:
+        logger.exception("Grant promo extend_sub: {}", e)
+        await safe_cb_answer(cb, "Не удалось применить промокод", show_alert=True)
+        return
+    await safe_cb_answer(cb)
+    await _deliver_grant_fulfillment(cb, fulfillment)
+
+
+@router.callback_query(F.data.regexp(r"^grant_promo:new:\d+$"))
+async def cb_grant_promo_new(cb: CallbackQuery):
+    from services.grant_promo import fulfill_grant_promo
+
+    promo_id = int(cb.data.rsplit(":", 1)[1])
+    try:
+        fulfillment = await fulfill_grant_promo(
+            cb.from_user.id,
+            promo_id,
+            mode="new",
+        )
+    except ValueError as e:
+        await safe_cb_answer(cb, str(e), show_alert=True)
+        return
+    except Exception as e:
+        logger.exception("Grant promo new: {}", e)
+        await safe_cb_answer(cb, "Не удалось применить промокод", show_alert=True)
+        return
+    await safe_cb_answer(cb)
+    await _deliver_grant_fulfillment(cb, fulfillment)
 
 
 @router.callback_query(F.data.startswith("sub_link:"))
