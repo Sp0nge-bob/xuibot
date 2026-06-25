@@ -11,6 +11,7 @@
 - [ ] `TEST_MODE=false`
 - [ ] `ALLOW_DEBUG_ADMIN=false`
 - [ ] `START_BOT_IN_WEBAPP=false`
+- [ ] `redis-server` запущен (`redis-cli ping` → `PONG`); в `.env` задан `REDIS_URL` (пункт **1** в `vpn-bot-ctl.sh` делает это автоматически)
 - [ ] Заполнены `PLATEGA_MERCHANT_ID`, `PLATEGA_SECRET`
 - [ ] `PUBLIC_WEBHOOK_URL` — HTTPS, доступен извне
 - [ ] В ЛК Platega Callback URL = `PUBLIC_WEBHOOK_URL`
@@ -19,6 +20,18 @@
 - [ ] Оба systemd-сервиса в статусе `active`
 - [ ] `/admin` → настроены цены, способы оплаты, ноды
 - [ ] Тестовый платёж → ключ в боте + клиент в 3x-ui
+- [ ] В логах Telegram: `FSM storage: Redis` (не `MemoryStorage`)
+
+## Обновление после `git pull`
+
+```bash
+cd ~/vpn-platega-bot   # или /opt/vpn-bot
+git pull
+.venv/bin/pip install -r requirements.txt
+sudo bash deploy/vpn-bot-ctl.sh
+# → 1   (обновить venv, redis, unit-файлы)
+# или → 2   (только перезапуск, если зависимости уже стоят)
+```
 
 ## nginx (фрагмент)
 

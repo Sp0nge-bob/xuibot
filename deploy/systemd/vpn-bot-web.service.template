@@ -1,7 +1,7 @@
 [Unit]
 Description=VPN Bot Webhook (Platega + fulfillment queue)
-After=network.target vpn-bot-telegram.service
-Wants=vpn-bot-telegram.service
+After=network.target redis-server.service vpn-bot-telegram.service
+Wants=redis-server.service vpn-bot-telegram.service
 
 [Service]
 Type=simple

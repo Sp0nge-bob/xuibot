@@ -156,6 +156,7 @@ show_unit_block() {
 show_status() {
     show_unit_block "$TELEGRAM_UNIT" "vpn-bot-telegram"
     show_unit_block "$WEB_UNIT" "vpn-bot-web"
+    show_redis_status
     echo
     if [[ -f "$STATE_FILE" ]]; then
         # shellcheck disable=SC1090

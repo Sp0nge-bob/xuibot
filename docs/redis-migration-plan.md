@@ -93,7 +93,18 @@ REDIS_URL=redis://127.0.0.1:6379/0
 
 `FSM_STATE_TTL_SEC` и `FSM_DATA_TTL_SEC` по умолчанию 86400 (24 ч) — менять не обязательно.
 
-### Установка Redis (один раз)
+### Установка Redis
+
+**Автоматически** (Debian/Ubuntu) — пункт **1** в `deploy/vpn-bot-ctl.sh`:
+
+- `apt install redis-server`
+- `systemctl enable` + `start`
+- проверка `redis-cli ping` → PONG
+- если в `.env` нет `REDIS_URL` — добавляет `REDIS_URL=redis://127.0.0.1:6379/0`
+
+Реализация: [`deploy/lib/redis.sh`](../deploy/lib/redis.sh).
+
+**Вручную:**
 
 ```bash
 sudo apt update && sudo apt install -y redis-server
@@ -107,10 +118,13 @@ redis-cli ping   # PONG
 cd ~/vpn-platega-bot
 git pull
 .venv/bin/pip install -r requirements.txt
-# REDIS_URL в .env
-sudo bash deploy/vpn-bot-ctl.sh restart
+sudo bash deploy/vpn-bot-ctl.sh
+# → 1   (redis + venv + unit-файлы)
+# или → 2   (только restart)
 journalctl -u vpn-bot-telegram -n 30 --no-pager | grep -i fsm
 ```
+
+Пункт **3** (статус) показывает блок Redis: PONG / REDIS_URL в `.env`.
 
 В логах: `FSM storage: Redis (TTL state=86400s, data=86400s)`.
 

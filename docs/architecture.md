@@ -15,12 +15,16 @@ flowchart LR
     BOT --> XUI
     BOT --> DB[(SQLite)]
     APP --> DB
+    BOT --> REDIS[(Redis\nFSM state/data)]
 ```
 
 | Процесс | Файл | Задачи |
 |---------|------|--------|
 | Webhook | `python app.py` | Приём callback Platega, rate limit, идемпотентность, очередь выдачи ключей |
 | Бот | `python run_bot.py` | Меню, оплата, админка, планировщик (истечение подписок, sync нод) |
+| Redis | `redis-server` (localhost) | FSM aiogram при `REDIS_URL` — state/data диалогов вне RAM бота |
+
+Без `REDIS_URL` FSM хранится в памяти процесса (`MemoryStorage`). В проде рекомендуется Redis — см. [Конфигурация → Redis](configuration.md).
 
 **Способы запуска:**
 

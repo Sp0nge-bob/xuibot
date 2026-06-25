@@ -11,6 +11,8 @@ cmd_reconcile() {
     validate_project
     ensure_env_file
     fix_env_for_systemd
+    ensure_redis_server || warn "Redis не готов — без REDIS_URL FSM останется в RAM"
+    ensure_redis_url_in_env
     ensure_service_user
     ensure_venv
     ensure_python_deps

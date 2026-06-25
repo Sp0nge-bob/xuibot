@@ -60,6 +60,36 @@
 python scripts/dedupe_nodes.py
 ```
 
+## Бот не стартует: REDIS_URL задан, Redis недоступен
+
+Симптом в `journalctl -u vpn-bot-telegram`: `REDIS_URL задан, но Redis недоступен`.
+
+```bash
+redis-cli ping          # должно быть PONG
+sudo systemctl status redis-server
+sudo bash deploy/vpn-bot-ctl.sh
+# → 1   (переустановит redis-server и проверит .env)
+```
+
+**Временный откат:** закомментируйте или удалите `REDIS_URL` в `.env` → перезапуск → FSM снова в RAM (`MemoryStorage`).
+
+## FSM всё ещё в RAM (MemoryStorage)
+
+В логах: `FSM storage: MemoryStorage (REDIS_URL не задан)`.
+
+- Добавьте в `.env`: `REDIS_URL=redis://127.0.0.1:6379/0`
+- Или пункт **1** в `deploy/vpn-bot-ctl.sh` (добавит строку, если Redis отвечает PONG)
+
+## `pip install` — externally-managed-environment
+
+На Debian/Ubuntu используйте venv, не системный pip:
+
+```bash
+.venv/bin/pip install -r requirements.txt
+```
+
+Пункт **1** в `deploy/vpn-bot-ctl.sh` ставит зависимости в `.venv` автоматически.
+
 ---
 
 **Назад:** [← Разработка](development.md) · **Оглавление:** [Документация](README.md)

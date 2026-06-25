@@ -34,13 +34,16 @@ python run_bot.py   # терминал 2 — Telegram polling
 
 ## systemd (пример)
 
-Меню systemd — **пункт 1 делает всё сам** (venv, pip, права, unit-файлы, запуск). Подходит и для первой установки, и после `git pull`:
+Меню systemd — **пункт 1 делает всё сам** (venv, pip, **redis-server**, `REDIS_URL` в `.env`, права, unit-файлы, запуск). Подходит и для первой установки, и после `git pull`:
 
 ```bash
 git pull
+.venv/bin/pip install -r requirements.txt   # не системный pip (PEP 668)
 sudo bash deploy/vpn-bot-ctl.sh
 # → 1
 ```
+
+**Redis:** на Debian/Ubuntu скрипт установит `redis-server` и добавит `REDIS_URL=redis://127.0.0.1:6379/0`, если строки ещё нет в `.env`. Без `REDIS_URL` FSM остаётся в RAM (`MemoryStorage`).
 
 Алиас: `sudo bash deploy/install-systemd.sh` (то же самое).
 

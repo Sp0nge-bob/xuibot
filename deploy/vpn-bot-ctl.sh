@@ -20,6 +20,8 @@ source "$DEPLOY_DIR/lib/systemd.sh"
 source "$DEPLOY_DIR/lib/reconcile.sh"
 # shellcheck source=lib/logs.sh
 source "$DEPLOY_DIR/lib/logs.sh"
+# shellcheck source=lib/redis.sh
+source "$DEPLOY_DIR/lib/redis.sh"
 
 pause_menu() {
     echo
@@ -31,7 +33,7 @@ draw_menu() {
     printf '%s\n' '╔══════════════════════════════════════════╗'
     printf '%s\n' '║       VPN Bot — управление systemd       ║'
     printf '%s\n' '╠══════════════════════════════════════════╣'
-    printf '%s\n' '║  1) Установить / обновить службы         ║'
+    printf '%s\n' '║  1) Установить / обновить (+ Redis)      ║'
     printf '%s\n' '║  2) Перезапустить службы (быстро)        ║'
     printf '%s\n' '║  3) Проверить состояние служб            ║'
     printf '%s\n' '║  4) Логи в реальном времени              ║'
@@ -137,7 +139,7 @@ main() {
 VPN Bot — systemd
 
   sudo bash deploy/vpn-bot-ctl.sh          # меню
-  sudo bash deploy/vpn-bot-ctl.sh install  # установить / обновить
+  sudo bash deploy/vpn-bot-ctl.sh install  # установить / обновить (+ redis-server)
   sudo bash deploy/vpn-bot-ctl.sh restart  # быстрый перезапуск служб
   sudo bash deploy/vpn-bot-ctl.sh status
   sudo bash deploy/vpn-bot-ctl.sh logs     # tail -f data/logs/bot.log
