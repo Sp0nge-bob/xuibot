@@ -716,8 +716,8 @@ async def cb_nodes_sync(cb: CallbackQuery):
             f"Основная: создано {stats.get('primary_created', 0)}, "
             f"обновлено {stats.get('primary_updated', 0)}, "
             f"лишних удалено {stats.get('primary_orphans_purged', 0)}\n"
-            f"Вторичные: нод {stats['nodes']}, "
-            f"призраков удалено {stats.get('purged', 0)}\n"
+            f"delOrphans: нод {stats['nodes']}, "
+            f"удалено {stats.get('purged', 0)}\n"
             f"Ошибок: {stats['failed']}"
             )
     except Exception as e:

@@ -11,8 +11,7 @@ from config.settings import settings
 from db import database as db
 from db import xui_nodes as nodes_db
 from services.xui import (
-    delete_orphan_clients_on_panel,
-    delete_orphan_clients_on_nodes,
+    delete_orphan_clients_everywhere,
     _client_needs_replica_update,
     _dedupe_nodes_by_host,
     _unified_get_client_info,
@@ -158,19 +157,11 @@ async def ensure_subscription_on_primary(sub: dict[str, Any]) -> str:
 
 
 async def _sync_primary_from_db(subs: list[dict[str, Any]]) -> dict[str, int]:
-    unattached = 0
-    try:
-        api = await get_api()
-        unattached = await delete_orphan_clients_on_panel(api)
-    except Exception as e:
-        logger.warning("Sync primary: delOrphans failed: {}", e)
-
     db_emails = {str(s["client_email"]).lower() for s in subs}
     orphans = await _purge_orphan_bot_clients_on_primary(db_emails)
 
     stats = {
         "subs": len(subs),
-        "orphans_unattached": unattached,
         "orphans_purged": orphans,
         "created": 0,
         "updated": 0,
@@ -219,18 +210,17 @@ async def sync_client_on_secondary_from_primary(
         return {"node_id": node_id, "email": email, "ok": False, "error": err}
 
 
-async def _sync_secondaries_orphans() -> dict[str, int]:
-    """
-    Вторичные ноды: clients/delOrphans — клиенты без attach к inbound.
+async def _del_orphans_on_all_nodes() -> dict[str, int]:
+    """clients/delOrphans на каждой включённой ноде (действует локально на панели)."""
+    from db.xui_nodes import list_nodes
 
-    Параметры активных клиентов панель 3x-ui разносит с основной сама.
-    """
-    nodes = _dedupe_nodes_by_host(await nodes_db.get_secondary_nodes(healthy_only=True))
+    nodes = _dedupe_nodes_by_host(await list_nodes(enabled_only=True))
     stats = {"nodes": len(nodes), "synced": 0, "missing": 0, "purged": 0, "failed": 0}
     if not nodes:
         return stats
 
-    orphan_stats = await delete_orphan_clients_on_nodes(nodes, label="secondary")
+    orphan_stats = await delete_orphan_clients_everywhere()
+    stats["nodes"] = int(orphan_stats.get("nodes") or 0)
     stats["purged"] = int(orphan_stats.get("deleted") or 0)
     stats["failed"] = int(orphan_stats.get("failed") or 0)
 
@@ -246,42 +236,38 @@ async def _sync_secondaries_orphans() -> dict[str, int]:
                 last_sync_error=node_err,
             )
         except Exception as e:
-            logger.error("Secondary sync: update_node {} failed: {}", node_id, e)
+            logger.error("delOrphans: update_node {} failed: {}", node_id, e)
 
-    if stats["purged"]:
-        logger.info(
-            "Sync secondaries: delOrphans удалено {} на {} нодах (ошибок нод {})",
-            stats["purged"],
-            stats["nodes"],
-            stats["failed"],
-        )
+    logger.info(
+        "delOrphans: удалено {} на {} нодах (ошибок {})",
+        stats["purged"],
+        stats["nodes"],
+        stats["failed"],
+    )
     return stats
 
 
 async def run_full_nodes_sync() -> dict[str, Any]:
     """
     1) Основная ↔ БД (лишние tg удалить, недостающие создать/обновить)
-    2) Вторичные — только очистка призраков (параметры тянет панель с основной)
+    2) delOrphans на всех включённых нодах
     """
     subs = await db.get_all_active_subscriptions()
     logger.info("Full nodes sync: {} active subscriptions in DB", len(subs))
 
     phase1 = await _sync_primary_from_db(subs)
 
-    primary = await nodes_db.get_primary_node()
-    if not primary:
+    if not await nodes_db.get_primary_node():
         logger.warning("Full nodes sync: primary node not configured")
-        return {"phase1": phase1, "phase2": {"nodes": 0, "synced": 0, "purged": 0, "failed": 0}}
 
-    phase2 = await _sync_secondaries_orphans()
+    phase2 = await _del_orphans_on_all_nodes()
 
     logger.info(
-        "Full nodes sync done: primary delOrphans={} db_orphans={} created={} updated={} failed={}; "
-        "secondary delOrphans={} failed={}",
-        phase1.get("orphans_unattached", 0),
+        "Full nodes sync done: primary db_orphans={} created={} updated={} failed={}; "
+        "delOrphans all nodes={} purged={} failed={}",
         phase1.get("orphans_purged", 0),
         phase1["created"], phase1["updated"], phase1["failed"],
-        phase2["purged"], phase2["failed"],
+        phase2["nodes"], phase2["purged"], phase2["failed"],
     )
     return {"phase1": phase1, "phase2": phase2}
 

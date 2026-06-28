@@ -542,6 +542,16 @@ async def delete_orphan_clients_on_nodes(
     return stats
 
 
+async def delete_orphan_clients_everywhere() -> dict[str, Any]:
+    """POST clients/delOrphans на каждой включённой ноде (локально на каждой панели)."""
+    from db.xui_nodes import list_nodes
+
+    nodes = _dedupe_nodes_by_host(await list_nodes(enabled_only=True))
+    if not nodes:
+        nodes = [{"id": 0, "host": settings.XUI_HOST}]
+    return await delete_orphan_clients_on_nodes(nodes, label="all")
+
+
 async def delete_depleted_clients_everywhere() -> dict[str, Any]:
     """POST clients/delDepleted на каждой включённой ноде."""
     from db.xui_nodes import list_nodes
