@@ -60,7 +60,7 @@ def _autosync_status_line(*, sync_disabled: bool) -> str:
         )
     return (
         "🔄 <b>Автосинк: включён</b> "
-        "<i>(раз в сутки: БД↔основная + призраки на вторичных)</i>"
+        "<i>(раз в сутки: БД↔основная + delOrphans на нодах)</i>"
     )
 
 

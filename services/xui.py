@@ -6,6 +6,7 @@ Unified client API 3x-ui 3.2+ (report/api.txt).
   POST clients/groups/bulkAdd    — привязка группы (UI панели)
   POST clients/del/{email}       — удаление tg*
   POST clients/delDepleted       — все истёкшие / исчерпавшие трафик
+  POST clients/delOrphans        — без привязки к inbound (+ мусор трафика/IP)
   POST clients/{email}/attach    — догон инбаунда (если нет в settings)
   POST clients/{email}/detach    — снятие лишнего инбаунда
   GET  clients/get/{email}       — чтение клиента
@@ -457,7 +458,7 @@ async def _unified_detach(api: AsyncApi, email: str, inbound_ids: list[int]) -> 
     logger.info("clients/detach {} → {}", email, inbound_ids)
 
 
-def _parse_del_depleted_count(response: Any) -> int:
+def _parse_bulk_delete_count(response: Any) -> int:
     try:
         body = response.json()
     except Exception:
@@ -491,9 +492,54 @@ async def delete_depleted_clients_on_panel(api: AsyncApi) -> int:
     await _throttle()
     response = await api.client._post(url, {"Accept": "application/json"}, {})
     panel_cache.invalidate()
-    deleted = _parse_del_depleted_count(response)
+    deleted = _parse_bulk_delete_count(response)
     logger.info("clients/delDepleted → удалено {}", deleted)
     return deleted
+
+
+async def delete_orphan_clients_on_panel(api: AsyncApi) -> int:
+    """Удалить клиентов без attach к inbound (delOrphans)."""
+    url = api.client._url("panel/api/clients/delOrphans")
+    await _throttle()
+    response = await api.client._post(url, {"Accept": "application/json"}, {})
+    panel_cache.invalidate()
+    deleted = _parse_bulk_delete_count(response)
+    logger.info("clients/delOrphans → удалено {}", deleted)
+    return deleted
+
+
+async def delete_orphan_clients_on_nodes(
+    nodes: list[dict],
+    *,
+    label: str = "nodes",
+) -> dict[str, Any]:
+    """POST clients/delOrphans на указанных нодах."""
+    nodes = _dedupe_nodes_by_host(nodes)
+    stats: dict[str, Any] = {
+        "nodes": len(nodes),
+        "deleted": 0,
+        "failed": 0,
+        "by_node": {},
+    }
+    if not nodes:
+        return stats
+    sem = asyncio.Semaphore(settings.XUI_PANEL_CONCURRENCY)
+
+    async def _one(node: dict) -> None:
+        nid = int(node.get("id") or 0)
+        async with sem:
+            try:
+                api = await get_api_for_node(node) if node.get("host") else await get_api()
+                removed = await delete_orphan_clients_on_panel(api)
+                stats["by_node"][nid] = removed
+                stats["deleted"] += removed
+            except Exception as e:
+                stats["failed"] += 1
+                stats["by_node"][nid] = None
+                logger.error("clients/delOrphans на {} {}: {}", label, nid, e)
+
+    await asyncio.gather(*[_one(node) for node in nodes])
+    return stats
 
 
 async def delete_depleted_clients_everywhere() -> dict[str, Any]:

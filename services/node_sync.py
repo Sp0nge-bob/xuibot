@@ -11,6 +11,8 @@ from config.settings import settings
 from db import database as db
 from db import xui_nodes as nodes_db
 from services.xui import (
+    delete_orphan_clients_on_panel,
+    delete_orphan_clients_on_nodes,
     _client_needs_replica_update,
     _dedupe_nodes_by_host,
     _unified_get_client_info,
@@ -156,11 +158,19 @@ async def ensure_subscription_on_primary(sub: dict[str, Any]) -> str:
 
 
 async def _sync_primary_from_db(subs: list[dict[str, Any]]) -> dict[str, int]:
+    unattached = 0
+    try:
+        api = await get_api()
+        unattached = await delete_orphan_clients_on_panel(api)
+    except Exception as e:
+        logger.warning("Sync primary: delOrphans failed: {}", e)
+
     db_emails = {str(s["client_email"]).lower() for s in subs}
     orphans = await _purge_orphan_bot_clients_on_primary(db_emails)
 
     stats = {
         "subs": len(subs),
+        "orphans_unattached": unattached,
         "orphans_purged": orphans,
         "created": 0,
         "updated": 0,
@@ -209,70 +219,42 @@ async def sync_client_on_secondary_from_primary(
         return {"node_id": node_id, "email": email, "ok": False, "error": err}
 
 
-async def _sync_secondaries_from_primary(
-    _subs: list[dict[str, Any]],
-    *,
-    primary_emails: set[str],
-) -> dict[str, int]:
+async def _sync_secondaries_orphans() -> dict[str, int]:
     """
-    Вторичные ноды: только удаление призраков (tg на ноде, но нет на основной).
+    Вторичные ноды: clients/delOrphans — клиенты без attach к inbound.
 
-    Параметры клиента (expiry, трафик, limitIp) панель 3x-ui разносит с основной
-    сама — бот на вторичные их не пушит. Исключение — удаление: на каждой ноде
-    отдельно (ограничение панели), это делает remove_client_everywhere и purge здесь.
+    Параметры активных клиентов панель 3x-ui разносит с основной сама.
     """
     nodes = _dedupe_nodes_by_host(await nodes_db.get_secondary_nodes(healthy_only=True))
     stats = {"nodes": len(nodes), "synced": 0, "missing": 0, "purged": 0, "failed": 0}
     if not nodes:
         return stats
 
-    sem = asyncio.Semaphore(settings.XUI_PANEL_CONCURRENCY)
-    stats_lock = asyncio.Lock()
+    orphan_stats = await delete_orphan_clients_on_nodes(nodes, label="secondary")
+    stats["purged"] = int(orphan_stats.get("deleted") or 0)
+    stats["failed"] = int(orphan_stats.get("failed") or 0)
 
-    async def _one_node(node: dict) -> None:
-        node_id = node["id"]
-        node_purged = 0
-        node_failed = 0
+    now = datetime.utcnow().isoformat()
+    by_node = orphan_stats.get("by_node") or {}
+    for node in nodes:
+        node_id = int(node["id"])
+        node_err = "delOrphans failed" if by_node.get(node_id) is None else None
         try:
-            api = await get_api_for_node(node)
-            secondary_emails = await list_bot_client_emails_on_panel(api)
-            ghosts = secondary_emails - primary_emails
-            logger.info(
-                "Sync secondary {}: {} tg на ноде, {} на основной, призраков {}",
-                node.get("name"), len(secondary_emails), len(primary_emails), len(ghosts),
-            )
-            for email in sorted(ghosts):
-                async with sem:
-                    try:
-                        await remove_bot_client_on_panel(api, email)
-                        node_purged += 1
-                        logger.info(
-                            "Sync secondary {}: удалён призрак {} (нет на основной)",
-                            node.get("name"), email,
-                        )
-                    except Exception as e:
-                        node_failed += 1
-                        logger.error(
-                            "Sync secondary {}: не удалось удалить {}: {}",
-                            node.get("name"), email, e,
-                        )
-
             await nodes_db.update_node(
                 node_id,
-                last_sync_at=datetime.utcnow().isoformat(),
-                last_sync_error=None,
+                last_sync_at=now,
+                last_sync_error=node_err,
             )
         except Exception as e:
-            node_failed += 1
-            err = f"{type(e).__name__}: {e}"[:200]
-            await nodes_db.update_node(node_id, last_sync_error=err)
-            logger.error("Secondary sync failed for node {}: {}", node_id, e)
+            logger.error("Secondary sync: update_node {} failed: {}", node_id, e)
 
-        async with stats_lock:
-            stats["purged"] += node_purged
-            stats["failed"] += node_failed
-
-    await asyncio.gather(*[_one_node(n) for n in nodes])
+    if stats["purged"]:
+        logger.info(
+            "Sync secondaries: delOrphans удалено {} на {} нодах (ошибок нод {})",
+            stats["purged"],
+            stats["nodes"],
+            stats["failed"],
+        )
     return stats
 
 
@@ -291,21 +273,15 @@ async def run_full_nodes_sync() -> dict[str, Any]:
         logger.warning("Full nodes sync: primary node not configured")
         return {"phase1": phase1, "phase2": {"nodes": 0, "synced": 0, "purged": 0, "failed": 0}}
 
-    api_primary = await get_api_for_node(primary)
-    primary_emails = await list_bot_client_emails_on_panel(api_primary)
-    logger.info(
-        "Full nodes sync: {} tg on primary after phase 1, {} active subs in DB",
-        len(primary_emails), len(subs),
-    )
-
-    phase2 = await _sync_secondaries_from_primary(subs, primary_emails=primary_emails)
+    phase2 = await _sync_secondaries_orphans()
 
     logger.info(
-        "Full nodes sync done: primary orphans={} created={} updated={} failed={}; "
-        "secondary purged={} synced={} failed={}",
+        "Full nodes sync done: primary delOrphans={} db_orphans={} created={} updated={} failed={}; "
+        "secondary delOrphans={} failed={}",
+        phase1.get("orphans_unattached", 0),
         phase1.get("orphans_purged", 0),
         phase1["created"], phase1["updated"], phase1["failed"],
-        phase2["purged"], phase2["synced"], phase2["failed"],
+        phase2["purged"], phase2["failed"],
     )
     return {"phase1": phase1, "phase2": phase2}
 
