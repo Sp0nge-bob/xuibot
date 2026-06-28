@@ -48,9 +48,9 @@ class Settings(BaseSettings):
     FULL_SYNC_INTERVAL_HOURS: int = 24
     # Проверка истекших подписок (disable на панели) — bot/scheduler.py
     EXPIRED_CHECK_INTERVAL_HOURS: int = 1
-    # Удаление неактивных подписок и клиентов на панели (дней после end_date) — bot/scheduler.py
+    # Очистка истёкших: delDepleted на нодах + удаление неактивных из БД (дней после end_date)
     EXPIRED_PURGE_ENABLED: bool = True
-    EXPIRED_PURGE_AFTER_DAYS: int = 14
+    EXPIRED_PURGE_AFTER_DAYS: int = 1
     EXPIRED_PURGE_INTERVAL_HOURS: int = 24
     # Напоминание об окончании подписки (за N дней, не чаще раза в сутки)
     EXPIRY_REMINDER_ENABLED: bool = True

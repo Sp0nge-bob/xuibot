@@ -61,10 +61,10 @@ async def purge_stale_expired_subscriptions_job():
     stats = await purge_stale_expired_subscriptions()
     if stats.get("enabled") and stats.get("subs"):
         logger.info(
-            "Очистка истёкших (итог): удалено={} ошибок={} panel inbounds={}",
+            "Очистка истёкших (итог): delDepleted={} db_удалено={} db_ошибок={}",
+            stats.get("panel_deleted", 0),
             stats.get("deleted", 0),
             stats.get("failed", 0),
-            stats.get("panel_inbounds", 0),
         )
 
 

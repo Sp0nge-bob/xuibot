@@ -743,7 +743,8 @@ async def deactivate_subscription(sub_id: int):
 
 
 async def get_stale_inactive_subscriptions(*, after_days: int) -> List[Dict[str, Any]]:
-    """Неактивные подписки, истёкшие более after_days назад (кандидаты на удаление)."""
+    """Неактивные подписки, end_date старше after_days (0 = сразу после деактивации)."""
+    after_days = max(0, int(after_days))
     cutoff = (datetime.utcnow() - timedelta(days=after_days)).isoformat()
     async with get_db() as db:
         async with db.execute(

@@ -5,6 +5,7 @@ Unified client API 3x-ui 3.2+ (report/api.txt).
   POST clients/update/{email}    — продление / disable
   POST clients/groups/bulkAdd    — привязка группы (UI панели)
   POST clients/del/{email}       — удаление tg*
+  POST clients/delDepleted       — все истёкшие / исчерпавшие трафик
   POST clients/{email}/attach    — догон инбаунда (если нет в settings)
   POST clients/{email}/detach    — снятие лишнего инбаунда
   GET  clients/get/{email}       — чтение клиента
@@ -454,6 +455,77 @@ async def _unified_detach(api: AsyncApi, email: str, inbound_ids: list[int]) -> 
     await api.client._post(url, {"Accept": "application/json"}, {"inboundIds": inbound_ids})
     panel_cache.invalidate()
     logger.info("clients/detach {} → {}", email, inbound_ids)
+
+
+def _parse_del_depleted_count(response: Any) -> int:
+    try:
+        body = response.json()
+    except Exception:
+        return 0
+    if not isinstance(body, dict):
+        return 0
+    obj = body.get("obj")
+    if isinstance(obj, bool):
+        return 0
+    if isinstance(obj, int):
+        return max(0, obj)
+    if isinstance(obj, dict):
+        for key in ("count", "deleted", "deletedCount", "num"):
+            if key in obj:
+                try:
+                    return max(0, int(obj[key]))
+                except (TypeError, ValueError):
+                    continue
+    for key in ("count", "deleted"):
+        if key in body:
+            try:
+                return max(0, int(body[key]))
+            except (TypeError, ValueError):
+                continue
+    return 0
+
+
+async def delete_depleted_clients_on_panel(api: AsyncApi) -> int:
+    """Удалить на панели всех клиентов с истёкшим сроком или исчерпанным трафиком."""
+    url = api.client._url("panel/api/clients/delDepleted")
+    await _throttle()
+    response = await api.client._post(url, {"Accept": "application/json"}, {})
+    panel_cache.invalidate()
+    deleted = _parse_del_depleted_count(response)
+    logger.info("clients/delDepleted → удалено {}", deleted)
+    return deleted
+
+
+async def delete_depleted_clients_everywhere() -> dict[str, Any]:
+    """POST clients/delDepleted на каждой включённой ноде."""
+    from db.xui_nodes import list_nodes
+
+    nodes = _dedupe_nodes_by_host(await list_nodes(enabled_only=True))
+    if not nodes:
+        nodes = [{"id": 0, "host": settings.XUI_HOST}]
+    stats: dict[str, Any] = {
+        "nodes": len(nodes),
+        "deleted": 0,
+        "failed": 0,
+        "by_node": {},
+    }
+    sem = asyncio.Semaphore(settings.XUI_PANEL_CONCURRENCY)
+
+    async def _one(node: dict) -> None:
+        nid = int(node.get("id") or 0)
+        async with sem:
+            try:
+                api = await get_api_for_node(node) if node.get("host") else await get_api()
+                removed = await delete_depleted_clients_on_panel(api)
+                stats["by_node"][nid] = removed
+                stats["deleted"] += removed
+            except Exception as e:
+                stats["failed"] += 1
+                stats["by_node"][nid] = None
+                logger.error("clients/delDepleted на ноде {}: {}", nid, e)
+
+    await asyncio.gather(*[_one(node) for node in nodes])
+    return stats
 
 
 async def _delete_client_by_email(api: AsyncApi, email: str) -> None:
