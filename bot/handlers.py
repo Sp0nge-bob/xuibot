@@ -38,7 +38,7 @@ from services.payment_flow import (
     check_payment_status,
 )
 from services.payment_processor import handle_platega_status
-from services.pricing import get_plan_quote, list_plans, quote_from_order
+from services.pricing import get_plan_quote, list_plans, quote_from_order, quotes_for_plans
 from services.subscription_labels import normalize_display_name, subscription_display_name
 from services.subscription_sync import get_active_subscriptions_for_ui
 from services.promo_redeem import redeem_promo_code
@@ -393,11 +393,12 @@ async def cb_purchase_plans(cb: CallbackQuery, state: FSMContext):
     has_paid = await _user_has_paid_subs(cb.from_user.id)
     extend_blocked = await tickets_db.is_extend_blocked_by_pending_refund(cb.from_user.id)
     plans = await list_plans()
+    quotes = await quotes_for_plans(plans, tg_id=cb.from_user.id)
     await safe_cb_answer(cb)
     await send_or_edit(
         cb,
         plans_menu_text(has_active_sub=has_paid and not extend_blocked),
-        plans_kb(plans),
+        plans_kb(plans, quotes=quotes),
     )
 
 
@@ -1335,12 +1336,13 @@ async def cb_extend_menu(cb: CallbackQuery, state: FSMContext):
     if len(paid_subs) == 1:
         await state.update_data(extend_subscription_id=paid_subs[0]["id"])
         plans = await list_plans()
+        quotes = await quotes_for_plans(plans, tg_id=cb.from_user.id)
         await safe_cb_answer(cb)
         await send_or_edit(
             cb,
             f"🔄 <b>Продление: {subscription_display_name(paid_subs[0])}</b>\n\n"
             "Выберите срок продления:",
-            plans_kb(plans, extend=True),
+            plans_kb(plans, extend=True, quotes=quotes),
         )
         return
     await safe_cb_answer(cb)
@@ -1362,11 +1364,12 @@ async def cb_extend_sub(cb: CallbackQuery, state: FSMContext):
         return
     await state.update_data(extend_subscription_id=sub_id)
     plans = await list_plans()
+    quotes = await quotes_for_plans(plans, tg_id=cb.from_user.id)
     await safe_cb_answer(cb)
     await send_or_edit(
         cb,
         f"🔄 <b>Продление: {subscription_display_name(sub)}</b>\n\nВыберите срок:",
-        plans_kb(plans, extend=True),
+        plans_kb(plans, extend=True, quotes=quotes),
     )
 
 

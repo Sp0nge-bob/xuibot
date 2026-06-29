@@ -43,8 +43,12 @@ def payment_failed_user_text(
         f"📦 {action}: <b>{plan_name}</b>",
         f"💰 Сумма: {money(amount)}",
     ]
-    if order.get("promo_code"):
-        lines.append(f"🎟 Промокод: <code>{order['promo_code']}</code>")
+    promo = (order.get("promo_code") or "").strip()
+    discount = int(order.get("discount_amount") or 0)
+    if promo:
+        lines.append(f"🎟 Промокод: <code>{promo}</code>")
+    elif discount > 0:
+        lines.append(f"👥 Реферальная скидка: <b>−{discount} ₽</b>")
     lines += [
         f"🆔 ID заказа: <code>{order_id}</code>",
         f"🆔 ID транзакции Platega: <code>{tx_id}</code>",

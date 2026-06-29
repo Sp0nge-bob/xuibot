@@ -61,8 +61,11 @@ def format_payment_admin_notify_text(order: Dict[str, Any], user: Optional[Dict[
             lines.append(f"🏦 Способ: {method['emoji']} <b>{html.escape(method['name'])}</b>")
 
     promo = (order.get("promo_code") or "").strip()
+    discount = int(order.get("discount_amount") or 0)
     if promo:
         lines.append(f"🎟 Промокод: <code>{html.escape(promo)}</code>")
+    elif discount > 0:
+        lines.append(f"👥 Реферальная скидка: <b>−{discount} ₽</b>")
 
     if str(order.get("platega_tx_id") or "").startswith("test-"):
         lines += ["", "⚠️ <i>Тестовый режим — оплата симулирована</i>"]

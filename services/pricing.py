@@ -1,7 +1,9 @@
 """Расчёт цен тарифов и применение промокодов."""
 from dataclasses import dataclass
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
+
+DiscountSource = Literal["promo", "referral"]
 
 from config.plans import Plan, get_plan
 from db.plan_prices import get_all_effective_plans, get_effective_plan
@@ -18,10 +20,15 @@ class PriceQuote:
     discount_amount: int
     promo_code: Optional[str] = None
     promo_id: Optional[int] = None
+    discount_source: Optional[DiscountSource] = None
 
     @property
     def has_discount(self) -> bool:
         return self.discount_amount > 0
+
+    @property
+    def is_referral_discount(self) -> bool:
+        return self.discount_source == "referral"
 
 
 def calc_discount(base_price: int, discount_type: str, discount_value: int) -> int:
@@ -38,12 +45,16 @@ def quote_from_order(order: dict, plan: Plan) -> PriceQuote:
     if discount_amount <= 0 and base_price > final_price:
         discount_amount = base_price - final_price
     promo_code = order.get("promo_code") or None
+    discount_source: DiscountSource | None = None
+    if discount_amount > 0:
+        discount_source = "promo" if promo_code else "referral"
     return PriceQuote(
         plan={**plan, "price": final_price},
         base_price=base_price,
         final_price=final_price,
         discount_amount=discount_amount,
         promo_code=promo_code,
+        discount_source=discount_source,
     )
 
 
@@ -139,6 +150,9 @@ async def get_plan_quote(
 
     discount_amount = max(promo_discount, referral_discount)
     final_price = max(0, base_price - discount_amount)
+    discount_source: DiscountSource | None = None
+    if discount_amount > 0:
+        discount_source = "referral" if referral_discount >= promo_discount else "promo"
 
     plan_out = {**plan, "price": final_price}
     return PriceQuote(
@@ -146,8 +160,9 @@ async def get_plan_quote(
         base_price=base_price,
         final_price=final_price,
         discount_amount=discount_amount,
-        promo_code=applied_code,
-        promo_id=promo_id,
+        promo_code=applied_code if discount_source == "promo" else None,
+        promo_id=promo_id if discount_source == "promo" else None,
+        discount_source=discount_source,
     )
 
 
@@ -197,6 +212,19 @@ async def validate_grant_promo(
 
 async def list_plans() -> List[Plan]:
     return await get_all_effective_plans()
+
+
+async def quotes_for_plans(
+    plans: List[Plan],
+    *,
+    tg_id: int,
+) -> dict[str, PriceQuote]:
+    quotes: dict[str, PriceQuote] = {}
+    for plan in plans:
+        quote = await get_plan_quote(plan["id"], tg_id=tg_id)
+        if quote:
+            quotes[plan["id"]] = quote
+    return quotes
 
 
 async def apply_promo_on_paid_order(order: dict) -> None:

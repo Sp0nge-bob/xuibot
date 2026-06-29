@@ -123,15 +123,21 @@ def faq_article_nav_kb() -> InlineKeyboardMarkup:
     ])
 
 
-def plans_kb(plans: list[Plan], *, extend: bool = False) -> InlineKeyboardMarkup:
+def plans_kb(
+    plans: list[Plan],
+    *,
+    extend: bool = False,
+    quotes: dict[str, PriceQuote] | None = None,
+) -> InlineKeyboardMarkup:
     prefix = "extend_plan" if extend else "select_plan"
-    rows = [
-        [InlineKeyboardButton(
-            text=plan_button_label(plan),
+    rows = []
+    for plan in plans:
+        quote = (quotes or {}).get(plan["id"])
+        final_price = quote.final_price if quote else None
+        rows.append([InlineKeyboardButton(
+            text=plan_button_label(plan, final_price=final_price),
             callback_data=f"{prefix}:{plan['id']}",
-        )]
-        for plan in plans
-    ]
+        )])
     if extend:
         rows.append(nav_row("manage_sub"))
     else:

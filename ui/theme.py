@@ -120,9 +120,11 @@ def price_per_month(plan: Plan) -> int:
     return max(1, round(plan["price"] * 30 / days))
 
 
-def plan_button_label(plan: Plan) -> str:
-    ppm = price_per_month(plan)
-    return f"📦 {plan['name']} · {plan['price']} ₽ · ~{ppm} ₽/мес"
+def plan_button_label(plan: Plan, *, final_price: int | None = None) -> str:
+    price = final_price if final_price is not None else plan["price"]
+    ppm_plan = {**plan, "price": price}
+    ppm = price_per_month(ppm_plan)
+    return f"📦 {plan['name']} · {price} ₽ · ~{ppm} ₽/мес"
 
 
 def plan_specs_table(plan: Plan, *, quote_final: int | None = None) -> str:

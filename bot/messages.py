@@ -20,6 +20,20 @@ from services.pricing import PriceQuote
 from services.subscription_labels import subscription_display_name, subscription_short_label
 
 
+def _quote_discount_line(quote: PriceQuote, *, with_amount: bool = True) -> str:
+    if quote.is_referral_discount:
+        if with_amount:
+            return f"👥 Реферальная скидка: <b>−{quote.discount_amount} ₽</b>"
+        return "👥 Реферальная скидка"
+    if quote.promo_code:
+        if with_amount:
+            return f"🎟 Промокод: <code>{quote.promo_code}</code> (−{quote.discount_amount} ₽)"
+        return f"🎟 Промокод: <code>{quote.promo_code}</code>"
+    if with_amount:
+        return f"🎟 Скидка: <b>−{quote.discount_amount} ₽</b>"
+    return "🎟 Скидка"
+
+
 def _sub_kind_label(sub: Dict[str, Any]) -> str:
     if is_trial_email(sub.get("client_email")):
         return "🎁 Пробная"
@@ -236,7 +250,7 @@ def _price_block(quote: PriceQuote | None, plan: Plan) -> str:
     if quote and quote.has_discount:
         lines += [
             f"💰 Цена: <s>{quote.base_price} ₽</s> → {money(quote.final_price)} · ~{ppm} ₽/мес",
-            f"🎟 Скидка: <b>−{quote.discount_amount} ₽</b> ({quote.promo_code})",
+            _quote_discount_line(quote),
         ]
     else:
         lines.append(f"💰 Цена: {money(plan['price'])} · ~{ppm} ₽/мес")
@@ -302,7 +316,7 @@ def test_payment_text(
         f"💳 К оплате: {money(final_amount)}",
     ]
     if quote and quote.has_discount:
-        blocks.append(f"🎟 Промокод: <code>{quote.promo_code}</code> (−{quote.discount_amount} ₽)")
+        blocks.append(_quote_discount_line(quote))
     renewal = renewal_hint(extend=extend, has_active_sub=has_active_sub)
     if renewal:
         blocks.append(renewal)
@@ -965,8 +979,12 @@ def _order_payment_lines(order: Dict[str, Any]) -> list[str]:
         f"🆔 ID транзакции Platega: <code>{order.get('platega_tx_id') or '—'}</code>",
         f"🕐 Оплачен: <b>{paid or '—'}</b>",
     ]
-    if order.get("promo_code"):
-        lines.append(f"🎟 Промокод: <code>{order['promo_code']}</code>")
+    promo = (order.get("promo_code") or "").strip()
+    discount = int(order.get("discount_amount") or 0)
+    if promo:
+        lines.append(f"🎟 Промокод: <code>{promo}</code>")
+    elif discount > 0:
+        lines.append(f"👥 Реферальная скидка: <b>−{discount} ₽</b>")
     return lines
 
 
@@ -1139,7 +1157,7 @@ def pending_payment_text(
     else:
         lines.append("⏱ Окно оплаты: <b>30 минут</b> с момента создания счёта")
     if quote and quote.has_discount:
-        lines.append(f"🎟 Промокод: <code>{quote.promo_code}</code>")
+        lines.append(_quote_discount_line(quote, with_amount=False))
     renewal = renewal_hint(extend=extend, has_active_sub=has_active_sub)
     if renewal:
         lines.append(renewal)
