@@ -166,23 +166,27 @@ async def take_pending_referral_days(tg_id: int) -> int:
         return pending
 
 
+_ACTIVE_REFERRED_PAID_SQL = """SELECT COUNT(DISTINCT a.referred_tg_id)
+   FROM referral_attributions a
+   INNER JOIN subscriptions s ON s.tg_id = a.referred_tg_id
+   WHERE a.referrer_tg_id = ?
+     AND s.is_active = 1
+     AND s.client_email NOT LIKE 'tgfree%'
+     AND EXISTS (
+       SELECT 1 FROM orders o
+       WHERE o.tg_id = a.referred_tg_id AND o.status = 'paid'
+     )"""
+
+
+async def _count_active_referred_paid_friends_on(db, referrer_tg_id: int) -> int:
+    async with db.execute(_ACTIVE_REFERRED_PAID_SQL, (referrer_tg_id,)) as cur:
+        return int((await cur.fetchone())[0])
+
+
 async def count_active_referred_paid_friends(referrer_tg_id: int) -> int:
     """Приглашённые с paid-заказом и активной подпиской (не trial)."""
     async with get_db() as db:
-        async with db.execute(
-            """SELECT COUNT(DISTINCT a.referred_tg_id)
-               FROM referral_attributions a
-               INNER JOIN subscriptions s ON s.tg_id = a.referred_tg_id
-               WHERE a.referrer_tg_id = ?
-                 AND s.is_active = 1
-                 AND s.client_email NOT LIKE 'tgfree%'
-                 AND EXISTS (
-                   SELECT 1 FROM orders o
-                   WHERE o.tg_id = a.referred_tg_id AND o.status = 'paid'
-                 )""",
-            (referrer_tg_id,),
-        ) as cur:
-            return int((await cur.fetchone())[0])
+        return await _count_active_referred_paid_friends_on(db, referrer_tg_id)
 
 
 def tier_discount_percent(active_referred_count: int) -> int:
@@ -258,7 +262,7 @@ async def count_referrals(referrer_tg_id: int) -> dict[str, int]:
             (referrer_tg_id,),
         ) as cur:
             paid = int((await cur.fetchone())[0])
-        active = await count_active_referred_paid_friends(referrer_tg_id)
+        active = await _count_active_referred_paid_friends_on(db, referrer_tg_id)
         async with db.execute(
             """SELECT COALESCE(SUM(referrer_bonus_days), 0)
                FROM referral_reward_log WHERE referrer_tg_id = ?""",
