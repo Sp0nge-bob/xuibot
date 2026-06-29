@@ -156,6 +156,7 @@ async def _init_db_impl():
     from db.tickets import init_tickets_tables
     from db.faq import init_faq_tables
     from db.webhook_dedup import init_webhook_dedup
+    from db.referrals import init_referral_tables
     await init_bot_settings()
     await init_promo_tables()
     await init_promo_pending_tables()
@@ -165,6 +166,7 @@ async def _init_db_impl():
     await init_tickets_tables()
     await init_faq_tables()
     await init_webhook_dedup()
+    await init_referral_tables()
     _INIT_MARKER.parent.mkdir(parents=True, exist_ok=True)
     _INIT_MARKER.write_text(datetime.utcnow().isoformat(), encoding="utf-8")
     logger.info("Database initialized at {}", DB_PATH)
@@ -564,6 +566,26 @@ async def get_subscription_by_order_id(order_id: int) -> Optional[Dict[str, Any]
         ) as cur:
             row = await cur.fetchone()
             return dict(row) if row else None
+
+
+async def add_subscription_bonus_days(subscription_id: int, days: int) -> str:
+    """Добавить дни к end_date подписки. Возвращает новый end_date ISO."""
+    extra = int(days)
+    if extra <= 0:
+        sub = await get_subscription_by_id(subscription_id)
+        return str(sub["end_date"]) if sub else ""
+    sub = await get_subscription_by_id(subscription_id)
+    if not sub:
+        raise ValueError("Подписка не найдена")
+    current_end = datetime.fromisoformat(str(sub["end_date"]).replace("Z", ""))
+    new_end = current_end + timedelta(days=extra)
+    async with get_db() as db:
+        await db.execute(
+            "UPDATE subscriptions SET end_date = ? WHERE id = ?",
+            (new_end.isoformat(), subscription_id),
+        )
+        await db.commit()
+    return new_end.isoformat()
 
 
 async def add_grant_bonus_days(subscription_id: int, days: int) -> None:

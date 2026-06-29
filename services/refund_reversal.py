@@ -45,6 +45,9 @@ async def apply_refund_reversal(order: dict[str, Any]) -> dict[str, Any]:
     Откатывает выдачу подписки после возврата средств.
     Новая покупка — удаление клиента; продление — сокращение срока на дни тарифа.
     """
+    from services.referral import reverse_referral_rewards_for_order
+
+    await reverse_referral_rewards_for_order(order)
     plan = get_plan(order.get("plan_id") or "")
     if not plan:
         logger.warning("Refund reversal skipped: unknown plan {}", order.get("plan_id"))

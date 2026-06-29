@@ -16,6 +16,10 @@ from ui.theme import (
     BTN_POLICY,
     BTN_PRIVACY_POLICY,
     BTN_PROMO,
+    BTN_REFERRAL,
+    BTN_PURCHASE_PROMO,
+    BTN_PURCHASE_PLANS,
+    BTN_EXIT,
     BTN_RESUME_PAY,
     BTN_SUBSCRIPTION,
     BTN_SUPPORT_SHORT,
@@ -58,16 +62,27 @@ def main_menu_kb(
             InlineKeyboardButton(text=BTN_SUBSCRIPTION, callback_data="manage_sub"),
         ],
         [
-            InlineKeyboardButton(text=BTN_PROMO, callback_data="promo_enter"),
             InlineKeyboardButton(text=BTN_FAQ, callback_data="faq_menu"),
-        ],
-        [
             InlineKeyboardButton(text=BTN_SUPPORT_SHORT, callback_data="support"),
-            InlineKeyboardButton(text=BTN_POLICY, callback_data="project_policy"),
         ],
-        [InlineKeyboardButton(text=BTN_SERVER_STATUS, callback_data="server_status")],
+        [InlineKeyboardButton(text=BTN_POLICY, callback_data="project_policy")],
+        [InlineKeyboardButton(text=BTN_REFERRAL, callback_data="referral_program")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def purchase_hub_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=BTN_PURCHASE_PROMO, callback_data="purchase_promo")],
+        [InlineKeyboardButton(text=BTN_PURCHASE_PLANS, callback_data="purchase_plans")],
+        [InlineKeyboardButton(text=BTN_EXIT, callback_data="main_menu")],
+    ])
+
+
+def back_to_purchase_hub_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        nav_row("tariffs", back_text=BTN_BACK_TARIFFS),
+    ])
 
 
 def project_policy_kb(
@@ -120,7 +135,7 @@ def plans_kb(plans: list[Plan], *, extend: bool = False) -> InlineKeyboardMarkup
     if extend:
         rows.append(nav_row("manage_sub"))
     else:
-        rows.append([InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")])
+        rows.append(nav_row("tariffs", back_text=BTN_BACK_TARIFFS))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -318,6 +333,11 @@ def subscription_manage_kb(
             text="💸 Запросить возврат",
             callback_data=f"refund:{sub_id}",
         )])
+    if not is_trial:
+        rows.append([InlineKeyboardButton(
+            text=BTN_SERVER_STATUS,
+            callback_data=f"server_status:{sub_id}",
+        )])
     rows.append(nav_row(back_callback))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -503,8 +523,17 @@ def trial_confirm_kb() -> InlineKeyboardMarkup:
     ])
 
 
-def server_status_kb() -> InlineKeyboardMarkup:
+def server_status_kb(*, back_callback: str = "main_menu") -> InlineKeyboardMarkup:
+    if back_callback == "main_menu":
+        rows = [[InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")]]
+    else:
+        rows = [nav_row(back_callback)]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def referral_program_kb(share_url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📤 Поделиться ссылкой", url=share_url)],
         [InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")],
     ])
 

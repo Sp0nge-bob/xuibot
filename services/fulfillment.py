@@ -51,7 +51,7 @@ async def fulfill_paid_order(order: dict) -> FulfillmentResult:
         raise ValueError(f"План {order['plan_id']} не найден")
 
     is_test = order["platega_tx_id"].startswith("test-")
-    return await fulfill_plan_for_tg(
+    result = await fulfill_plan_for_tg(
         order["tg_id"],
         plan,
         order_id=order.get("id"),
@@ -62,6 +62,16 @@ async def fulfill_paid_order(order: dict) -> FulfillmentResult:
         title_new="Оплата прошла успешно!",
         log_context=f"Order {order['id']}",
     )
+    if result.subscription_id:
+        from services.referral import (
+            apply_pending_referral_days_for_user,
+            process_referral_rewards_for_order,
+        )
+        await apply_pending_referral_days_for_user(order["tg_id"], result.subscription_id)
+        await process_referral_rewards_for_order(
+            order, subscription_id=result.subscription_id,
+        )
+    return result
 
 
 async def fulfill_plan_for_tg(

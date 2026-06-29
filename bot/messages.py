@@ -164,10 +164,29 @@ def _ru_articles_word(n: int) -> str:
     return "статей"
 
 
+def purchase_hub_text(*, referral_welcome: bool = False) -> str:
+    extra = None
+    if referral_welcome:
+        from config.referral import (
+            REFERRAL_WELCOME_BONUS_DAYS,
+            REFERRAL_WELCOME_DISCOUNT_PERCENT,
+        )
+        extra = (
+            f"🎁 По реферальной ссылке: <b>−{REFERRAL_WELCOME_DISCOUNT_PERCENT}%</b> "
+            f"и <b>+{REFERRAL_WELCOME_BONUS_DAYS} дн.</b> на первую оплату."
+        )
+    return screen(
+        "🛒 <b>Покупка</b>",
+        "Сначала можно применить промокод или сразу выбрать тариф.",
+        extra,
+        hint="Выберите действие ниже 👇",
+    )
+
+
 def plans_menu_text(*, has_active_sub: bool = False) -> str:
     hint = renewal_hint(has_active_sub=has_active_sub) or None
     return screen(
-        "🛒 <b>Покупка</b>",
+        "📦 <b>Тарифы</b>",
         "Выберите подходящий план.",
         hint=hint,
     )
@@ -1137,13 +1156,63 @@ def pending_payment_text(
     return screen(title, "\n".join(lines), hint=hint)
 
 
-def promo_enter_text() -> str:
+def promo_enter_text(*, from_purchase: bool = False) -> str:
+    back_hint = "«Назад к покупке»" if from_purchase else "«Главное меню»"
     return screen(
         "🎟 <b>Промокод</b>",
         "• <b>Бесплатный тариф</b> — активируется сразу\n"
         "• <b>Скидка</b> — применится к ближайшей оплате в течение 7 дней",
-        hint="Отправьте код следующим сообщением. Отмена: /start или «Главное меню».",
+        hint=f"Отправьте код следующим сообщением. Отмена: /start или {back_hint}.",
     )
+
+
+def referral_program_text(
+    *,
+    link: str,
+    invited: int,
+    paid: int,
+    active: int,
+    earned_days: int,
+    tier_percent: int,
+    pending_days: int,
+    friends: list[dict],
+) -> str:
+    from config.referral import (
+        REFERRAL_PAYMENT_BONUS_DAYS,
+        REFERRAL_TIER_MAX_PERCENT,
+        REFERRAL_WELCOME_BONUS_DAYS,
+        REFERRAL_WELCOME_DISCOUNT_PERCENT,
+    )
+
+    lines = [
+        f"🔗 <b>Ваша ссылка:</b>\n<code>{link}</code>",
+        "",
+        "<b>Для друга</b> (первая оплата по ссылке):",
+        f"   └ скидка <b>{REFERRAL_WELCOME_DISCOUNT_PERCENT}%</b> + <b>{REFERRAL_WELCOME_BONUS_DAYS} дн.</b>",
+        "",
+        "<b>Для вас:</b>",
+        f"   └ скидка <b>{tier_percent}%</b> на тарифы (макс. {REFERRAL_TIER_MAX_PERCENT}%), пока у приглашённых активна подписка",
+        f"   └ <b>+{REFERRAL_PAYMENT_BONUS_DAYS} дн.</b> за каждую оплату друга",
+        "",
+        f"📊 Приглашено: <b>{invited}</b> · оплатили: <b>{paid}</b> · активны: <b>{active}</b>",
+        f"🎁 Заработано дней: <b>{earned_days}</b>",
+    ]
+    if pending_days > 0:
+        lines.append(f"⏳ В очереди: <b>{pending_days}</b> дн. (применятся к вашей подписке)")
+    if friends:
+        lines.append("")
+        lines.append("<b>Приглашённые:</b>")
+        for f in friends[:8]:
+            name = f.get("first_name") or f.get("username") or str(f.get("referred_tg_id"))
+            paid_orders = int(f.get("paid_orders") or 0)
+            if f.get("active_end"):
+                status = "✅ активен"
+            elif paid_orders:
+                status = "⏸ истёк"
+            else:
+                status = "— без оплаты"
+            lines.append(f"   └ {name} · {status}")
+    return screen("👥 <b>Реферальная программа</b>", "\n".join(lines))
 
 
 def promo_applied_text(code: str, discount: int, final_price: int) -> str:

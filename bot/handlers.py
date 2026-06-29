@@ -48,6 +48,9 @@ from .fulfillment_delivery import deliver_fulfillment
 from .ui_helpers import safe_cb_answer, send_or_edit
 from .keyboards import (
     main_menu_kb,
+    purchase_hub_kb,
+    back_to_purchase_hub_kb,
+    referral_program_kb,
     plans_kb,
     payment_methods_kb,
     test_scenario_kb,
@@ -67,6 +70,8 @@ from .keyboards import (
 from .messages import (
     EXTEND_BLOCKED_REFUND_PENDING_MSG,
     main_menu_text,
+    purchase_hub_text,
+    referral_program_text,
     plans_menu_text,
     plan_card_text,
     payment_method_text,
@@ -218,11 +223,18 @@ async def _notify_admins(text: str):
 async def cmd_start(message: Message, state: FSMContext):
     from bot.faq_album import clear_faq_album
     from bot.ticket_chat import clear_active_session
+    from services.referral import parse_referral_start_arg, try_bind_referrer
 
     if message.from_user:
         clear_active_session(message.from_user.id)
     await clear_faq_album(message.bot, message.chat.id)
     await state.clear()
+    if message.from_user and message.text:
+        parts = message.text.split(maxsplit=1)
+        if len(parts) > 1:
+            referrer_id = parse_referral_start_arg(parts[1])
+            if referrer_id:
+                await try_bind_referrer(message.from_user.id, referrer_id)
     await _show_main_menu(message, state=state)
 
 
@@ -238,8 +250,41 @@ async def cmd_subscription(message: Message, state: FSMContext):
 async def cb_promo_enter(cb: CallbackQuery, state: FSMContext):
     await _clear_promo_input_state(state)
     await state.set_state(UserStates.waiting_promo_code)
+    await state.update_data(promo_from_purchase=False)
     await safe_cb_answer(cb)
     await send_or_edit(cb, promo_enter_text(), back_to_main_kb())
+
+
+@router.callback_query(F.data == "purchase_promo")
+async def cb_purchase_promo(cb: CallbackQuery, state: FSMContext):
+    await _clear_promo_input_state(state)
+    await state.set_state(UserStates.waiting_promo_code)
+    await state.update_data(promo_from_purchase=True)
+    await safe_cb_answer(cb)
+    await send_or_edit(
+        cb,
+        promo_enter_text(from_purchase=True),
+        back_to_purchase_hub_kb(),
+    )
+
+
+@router.callback_query(F.data == "referral_program")
+async def cb_referral_program(cb: CallbackQuery):
+    from urllib.parse import quote
+
+    from services.referral import build_referral_link, get_referral_dashboard
+
+    await safe_cb_answer(cb)
+    me = await cb.bot.get_me()
+    link = build_referral_link(me.username or "", cb.from_user.id)
+    dash = await get_referral_dashboard(cb.from_user.id)
+    share_text = "Попробуй VPN — скидка на первую оплату по моей ссылке!"
+    share_url = f"https://t.me/share/url?url={quote(link)}&text={quote(share_text)}"
+    await send_or_edit(
+        cb,
+        referral_program_text(link=link, **dash),
+        referral_program_kb(share_url),
+    )
 
 
 @router.callback_query(F.data == "main_menu")
@@ -321,8 +366,29 @@ async def cb_trial_confirm(cb: CallbackQuery):
     )
 
 
+async def _purchase_hub_referral_welcome(tg_id: int) -> bool:
+    from db import referrals as ref_db
+
+    flags = await ref_db.get_user_referral_flags(tg_id)
+    if not flags["referred_by_tg_id"] or flags["referral_welcome_used"]:
+        return False
+    return await ref_db.count_paid_orders(tg_id) == 0
+
+
 @router.callback_query(F.data == "tariffs")
 async def cb_tariffs(cb: CallbackQuery, state: FSMContext):
+    await _clear_promo_input_state(state)
+    await safe_cb_answer(cb)
+    welcome = await _purchase_hub_referral_welcome(cb.from_user.id)
+    await send_or_edit(
+        cb,
+        purchase_hub_text(referral_welcome=welcome),
+        purchase_hub_kb(),
+    )
+
+
+@router.callback_query(F.data == "purchase_plans")
+async def cb_purchase_plans(cb: CallbackQuery, state: FSMContext):
     await _clear_promo_input_state(state)
     has_paid = await _user_has_paid_subs(cb.from_user.id)
     extend_blocked = await tickets_db.is_extend_blocked_by_pending_refund(cb.from_user.id)
@@ -1357,9 +1423,17 @@ async def msg_sub_rename(message: Message, state: FSMContext):
     await show_subscription_detail(message, message.from_user.id, int(sub_id))
 
 
+def _promo_reply_kb(*, from_purchase: bool):
+    if from_purchase:
+        return back_to_purchase_hub_kb()
+    return back_to_main_kb()
+
+
 @router.message(UserStates.waiting_promo_code)
 async def msg_promo_code(message: Message, state: FSMContext):
-    await _clear_promo_input_state(state)
+    data = await state.get_data()
+    from_purchase = bool(data.get("promo_from_purchase"))
+    promo_kb = _promo_reply_kb(from_purchase=from_purchase)
 
     cmd = _message_command(message.text or "")
     if cmd == "/admin":
@@ -1383,14 +1457,15 @@ async def msg_promo_code(message: Message, state: FSMContext):
         await show_faq_menu_message(message)
         return
     if cmd:
-        await message.answer("Ввод промокода отменён.", reply_markup=back_to_main_kb())
+        await _clear_promo_input_state(state)
+        await message.answer("Ввод промокода отменён.", reply_markup=promo_kb)
         return
 
     code = (message.text or "").strip()
     if not code:
         await message.answer(
-            "Промокод не введён. Нажмите «Промокоды» в главном меню и попробуйте снова.",
-            reply_markup=back_to_main_kb(),
+            "Промокод не введён. Откройте «Покупка» → «Применить промокод» и попробуйте снова.",
+            reply_markup=promo_kb,
         )
         return
 
@@ -1398,15 +1473,16 @@ async def msg_promo_code(message: Message, state: FSMContext):
     try:
         result = await redeem_promo_code(message.from_user.id, code)
     except ValueError as e:
-        await message.answer(f"❌ {e}", reply_markup=back_to_main_kb())
+        await message.answer(f"❌ {e}", reply_markup=promo_kb)
         return
     except Exception as e:
         logger.exception("Promo redeem error: {}", e)
         await message.answer(
             "❌ Не удалось активировать промокод. Попробуйте позже.",
-            reply_markup=back_to_main_kb(),
+            reply_markup=promo_kb,
         )
         return
+    await _clear_promo_input_state(state)
 
     if result.kind == "grant" and result.fulfillment:
         await deliver_fulfillment(
@@ -1427,7 +1503,7 @@ async def msg_promo_code(message: Message, state: FSMContext):
         return
 
     if result.message:
-        await message.answer(result.message, reply_markup=back_to_main_kb())
+        await message.answer(result.message, reply_markup=promo_kb if from_purchase else back_to_main_kb())
 
 
 async def _deliver_grant_fulfillment(cb: CallbackQuery, fulfillment) -> None:

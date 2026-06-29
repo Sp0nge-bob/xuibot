@@ -110,15 +110,15 @@ async def get_plan_quote(
             effective_code = pending["promo_code"]
             from_pending = True
 
+    promo_discount = 0
     if effective_code and tg_id is not None:
         promo = await promo_db.get_promo_by_code(effective_code)
         if promo and not is_grant_promo(promo):
             if from_pending:
                 if _promo_plan_allowed(promo, plan_id):
-                    discount_amount = calc_discount(
+                    promo_discount = calc_discount(
                         base_price, promo["discount_type"], promo["discount_value"],
                     )
-                    final_price = max(0, base_price - discount_amount)
                     promo_id = promo["id"]
                     applied_code = promo["code"]
             else:
@@ -126,12 +126,19 @@ async def get_plan_quote(
                     effective_code, plan_id=plan_id, tg_id=tg_id,
                 )
                 if promo_valid:
-                    discount_amount = calc_discount(
+                    promo_discount = calc_discount(
                         base_price, promo_valid["discount_type"], promo_valid["discount_value"],
                     )
-                    final_price = max(0, base_price - discount_amount)
                     promo_id = promo_valid["id"]
                     applied_code = promo_valid["code"]
+
+    referral_discount = 0
+    if tg_id is not None:
+        from services.referral import calc_referral_discount_amount
+        referral_discount = await calc_referral_discount_amount(tg_id, base_price)
+
+    discount_amount = max(promo_discount, referral_discount)
+    final_price = max(0, base_price - discount_amount)
 
     plan_out = {**plan, "price": final_price}
     return PriceQuote(
@@ -154,7 +161,7 @@ async def validate_promo(
     if not promo:
         return None, "Промокод не найден"
     if is_grant_promo(promo):
-        return None, "Этот промокод выдаёт тариф бесплатно — активируйте его в главном меню → «Промокоды»."
+        return None, "Этот промокод выдаёт тариф бесплатно — активируйте в «Покупка» → «Применить промокод»."
 
     err = await _validate_promo_common(promo, tg_id=tg_id)
     if err:
@@ -175,7 +182,7 @@ async def validate_grant_promo(
     if not promo:
         return None, "Промокод не найден"
     if not is_grant_promo(promo):
-        return None, "Этот промокод даёт скидку — активируйте его в главном меню → «Промокоды»"
+        return None, "Этот промокод даёт скидку — активируйте в «Покупка» → «Применить промокод»"
 
     err = await _validate_promo_common(promo, tg_id=tg_id)
     if err:
