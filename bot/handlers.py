@@ -95,22 +95,25 @@ router = Router()
 
 
 async def _block_new_payment_cb(cb: CallbackQuery) -> bool:
-    from services.bot_lockdown import get_new_payment_block_message
+    from services.bot_lockdown import get_new_payment_block_response
 
-    msg = await get_new_payment_block_message(cb.from_user.id)
-    if not msg:
+    block = await get_new_payment_block_response(cb.from_user.id)
+    if not block:
         return False
-    await safe_cb_answer(cb, msg, show_alert=True)
+    alert_text, message_text = block
+    await safe_cb_answer(cb, alert_text, show_alert=True)
+    await user_cb_message_answer(cb, message_text, reply_markup=back_to_main_kb())
     return True
 
 
 async def _block_new_payment_msg(message: Message) -> bool:
-    from services.bot_lockdown import get_new_payment_block_message
+    from services.bot_lockdown import get_new_payment_block_response
 
-    msg = await get_new_payment_block_message(message.from_user.id)
-    if not msg:
+    block = await get_new_payment_block_response(message.from_user.id)
+    if not block:
         return False
-    await user_answer(message, msg, reply_markup=back_to_main_kb())
+    _, message_text = block
+    await user_answer(message, message_text, reply_markup=back_to_main_kb())
     return True
 
 

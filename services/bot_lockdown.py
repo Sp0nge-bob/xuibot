@@ -6,14 +6,37 @@ from typing import Any
 
 from config.settings import settings
 from db import bot_settings as bot_settings_db
-from services.primary_gate import SERVICE_UNAVAILABLE_TEXT, is_primary_operational
+from services.primary_gate import is_primary_operational
+from ui.theme import screen
 
-MAINTENANCE_TEXT = "Бот находится на тех обслуживании"
-PRIMARY_UNAVAILABLE_ALERT = "Сервис временно недоступен. Панель VPN на обслуживании."
-NEW_PAYMENT_BLOCKED_ALERT = (
-    "Приём новых оплат временно приостановлен. "
-    "Если у вас есть незавершённый платёж — вернитесь к нему из главного меню."
-)
+MAINTENANCE_ALERT = "Бот на техобслуживании. Попробуйте позже."
+PRIMARY_UNAVAILABLE_ALERT = "Сервис временно недоступен. Попробуйте позже."
+NEW_PAYMENT_BLOCKED_ALERT = "Новые оплаты временно недоступны."
+
+
+def maintenance_message() -> str:
+    return screen(
+        "🔧 <b>Техническое обслуживание</b>",
+        "Бот временно недоступен — проводим плановые работы.",
+        hint="Попробуйте зайти позже. При срочном вопросе — напишите в поддержку.",
+        footer="🙏 <i>Спасибо за понимание</i>",
+    )
+
+
+def primary_unavailable_message() -> str:
+    return screen(
+        "⚠️ <b>Сервис временно недоступен</b>",
+        "Панель VPN сейчас на обслуживании — подключения могут не работать.",
+        hint="Попробуйте позже или напишите в поддержку.",
+    )
+
+
+def new_payment_blocked_message() -> str:
+    return screen(
+        "⏳ <b>Оплата временно приостановлена</b>",
+        "Идёт подготовка к техобслуживанию — новые тарифы и счета пока недоступны.",
+        hint="Если у вас есть незавершённый платёж — вернитесь к нему из главного меню.",
+    )
 
 _was_draining: bool = False
 
@@ -157,10 +180,11 @@ async def is_new_payment_allowed(tg_id: int) -> bool:
     return not status.manual
 
 
-async def get_new_payment_block_message(tg_id: int) -> str | None:
+async def get_new_payment_block_response(tg_id: int) -> tuple[str, str] | None:
+    """(alert, HTML-сообщение) или None."""
     if await is_new_payment_allowed(tg_id):
         return None
-    return NEW_PAYMENT_BLOCKED_ALERT
+    return NEW_PAYMENT_BLOCKED_ALERT, new_payment_blocked_message()
 
 
 async def get_block_response() -> tuple[str, str] | None:
@@ -172,8 +196,8 @@ async def get_block_response() -> tuple[str, str] | None:
     if status.draining or not status.active:
         return None
     if status.manual:
-        return MAINTENANCE_TEXT, MAINTENANCE_TEXT
-    return PRIMARY_UNAVAILABLE_ALERT, SERVICE_UNAVAILABLE_TEXT
+        return MAINTENANCE_ALERT, maintenance_message()
+    return PRIMARY_UNAVAILABLE_ALERT, primary_unavailable_message()
 
 
 async def whitelist_users_info() -> list[dict[str, Any]]:
