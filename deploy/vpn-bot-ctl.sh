@@ -34,11 +34,12 @@ draw_menu() {
     printf '%s\n' '║       VPN Bot — управление systemd       ║'
     printf '%s\n' '╠══════════════════════════════════════════╣'
     printf '%s\n' '║  1) Установить / обновить (+ Redis)      ║'
-    printf '%s\n' '║  2) Перезапустить службы (быстро)        ║'
-    printf '%s\n' '║  3) Проверить состояние служб            ║'
-    printf '%s\n' '║  4) Логи в реальном времени              ║'
-    printf '%s\n' '║  5) Остановить systemd службы            ║'
-    printf '%s\n' '║  6) Удалить systemd службы               ║'
+    printf '%s\n' '║  2) Обновить бота (git pull + рестарт)   ║'
+    printf '%s\n' '║  3) Перезапустить службы (быстро)        ║'
+    printf '%s\n' '║  4) Проверить состояние служб            ║'
+    printf '%s\n' '║  5) Логи в реальном времени              ║'
+    printf '%s\n' '║  6) Остановить systemd службы            ║'
+    printf '%s\n' '║  7) Удалить systemd службы               ║'
     printf '%s\n' '║  0) Выход                                ║'
     printf '%s\n' '╚══════════════════════════════════════════╝'
     printf '\n'
@@ -58,7 +59,7 @@ interactive_menu() {
 
     while true; do
         draw_menu
-        read -r -p 'Выберите пункт [0-6]: ' choice </dev/tty
+        read -r -p 'Выберите пункт [0-7]: ' choice </dev/tty
 
         case "$choice" in
             1)
@@ -69,23 +70,29 @@ interactive_menu() {
                 ;;
             2)
                 echo
-                run_action restart_services
+                log "git pull и перезапуск служб…"
+                run_action cmd_update_bot
                 pause_menu
                 ;;
             3)
+                echo
+                run_action restart_services
+                pause_menu
+                ;;
+            4)
                 load_config 2>/dev/null || true
                 show_status
                 pause_menu
                 ;;
-            4)
+            5)
                 run_action follow_all_logs
                 pause_menu
                 ;;
-            5)
+            6)
                 run_action stop_services
                 pause_menu
                 ;;
-            6)
+            7)
                 read -r -p "Удалить службы? [y/N]: " confirm </dev/tty
                 if [[ "$confirm" =~ ^([yY]|yes|д|да)$ ]]; then
                     run_action uninstall_services
@@ -98,7 +105,7 @@ interactive_menu() {
                 exit 0
                 ;;
             *)
-                warn "Введите 0 или число 1–6"
+                warn "Введите 0 или число 1–7"
                 pause_menu
                 ;;
         esac
@@ -113,6 +120,9 @@ main() {
             ;;
         install|reconcile)
             cmd_reconcile
+            ;;
+        update|pull)
+            cmd_update_bot
             ;;
         restart)
             require_root
@@ -140,6 +150,7 @@ VPN Bot — systemd
 
   sudo bash deploy/vpn-bot-ctl.sh          # меню
   sudo bash deploy/vpn-bot-ctl.sh install  # установить / обновить (+ redis-server)
+  sudo bash deploy/vpn-bot-ctl.sh update   # git pull + перезапуск служб
   sudo bash deploy/vpn-bot-ctl.sh restart  # быстрый перезапуск служб
   sudo bash deploy/vpn-bot-ctl.sh status
   sudo bash deploy/vpn-bot-ctl.sh logs     # tail -f data/logs/bot.log
