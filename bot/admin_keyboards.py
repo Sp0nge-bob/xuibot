@@ -412,6 +412,57 @@ def admin_stats_kb() -> InlineKeyboardMarkup:
     ])
 
 
+def diagnostics_kb(
+    *,
+    view: str = "summary",
+    has_issues: bool = False,
+    recs_count: int = 0,
+) -> InlineKeyboardMarkup:
+    """Клавиатура диагностики: сводка или технический раздел."""
+    rows: list[list[InlineKeyboardButton]] = []
+    pair: list[InlineKeyboardButton] = []
+    for label, section in (
+        ("🤖 Процессы", "proc"),
+        ("🌐 Webhook", "web"),
+        ("🖧 VPN", "vpn"),
+        ("💾 Хранилище", "store"),
+    ):
+        text = f"• {label}" if view == section else label
+        pair.append(InlineKeyboardButton(
+            text=text,
+            callback_data=f"adm:diagnostics:{section}",
+        ))
+        if len(pair) == 2:
+            rows.append(pair)
+            pair = []
+    if pair:
+        rows.append(pair)
+
+    if has_issues and recs_count > 0:
+        rec_label = f"📋 Рекомендации ({recs_count})"
+        rows.append([InlineKeyboardButton(
+            text=rec_label if view != "recs" else f"• {rec_label}",
+            callback_data="adm:diagnostics:recs",
+        )])
+
+    refresh_cb = (
+        f"adm:diagnostics:{view}:refresh"
+        if view != "summary"
+        else "adm:diagnostics:refresh"
+    )
+    nav_row: list[InlineKeyboardButton] = [
+        InlineKeyboardButton(text="🔄 Обновить", callback_data=refresh_cb),
+    ]
+    if view != "summary":
+        nav_row.append(InlineKeyboardButton(
+            text="◀️ Сводка",
+            callback_data="adm:diagnostics",
+        ))
+    rows.append(nav_row)
+    rows.append([InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def admin_server_status_kb(items: list) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     for item in items:
