@@ -21,6 +21,10 @@
 - Rate limit (`WEBHOOK_RATE_LIMIT_PER_MIN`)
 - Идемпотентность повторных callback (`WEBHOOK_IDEMPOTENCY_TTL_SEC`)
 
+## Lockdown и оплаты
+
+При **draining** (ручная блокировка с активными PENDING) новые счета не создаются; незавершённые платежи дорабатываются. При полной блокировке или недоступной ★ Primary — см. [Архитектура → lockdown](architecture.md#блокировка-бота-lockdown).
+
 ---
 
 **Назад:** [← 3x-ui](xui.md) · **Далее:** [Админка →](admin.md)

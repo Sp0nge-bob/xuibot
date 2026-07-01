@@ -6,7 +6,7 @@
 
 ## Тестовый режим
 
-`TEST_MODE=true` — симулятор Platega без реальных денег. Клиенты в 3x-ui создаются как в проде.
+`TEST_MODE=true` в `.env` — симулятор Platega без реальных денег. Клиенты в 3x-ui создаются как в проде.
 
 ```env
 TEST_MODE=true
@@ -16,31 +16,45 @@ LOG_LEVEL=DEBUG
 
 Запуск:
 
-- `python run_all.py` — webhook + Telegram (полный цикл)
-- `python run_bot.py` — только бот (webhook не нужен для симулятора Platega в TEST_MODE)
+- `python run_all.py` — webhook + Telegram
+- `python run_bot.py` — только бот (симулятор не требует webhook)
 
-Перед продом: `TEST_MODE=false`, реальные credentials Platega.
+**Runtime:** в `/admin` → **Отладка** можно включить/выключить TEST_MODE без перезапуска (сохраняется в БД). Сброс — «TEST_MODE из .env».
+
+Перед продом: `TEST_MODE=false`, сброс override в отладке, реальные credentials Platega.
 
 ## Логи и мониторинг
 
 | Уровень | Что видно |
 |---------|-----------|
-| `INFO` | Старт, платежи (tx + status), деактивация подписок, sync |
-| `DEBUG` | Тело webhook, health нод, debounce callback |
+| `INFO` | Старт, платежи, деактивация, sync, lockdown |
+| `DEBUG` | Тело webhook, health нод, debounce |
 
-Файлы: `data/logs/` (последние `LOG_SESSION_RETAIN` сессий).
+| Путь | Описание |
+|------|----------|
+| `data/logs/bot.log` | Текущая сессия (`tail -f`) |
+| `data/logs/botlog_*.log` | Архивы после рестарта (макс. `LOG_ARCHIVE_RETAIN`) |
 
-Health endpoint: `GET /health` на порту webhook.
+**Health:** `GET /health` на порту webhook (`WEBHOOK_PORT`).
 
-Проверка нод вручную: `/admin` → Ноды → «Проверить все ноды».
+**Админка:**
+
+- `/admin` → **Обзор** → **Диагностика** — техсостояние (процессы, webhook, VPN, Redis)
+- `/admin` → **VPN** → **Ноды** → «Проверить»
 
 ## Скрипты
 
 | Путь | Назначение |
 |------|------------|
 | `scripts/list_inbounds.py` | ID инбаундов с панели |
-| `scripts/dedupe_nodes.py` | Очистка дубликатов в БД |
-| `scripts/dev/*` | Скрипты разработки — не для прода |
+| `scripts/dedupe_nodes.py` | Дубликаты нод в БД |
+| `scripts/dev/test_pending_flow.py` | Симуляция PENDING (TEST_MODE) |
+| `scripts/dev/test_admin_diagnostics.py` | Unit-тесты форматирования диагностики |
+| `scripts/dev/*` | Остальное — только разработка |
+
+## UI и тексты
+
+Дизайн-система экранов: [`ui/theme.py`](../ui/theme.py) (`screen()`, разделитель, кнопки).
 
 ---
 

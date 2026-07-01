@@ -4,33 +4,55 @@
 
 # Деплой в продакшен
 
-Перед выбором сервера: [Системные требования VPS](requirements.md) (500 / 1000 / 3000+ подписок).
+Перед выбором сервера: [Системные требования VPS](requirements.md).
 
 ## Чеклист
 
-- [ ] `TEST_MODE=false`
+- [ ] `TEST_MODE=false` (или не переопределён в админке)
 - [ ] `ALLOW_DEBUG_ADMIN=false`
 - [ ] `START_BOT_IN_WEBAPP=false`
-- [ ] `redis-server` запущен (`redis-cli ping` → `PONG`); в `.env` задан `REDIS_URL` (пункт **1** в `vpn-bot-ctl.sh` делает это автоматически)
-- [ ] Заполнены `PLATEGA_MERCHANT_ID`, `PLATEGA_SECRET`
+- [ ] `redis-server` → `PONG`; в `.env` задан `REDIS_URL` (пункт **1** в `vpn-bot-ctl.sh`)
+- [ ] `PLATEGA_MERCHANT_ID`, `PLATEGA_SECRET`
 - [ ] `PUBLIC_WEBHOOK_URL` — HTTPS, доступен извне
-- [ ] В ЛК Platega Callback URL = `PUBLIC_WEBHOOK_URL`
-- [ ] nginx проксирует порт `WEBHOOK_PORT` (по умолчанию 8080)
+- [ ] Callback URL в ЛК Platega = `PUBLIC_WEBHOOK_URL`
+- [ ] nginx проксирует `WEBHOOK_PORT` (8080)
 - [ ] `curl https://домен/health` → `{"status":"ok"}`
-- [ ] Оба systemd-сервиса в статусе `active`
-- [ ] `/admin` → настроены цены, способы оплаты, ноды
-- [ ] Тестовый платёж → ключ в боте + клиент в 3x-ui
-- [ ] В логах Telegram: `FSM storage: Redis` (не `MemoryStorage`)
+- [ ] Оба systemd-сервиса `active`
+- [ ] `/admin` → тарифы, оплата, ноды, inbounds
+- [ ] Тестовый платёж → ключ + клиент в 3x-ui
+- [ ] В логах: `FSM storage: Redis`
 
-## Обновление после `git pull`
+## Обновление
+
+### Только код (типично после `git pull`)
 
 ```bash
-cd ~/vpn-platega-bot   # или /opt/vpn-bot
-git pull
-.venv/bin/pip install -r requirements.txt
+cd /opt/vpn-bot   # или ваш APP_DIR
 sudo bash deploy/vpn-bot-ctl.sh
-# → 1   (обновить venv, redis, unit-файлы)
-# или → 2   (только перезапуск, если зависимости уже стоят)
+# → 2   (git pull + restart)
+```
+
+Или:
+
+```bash
+sudo bash deploy/vpn-bot-ctl.sh update
+```
+
+### Полное обновление (venv, redis, unit-файлы)
+
+```bash
+git pull
+sudo bash deploy/vpn-bot-ctl.sh
+# → 1
+```
+
+Используйте после смены зависимостей в `pyproject.toml` или при «починке» окружения.
+
+### Только перезапуск
+
+```bash
+sudo bash deploy/vpn-bot-ctl.sh
+# → 3
 ```
 
 ## nginx (фрагмент)
@@ -45,6 +67,11 @@ location /health {
     proxy_pass http://127.0.0.1:8080;
 }
 ```
+
+## После деплоя
+
+- `/admin` → **Обзор** → **Диагностика** — техсостояние (webhook, ноды, Redis)
+- При проблемах — раздел «Рекомендации» в диагностике или [Troubleshooting](troubleshooting.md)
 
 ---
 

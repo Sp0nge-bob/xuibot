@@ -4,55 +4,67 @@
 
 # Troubleshooting
 
+Первый шаг в проде: `/admin` → **Обзор** → **Диагностика** (сводка и разделы с рекомендациями).
+
 ## Бот не отвечает в Telegram
 
-- Запущен ли бот? (`python run_all.py` или отдельно `python run_bot.py`)
-- В логах: `Подключён @username` и `Polling started`
+- Запущен ли процесс? (`systemctl status vpn-bot-telegram` или `python run_bot.py`)
+- Логи: `Подключён @username`, `Polling started`
 - Верный `BOT_TOKEN`?
+- **Lockdown:** `/admin` → **Отладка** → блокировка; или ★ Primary offline (автоблокировка)
+- **Polling lock:** диагностика → «Процессы»; мёртвый PID — удалить `data/.polling.lock`, restart
 
 ## Webhook не приходит
 
-- `curl -X POST PUBLIC_WEBHOOK_URL` — доступен ли URL?
-- Callback URL в Platega совпадает с `PUBLIC_WEBHOOK_URL`
-- nginx проксирует на `WEBHOOK_PORT`
+- `curl` на `PUBLIC_WEBHOOK_URL` и `/health`
+- Callback URL в Platega = `PUBLIC_WEBHOOK_URL`
+- nginx → `WEBHOOK_PORT`
 - `TEST_MODE=false` для реальных платежей
+- Диагностика → **Webhook**: local/public health, Platega API
 
 ## Оплата прошла, ключа нет
 
 - Логи `app.py`: `Platega callback: tx=... status=CONFIRMED`
-- Очередь не переполнена (`FULFILLMENT_QUEUE_MAX_SIZE`)
-- Ноды online в админке
-- `XUI_HOST` без лишнего `/panel/`
+- Очередь выдачи: диагностика → воркеры fulfillment
+- Ноды online: диагностика → **VPN**
+- `XUI_HOST` без `/panel/`
+
+## Бот «на обслуживании» / оплата приостановлена
+
+| Сообщение | Причина |
+|-----------|---------|
+| Техобслуживание | Ручная блокировка (полная) |
+| Сервис недоступен | ★ Primary недоступна |
+| Оплата приостановлена | Draining — ждут завершения PENDING |
+
+Поддержка и тикеты работают. Снять ручную блокировку: `/admin` → **Отладка** → **Блокировка**.
+
+## ★ Primary недоступна
+
+- Диагностика → VPN / сводка
+- `/admin` → **Ноды** → «Проверить»
+- URL без `/panel/`, актуальный токен
+- `curl -k` на host панели с VPS
 
 ## Ошибка 3x-ui / таймаут
 
-- Увеличьте `XUI_PANEL_CONCURRENCY` осторожно (нагрузка на панель)
-- Проверьте `XUI_TOKEN` и secret path
-- `LOG_LEVEL=DEBUG` для деталей API
+- Осторожно с `XUI_PANEL_CONCURRENCY`
+- `LOG_LEVEL=DEBUG` для API
+- Вторичная нода down — пользователи видят предупреждение; проверить ноды в админке
 
-## Сменили `XUI_HOST` в `.env`, а бот ходит на старый URL
+## Сменили `XUI_HOST` в `.env`
 
-Адрес ★ основной ноды хранится в `data/bot.db` (`xui_nodes`). После правки `.env` **перезапустите** бота — при старте host подтянется из `XUI_HOST` (в логах: `primary host обновлён из .env`). Без перезапуска или без обновления кода — `/admin` → **Ноды** → ★ Primary → **Редактировать** → новый host.
+После правки **перезапустите** бота — host подтянется в ★ Primary. Или `/admin` → **Ноды** → **Редактировать**.
 
-## `message caption is too long` при выдаче ключа / trial
+## `message caption is too long` (Happ / QR)
 
-- При `crypt3_local` / `crypt5_api` ссылка `happ://crypt…` ~700 символов — не влезает в caption фото (лимит Telegram **1024**).
-- Бот выносит длинную ссылку в **отдельное сообщение** после QR (обновление после `69e3cb7`).
-- Если ошибка остаётся — `git pull` и перезапуск бота.
+- Длинная `happ://crypt…` не влезает в caption (лимит 1024)
+- Бот выносит ссылку в отдельное сообщение
+- `git pull` + `vpn-bot-ctl.sh` → **2**
 
-## Happ: «ссылка не валидна» при вставке `happ://crypt…`
+## Happ: ссылка не валидна / plain URL вместо crypt
 
-- RSA-ключ из [документации Happ](https://www.happ.su/main/dev-docs/crypto-link) даёт префикс **`happ://crypt3/`** — режим **`crypt3_local`**.
-- Если crypt3 не принимается вашей версией Happ — **`crypt5_api`** (`happ://crypt5/…`).
-- Копируйте ссылку **целиком** из отдельного сообщения (после QR), без переносов строк.
-
-## Happ: вместо `happ://crypt…` отдаётся обычная ссылка
-
-- В логах: `Happ crypto … failed` — смотрите причину (таймаут API, нет `cryptography`)
-- Режим **Crypt5 API**: нужен доступ VPS → `crypto.happ.su`
-- Режим **Crypt4 локально**: `pip install cryptography` (зависимость в `requirements.txt`)
-- Слишком длинный `SUBSCRIPTION_BASE_URL` (>501 байт) — Crypt4 не сработает, будет fallback
-- Сменили режим в `/admin` → **🔐 Happ** — кэш сбрасывается автоматически
+См. [Конфигурация → Happ](configuration.md#happ--шифрование-ссылки-подписки). Логи: `Happ crypto … failed`.
 
 ## Дубли нод
 
@@ -60,38 +72,33 @@
 python scripts/dedupe_nodes.py
 ```
 
-## Бот не стартует: REDIS_URL задан, Redis недоступен
+## Redis / FSM
 
-Симптом в `journalctl -u vpn-bot-telegram`: `REDIS_URL задан, но Redis недоступен`.
+`REDIS_URL задан, но Redis недоступен`:
 
 ```bash
-redis-cli ping          # должно быть PONG
+redis-cli ping
 sudo systemctl status redis-server
-sudo bash deploy/vpn-bot-ctl.sh
-# → 1   (переустановит redis-server и проверит .env)
+sudo bash deploy/vpn-bot-ctl.sh   # → 1
 ```
 
-**Временный откат:** закомментируйте или удалите `REDIS_URL` в `.env` → перезапуск → FSM снова в RAM (`MemoryStorage`).
-
-## FSM всё ещё в RAM (MemoryStorage)
-
-В логах: `FSM storage: MemoryStorage (REDIS_URL не задан)`.
-
-- Добавьте в `.env`: `REDIS_URL=redis://127.0.0.1:6379/0`
-- Или пункт **1** в `deploy/vpn-bot-ctl.sh` (добавит строку, если Redis отвечает PONG)
+Откат: убрать `REDIS_URL` → FSM в RAM.
 
 ## `pip install` — externally-managed-environment
-
-На Debian/Ubuntu используйте venv, не системный pip:
 
 ```bash
 .venv/bin/pip install -r requirements.txt
 ```
 
-Пункт **1** в `deploy/vpn-bot-ctl.sh` ставит зависимости в `.venv` автоматически.
+Пункт **1** в `vpn-bot-ctl.sh` ставит в `.venv` автоматически.
+
+## Обновление на сервере
+
+```bash
+sudo bash deploy/vpn-bot-ctl.sh update   # git pull + restart
+# или меню → 2; при новых зависимостях → 1
+```
 
 ---
 
 **Назад:** [← Разработка](development.md) · **Оглавление:** [Документация](README.md)
-
-*Вопросы по настройке — смотрите логи `data/logs/` и разделы выше.*

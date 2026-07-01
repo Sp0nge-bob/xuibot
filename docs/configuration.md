@@ -11,6 +11,7 @@
 | Переменная | Описание |
 |------------|----------|
 | `BOT_TOKEN` | Токен от @BotFather |
+| `BOT_BRAND` | Название сервиса в `/start` и экранах бота |
 | `BOT_ADMINS` | Telegram ID админов через запятую |
 
 ## Platega
@@ -80,7 +81,19 @@ journalctl -u vpn-bot-telegram -n 20 --no-pager | grep -i fsm
 # FSM storage: Redis (TTL state=86400s, data=86400s)
 ```
 
-Подробный план дальнейших фаз: [Redis — план миграции](redis-migration-plan.md).
+Планы миграции: [Redis](redis-migration-plan.md) · [PostgreSQL для бота](postgresql-migration-plan.md) (опционально, не реализовано).
+
+## Реферальная программа
+
+Параметры в коде [`config/referral.py`](../config/referral.py) (не `.env`):
+
+| Константа | По умолчанию | Смысл |
+|-----------|--------------|-------|
+| `REFERRAL_WELCOME_DISCOUNT_PERCENT` | 20% | Скидка при первой оплате приглашённого |
+| `REFERRAL_WELCOME_BONUS_DAYS` | 14 | Бонусные дни рефереру за первую оплату приглашённого |
+| `REFERRAL_PAYMENT_BONUS_DAYS` | 5 | Бонус за каждую оплату реферала |
+| `REFERRAL_TIER_*` | 10–30% | Скидка рефереру по числу приглашённых |
+| `REFERRAL_START_PREFIX` | `ref_` | Deep link: `/start ref_123456789` |
 
 ## Режимы
 
@@ -88,11 +101,13 @@ journalctl -u vpn-bot-telegram -n 20 --no-pager | grep -i fsm
 |------------|-----------|------------|
 | `TEST_MODE` | `false` | `true` (симулятор Platega) |
 | `START_BOT_IN_WEBAPP` | `false` | `false` или `true` (один процесс) |
-| `ALLOW_DEBUG_ADMIN` | `false` | `true` (сброс БД в админке) |
+| `ALLOW_DEBUG_ADMIN` | `false` | `true` (отладка: lockdown, сброс БД, TEST_MODE в runtime) |
 | `LOG_LEVEL` | `INFO` | `DEBUG` при отладке |
 | `BACKUP_ENABLED` | `true` | `false` — без автобэкапа |
-| `BACKUP_INTERVAL` | `24h` | Интервал: `30m`, `6h`, `7d` (мин. 30m, макс. 30d); в админке можно переопределить |
+| `BACKUP_INTERVAL` | `24h` | Интервал: `30m`, `6h`, `7d`; в админке можно переопределить |
 | `BACKUP_LOCAL_RETAIN` | `5` | Сколько zip хранить в `data/backups/` |
+
+**TEST_MODE в runtime:** при `ALLOW_DEBUG_ADMIN=true` можно переключать в `/admin` → **Отладка** без правки `.env` (значение хранится в БД и перекрывает `.env`). Диагностика показывает источник: БД или `.env`.
 
 **Запуск** (не переменные `.env`, а команды):
 

@@ -17,7 +17,7 @@ cp .env.example .env
 
 Заполните `.env` (см. [Конфигурация](configuration.md)), затем запустите бота.
 
-**Одна команда** (webhook + Telegram, два процесса):
+**Одна команда** (webhook + Telegram):
 
 ```bash
 python run_all.py
@@ -26,32 +26,53 @@ python run_all.py
 Или в двух терминалах:
 
 ```bash
-python app.py       # терминал 1 — webhook Platega
-python run_bot.py   # терминал 2 — Telegram polling
+python app.py       # webhook Platega
+python run_bot.py   # Telegram polling
 ```
 
-Для отладки в одном процессе: `START_BOT_IN_WEBAPP=true` в `.env`, затем `python app.py`.
+Для отладки в одном процессе: `START_BOT_IN_WEBAPP=true`, затем `python app.py`.
 
-## systemd (пример)
+## systemd (`deploy/vpn-bot-ctl.sh`)
 
-Меню systemd — **пункт 1 делает всё сам** (venv, pip, **redis-server**, `REDIS_URL` в `.env`, права, unit-файлы, запуск). Подходит и для первой установки, и после `git pull`:
+Интерактивное меню:
 
 ```bash
-git pull
-.venv/bin/pip install -r requirements.txt   # не системный pip (PEP 668)
 sudo bash deploy/vpn-bot-ctl.sh
-# → 1
 ```
 
-**Redis:** на Debian/Ubuntu скрипт установит `redis-server` и добавит `REDIS_URL=redis://127.0.0.1:6379/0`, если строки ещё нет в `.env`. Без `REDIS_URL` FSM остаётся в RAM (`MemoryStorage`).
+| Пункт | Действие |
+|-------|----------|
+| **1** | Установить / обновить полностью: venv, pip, redis-server, `REDIS_URL`, права, unit-файлы, запуск |
+| **2** | **Обновить бота:** `git pull --ff-only` + перезапуск служб (без переустановки venv) |
+| **3** | Быстрый перезапуск служб |
+| **4** | Статус служб + Redis |
+| **5** | Логи `tail -f` |
+| **6** | Остановить службы |
+| **7** | Удалить unit-файлы |
 
-Алиас: `sudo bash deploy/install-systemd.sh` (то же самое).
+**Первая установка:** пункт **1** после заполнения `.env`.
 
-Перед первым запуском заполните `.env` (или скрипт создаст его из `.env.example`).
+**Обычное обновление кода:** пункт **2** или:
 
-Неинтерактивно: `sudo bash deploy/vpn-bot-ctl.sh install`
+```bash
+sudo bash deploy/vpn-bot-ctl.sh update
+```
 
-Unit-шаблоны: [`deploy/systemd/*.template`](../deploy/systemd/) — подставляются скриптом автоматически.
+**Если изменился `pyproject.toml` / новые зависимости:** пункт **1**.
+
+**Redis:** пункт 1 на Debian/Ubuntu ставит `redis-server` и добавляет `REDIS_URL=redis://127.0.0.1:6379/0`, если строки нет в `.env`.
+
+Алиас: `sudo bash deploy/install-systemd.sh` (то же меню).
+
+Неинтерактивно:
+
+```bash
+sudo bash deploy/vpn-bot-ctl.sh install   # полная установка
+sudo bash deploy/vpn-bot-ctl.sh update    # git pull + restart
+sudo bash deploy/vpn-bot-ctl.sh restart # только restart
+```
+
+Unit-шаблоны: [`deploy/systemd/*.template`](../deploy/systemd/).
 
 ---
 
