@@ -2,7 +2,9 @@
 from typing import List, Optional
 
 from aiogram import Bot
-from aiogram.types import BufferedInputFile, FSInputFile, InputMediaPhoto
+from aiogram.types import BufferedInputFile, FSInputFile
+
+from bot.photo_delivery import send_photos_with_text
 
 
 async def deliver_fulfillment(
@@ -21,33 +23,25 @@ async def deliver_fulfillment(
             chat_id,
             photo,
             caption=text,
+            parse_mode="HTML",
             reply_markup=reply_markup if not link_message else None,
         )
     else:
-        await bot.send_message(chat_id, text, reply_markup=reply_markup)
+        await bot.send_message(chat_id, text, reply_markup=reply_markup, parse_mode="HTML")
 
     if link_message:
         await bot.send_message(
             chat_id,
             link_message,
             reply_markup=reply_markup,
+            parse_mode="HTML",
         )
 
-    if not setup_text and not setup_photos:
-        return
-
-    photos = setup_photos or []
-    if photos:
-        if len(photos) == 1:
-            await bot.send_photo(chat_id, photos[0], caption=setup_text)
-        else:
-            media = [
-                InputMediaPhoto(
-                    media=photos[0],
-                    caption=setup_text,
-                ),
-                *[InputMediaPhoto(media=p) for p in photos[1:]],
-            ]
-            await bot.send_media_group(chat_id, media)
-    elif setup_text:
-        await bot.send_message(chat_id, setup_text)
+    if setup_text or setup_photos:
+        await send_photos_with_text(
+            bot,
+            chat_id,
+            setup_text,
+            setup_photos or [],
+            parse_mode="HTML",
+        )

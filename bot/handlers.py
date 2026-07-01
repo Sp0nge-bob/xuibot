@@ -72,6 +72,7 @@ from .messages import (
     main_menu_text,
     purchase_hub_text,
     referral_program_text,
+    referral_bind_applied_text,
     plans_menu_text,
     plan_card_text,
     payment_method_text,
@@ -163,7 +164,13 @@ def _message_command(text: str) -> str | None:
     return raw.split("@")[0].lower()
 
 
-async def _show_main_menu(target: Message | CallbackQuery, *, edit: bool = False, state: FSMContext | None = None):
+async def _show_main_menu(
+    target: Message | CallbackQuery,
+    *,
+    edit: bool = False,
+    state: FSMContext | None = None,
+    prepend_text: str | None = None,
+):
     user = target.from_user
     if isinstance(target, CallbackQuery):
         await safe_cb_answer(target)
@@ -196,6 +203,8 @@ async def _show_main_menu(target: Message | CallbackQuery, *, edit: bool = False
         pending_discount_expires_at=pending_expires,
         pending_payment_plan_name=pending_order.get("plan_name") if pending_order else None,
     )
+    if prepend_text:
+        text = f"{prepend_text}\n\n{text}"
     kb = main_menu_kb(
         trial_available=trial_available,
         pending_tx_id=pending_order.get("platega_tx_id") if pending_order else None,
@@ -223,19 +232,32 @@ async def _notify_admins(text: str):
 async def cmd_start(message: Message, state: FSMContext):
     from bot.faq_album import clear_faq_album
     from bot.ticket_chat import clear_active_session
-    from services.referral import parse_referral_start_arg, try_bind_referrer
+    from services.referral import (
+        notify_referrer_friend_bound,
+        parse_referral_start_arg,
+        try_bind_referrer,
+    )
 
     if message.from_user:
         clear_active_session(message.from_user.id)
     await clear_faq_album(message.bot, message.chat.id)
     await state.clear()
+    referral_notice = None
     if message.from_user and message.text:
         parts = message.text.split(maxsplit=1)
         if len(parts) > 1:
             referrer_id = parse_referral_start_arg(parts[1])
             if referrer_id:
-                await try_bind_referrer(message.from_user.id, referrer_id)
-    await _show_main_menu(message, state=state)
+                bound = await try_bind_referrer(message.from_user.id, referrer_id)
+                if bound:
+                    welcome = await _purchase_hub_referral_welcome(message.from_user.id)
+                    referral_notice = referral_bind_applied_text(welcome_eligible=welcome)
+                    await notify_referrer_friend_bound(
+                        referrer_id,
+                        friend_first_name=message.from_user.first_name,
+                        friend_username=message.from_user.username,
+                    )
+    await _show_main_menu(message, state=state, prepend_text=referral_notice)
 
 
 @router.message(Command("subscription"))

@@ -23,14 +23,14 @@ async def _open_faq_article(
     await clear_faq_album(bot, chat_id)
     nav = faq_article_nav_kb()
     if faq_db.is_activation_faq_article(article):
-        album_ids = await send_activation_setup_faq(
+        photo_ids = await send_activation_setup_faq(
             bot, chat_id, article, reply_markup=nav,
         )
     else:
-        album_ids = await send_faq_article(
+        photo_ids = await send_faq_article(
             bot, chat_id, article, photos, reply_markup=nav,
         )
-    set_faq_album_message_ids(chat_id, album_ids)
+    set_faq_album_message_ids(chat_id, photo_ids)
 
 
 async def show_faq_menu_message(message: Message) -> None:

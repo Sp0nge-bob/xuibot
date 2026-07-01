@@ -3,7 +3,8 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup
 from loguru import logger
 
 _TELEGRAM_TEXT_LIMIT = 4096
-_TELEGRAM_SAFE_LIMIT = 3900
+TELEGRAM_SAFE_LIMIT = 3900
+_TELEGRAM_SAFE_LIMIT = TELEGRAM_SAFE_LIMIT
 
 
 def clamp_telegram_text(text: str, *, limit: int = _TELEGRAM_SAFE_LIMIT) -> str:

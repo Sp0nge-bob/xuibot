@@ -178,6 +178,36 @@ def _ru_articles_word(n: int) -> str:
     return "статей"
 
 
+def referral_referrer_invited_text(
+    *,
+    friend_first_name: str | None,
+    friend_username: str | None,
+) -> str:
+    from config.referral import REFERRAL_PAYMENT_BONUS_DAYS
+
+    friend = user_chip(friend_first_name, friend_username)
+    return screen(
+        "👥 <b>Новый приглашённый</b>",
+        f"По вашей ссылке зашёл: {friend}",
+        f"После первой оплаты друга вы получите <b>+{REFERRAL_PAYMENT_BONUS_DAYS} дн.</b>",
+        hint="Статистика — в разделе «Реферальная программа»",
+    )
+
+
+def referral_bind_applied_text(*, welcome_eligible: bool) -> str:
+    if welcome_eligible:
+        from config.referral import (
+            REFERRAL_WELCOME_BONUS_DAYS,
+            REFERRAL_WELCOME_DISCOUNT_PERCENT,
+        )
+        return screen(
+            "👥 <b>Реферальная ссылка применена</b>",
+            f"На первую оплату: <b>−{REFERRAL_WELCOME_DISCOUNT_PERCENT}%</b> "
+            f"и <b>+{REFERRAL_WELCOME_BONUS_DAYS} дн.</b>",
+        )
+    return screen("👥 <b>Реферальная ссылка применена</b>")
+
+
 def purchase_hub_text(*, referral_welcome: bool = False) -> str:
     extra = None
     if referral_welcome:
@@ -1184,6 +1214,88 @@ def promo_enter_text(*, from_purchase: bool = False) -> str:
     )
 
 
+_REFERRAL_PROGRAM_TITLE = "👥 <b>Реферальная программа</b>"
+
+
+def _referral_friend_display_name(f: dict, *, max_len: int = 36) -> str:
+    name = f.get("first_name") or f.get("username") or str(f.get("referred_tg_id"))
+    name = str(name).strip()
+    if len(name) <= max_len:
+        return name
+    return name[: max_len - 1] + "…"
+
+
+def _referral_friend_line(f: dict) -> str:
+    paid_orders = int(f.get("paid_orders") or 0)
+    if f.get("active_end"):
+        status = "✅ активен"
+    elif paid_orders:
+        status = "⏸ истёк"
+    else:
+        status = "— без оплаты"
+    return f"   └ {_referral_friend_display_name(f)} · {status}"
+
+
+def _referral_list_notice(shown_count: int) -> str:
+    return f"<i>Указаны последние {shown_count} привязанных</i>"
+
+
+def _referral_program_screen(
+    base_lines: list[str],
+    friend_lines: list[str],
+    *,
+    shown_count: int,
+    invited: int,
+) -> str:
+    lines = list(base_lines)
+    if friend_lines:
+        lines.append("")
+        lines.append("<b>Приглашённые:</b>")
+        lines.extend(friend_lines)
+        if invited > shown_count:
+            lines.append(_referral_list_notice(shown_count))
+    return screen(_REFERRAL_PROGRAM_TITLE, "\n".join(lines))
+
+
+def _fit_referral_friend_lines(
+    base_lines: list[str],
+    friends: list[dict],
+    *,
+    invited: int,
+    text_limit: int,
+) -> str:
+    from bot.ui_helpers import TELEGRAM_SAFE_LIMIT
+
+    limit = min(text_limit, TELEGRAM_SAFE_LIMIT)
+    all_lines = [_referral_friend_line(f) for f in friends]
+    shown: list[str] = []
+
+    for line in all_lines:
+        candidate = shown + [line]
+        text = _referral_program_screen(
+            base_lines,
+            candidate,
+            shown_count=len(candidate),
+            invited=invited,
+        )
+        if len(text) > limit:
+            break
+        shown = candidate
+
+    while shown:
+        text = _referral_program_screen(
+            base_lines,
+            shown,
+            shown_count=len(shown),
+            invited=invited,
+        )
+        if len(text) <= limit:
+            return text
+        shown = shown[:-1]
+
+    return _referral_program_screen(base_lines, [], shown_count=0, invited=invited)
+
+
 def referral_program_text(
     *,
     link: str,
@@ -1195,6 +1307,7 @@ def referral_program_text(
     pending_days: int,
     friends: list[dict],
 ) -> str:
+    from bot.ui_helpers import TELEGRAM_SAFE_LIMIT
     from config.referral import (
         REFERRAL_PAYMENT_BONUS_DAYS,
         REFERRAL_TIER_MAX_PERCENT,
@@ -1202,7 +1315,7 @@ def referral_program_text(
         REFERRAL_WELCOME_DISCOUNT_PERCENT,
     )
 
-    lines = [
+    base_lines = [
         f"🔗 <b>Ваша ссылка:</b>\n<code>{link}</code>",
         "",
         "<b>Для друга</b> (первая оплата по ссылке):",
@@ -1216,21 +1329,17 @@ def referral_program_text(
         f"🎁 Заработано дней: <b>{earned_days}</b>",
     ]
     if pending_days > 0:
-        lines.append(f"⏳ В очереди: <b>{pending_days}</b> дн. (применятся к вашей подписке)")
-    if friends:
-        lines.append("")
-        lines.append("<b>Приглашённые:</b>")
-        for f in friends[:8]:
-            name = f.get("first_name") or f.get("username") or str(f.get("referred_tg_id"))
-            paid_orders = int(f.get("paid_orders") or 0)
-            if f.get("active_end"):
-                status = "✅ активен"
-            elif paid_orders:
-                status = "⏸ истёк"
-            else:
-                status = "— без оплаты"
-            lines.append(f"   └ {name} · {status}")
-    return screen("👥 <b>Реферальная программа</b>", "\n".join(lines))
+        base_lines.append(
+            f"⏳ В очереди: <b>{pending_days}</b> дн. (применятся к вашей подписке)"
+        )
+    if not friends:
+        return _referral_program_screen(base_lines, [], shown_count=0, invited=invited)
+    return _fit_referral_friend_lines(
+        base_lines,
+        friends,
+        invited=invited,
+        text_limit=TELEGRAM_SAFE_LIMIT,
+    )
 
 
 def promo_applied_text(code: str, discount: int, final_price: int) -> str:

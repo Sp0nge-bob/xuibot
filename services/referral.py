@@ -34,7 +34,7 @@ async def try_bind_referrer(referred_tg_id: int, referrer_tg_id: int | None) -> 
     if not referrer_tg_id or referrer_tg_id == referred_tg_id:
         return False
     await db.get_or_create_user(referred_tg_id)
-    return await ref_db.set_referrer_if_empty(referred_tg_id, referrer_tg_id)
+    return await ref_db.bind_referrer(referred_tg_id, referrer_tg_id)
 
 
 async def calc_referral_discount_amount(tg_id: int, base_price: int) -> int:
@@ -165,6 +165,34 @@ async def reverse_referral_rewards_for_order(order: dict[str, Any]) -> None:
 def build_referral_link(bot_username: str, tg_id: int) -> str:
     username = (bot_username or "").lstrip("@")
     return f"https://t.me/{username}?start={REFERRAL_START_PREFIX}{tg_id}"
+
+
+async def notify_referrer_friend_bound(
+    referrer_tg_id: int,
+    *,
+    friend_first_name: str | None,
+    friend_username: str | None,
+) -> bool:
+    """Уведомить реферера, что друг перешёл по ссылке."""
+    from bot.keyboards import referral_program_open_kb
+    from bot.messages import referral_referrer_invited_text
+    from bot.sender import send_message
+
+    text = referral_referrer_invited_text(
+        friend_first_name=friend_first_name,
+        friend_username=friend_username,
+    )
+    try:
+        await send_message(
+            referrer_tg_id,
+            text,
+            reply_markup=referral_program_open_kb(),
+        )
+        logger.info("Referral: уведомление рефереру tg_id={}", referrer_tg_id)
+        return True
+    except Exception as e:
+        logger.warning("Referral: не удалось уведомить реферера tg_id={}: {}", referrer_tg_id, e)
+        return False
 
 
 async def get_referral_dashboard(tg_id: int) -> dict[str, Any]:

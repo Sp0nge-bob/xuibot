@@ -9,3 +9,6 @@ REFERRAL_TIER_STEP_PERCENT = 5
 REFERRAL_TIER_MAX_PERCENT = 30
 
 REFERRAL_START_PREFIX = "ref_"
+
+# Список приглашённых в экране «Реферальная программа»
+REFERRAL_LIST_FETCH_LIMIT = 50

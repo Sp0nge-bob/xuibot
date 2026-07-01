@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from config.referral import (
+    REFERRAL_LIST_FETCH_LIMIT,
     REFERRAL_TIER_BASE_PERCENT,
     REFERRAL_TIER_MAX_PERCENT,
     REFERRAL_TIER_STEP_PERCENT,
@@ -93,23 +94,44 @@ async def get_user_referral_flags(tg_id: int) -> dict[str, Any]:
             }
 
 
-async def set_referrer_if_empty(referred_tg_id: int, referrer_tg_id: int) -> bool:
+async def bind_referrer(referred_tg_id: int, referrer_tg_id: int) -> bool:
+    """
+    Привязать реферера. Пока нет оплаченных заказов — можно сменить реферера.
+    После первой оплаты атрибуция фиксируется.
+    """
     if referred_tg_id == referrer_tg_id:
         return False
+    if await count_paid_orders(referred_tg_id) > 0:
+        return False
+
     async with get_db() as db:
         async with db.execute(
-            "SELECT 1 FROM referral_attributions WHERE referred_tg_id = ?",
+            "SELECT referrer_tg_id FROM referral_attributions WHERE referred_tg_id = ?",
             (referred_tg_id,),
         ) as cur:
-            if await cur.fetchone():
+            row = await cur.fetchone()
+
+        if row:
+            if int(row[0]) == referrer_tg_id:
+                await db.execute(
+                    "UPDATE users SET referred_by_tg_id = ? WHERE tg_id = ?",
+                    (referrer_tg_id, referred_tg_id),
+                )
+                await db.commit()
                 return False
+            await db.execute(
+                "UPDATE referral_attributions SET referrer_tg_id = ? WHERE referred_tg_id = ?",
+                (referrer_tg_id, referred_tg_id),
+            )
+        else:
+            await db.execute(
+                """INSERT INTO referral_attributions (referred_tg_id, referrer_tg_id)
+                   VALUES (?, ?)""",
+                (referred_tg_id, referrer_tg_id),
+            )
+
         await db.execute(
-            """INSERT INTO referral_attributions (referred_tg_id, referrer_tg_id)
-               VALUES (?, ?)""",
-            (referred_tg_id, referrer_tg_id),
-        )
-        await db.execute(
-            "UPDATE users SET referred_by_tg_id = ? WHERE tg_id = ? AND referred_by_tg_id IS NULL",
+            "UPDATE users SET referred_by_tg_id = ? WHERE tg_id = ?",
             (referrer_tg_id, referred_tg_id),
         )
         await db.commit()
@@ -277,7 +299,11 @@ async def count_referrals(referrer_tg_id: int) -> dict[str, int]:
     }
 
 
-async def list_referred_users(referrer_tg_id: int, *, limit: int = 20) -> List[Dict[str, Any]]:
+async def list_referred_users(
+    referrer_tg_id: int,
+    *,
+    limit: int = REFERRAL_LIST_FETCH_LIMIT,
+) -> List[Dict[str, Any]]:
     async with get_db() as db:
         async with db.execute(
             """SELECT a.referred_tg_id, a.created_at,

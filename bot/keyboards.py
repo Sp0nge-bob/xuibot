@@ -544,6 +544,12 @@ def referral_program_kb(share_url: str) -> InlineKeyboardMarkup:
     ])
 
 
+def referral_program_open_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=BTN_REFERRAL, callback_data="referral_program")],
+    ])
+
+
 def back_to_main_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")],
