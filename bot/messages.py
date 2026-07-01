@@ -939,54 +939,62 @@ def admin_debug_lockdown_menu_text(
     draining: bool = False,
     whitelist: list,
 ) -> str:
-    manual_status = (
-        "🔒 <b>Ручная блокировка включена</b>"
-        if manual_enabled
-        else "🔓 Ручная блокировка выключена"
-    )
-    primary_status = (
-        "🟢 <b>★ Primary доступна</b>"
-        if primary_ok
-        else "🔴 <b>★ Primary недоступна</b> — доступ ограничен автоматически"
-    )
-    lines = [
-        "🔒 <b>Блокировка бота</b>",
-        "━━━━━━━━━━━━━━━━",
-        "",
-        manual_status,
-        primary_status,
-        "",
-    ]
     if draining:
-        lines += [
-            f"⏳ <b>Ожидание оплат</b> — PENDING-заказов: <b>{pending_orders}</b>",
-            "Новые тарифы и оплаты заблокированы; текущие платежи дорабатываются.",
-            "После завершения всех PENDING — полная блокировка.",
-            "",
-        ]
+        status_block = (
+            "⏳ <b>Ожидание завершения оплат</b>\n"
+            f"PENDING-заказов: <b>{pending_orders}</b>\n\n"
+            "• Новые тарифы и оплаты — заблокированы\n"
+            "• Текущие платежи — дорабатываются\n"
+            "• После нуля PENDING — полная блокировка"
+        )
     elif manual_enabled and primary_ok:
-        lines += [
-            "Полная блокировка активна (кроме админов и белого списка).",
-            "",
-        ]
+        status_block = (
+            "🔒 <b>Блокировка активна</b>\n\n"
+            "Бот недоступен пользователям.\n"
+            "Поддержка остаётся открытой.\n\n"
+            "Без ограничений: админы и белый список."
+        )
+    elif manual_enabled:
+        status_block = (
+            "🔒 <b>Ручная блокировка включена</b>\n"
+            "🔴 ★ Primary недоступна — действует автоблокировка."
+        )
+    elif not primary_ok:
+        status_block = (
+            "🔓 Ручная блокировка выключена\n"
+            "🔴 ★ Primary недоступна — бот ограничен автоматически."
+        )
     else:
-        lines += [
-            "При полной блокировке бот недоступен всем пользователям, "
-            "кроме админов и TG ID из белого списка.",
-            "",
-        ]
+        status_block = (
+            "🔓 <b>Блокировка выключена</b>\n\n"
+            "При включении с активными PENDING сначала дождётесь их завершения, "
+            "затем включится полная блокировка."
+        )
+
+    primary_line = (
+        "🟢 ★ Primary доступна"
+        if primary_ok
+        else "🔴 ★ Primary недоступна"
+    )
+
     if whitelist:
-        lines.append("<b>Белый список:</b>")
+        wl_lines = ["<b>Белый список:</b>"]
         for u in whitelist:
             label = u.get("username") or u.get("first_name") or str(u["tg_id"])
             if u.get("username") and not str(label).startswith("@"):
                 label = f"@{u['username']}"
-            lines.append(f"• {label} · <code>{u['tg_id']}</code>")
+            wl_lines.append(f"• {label} · <code>{u['tg_id']}</code>")
+        whitelist_block = "\n".join(wl_lines)
     else:
-        lines.append("Белый список пуст.")
-    lines.append("")
-    lines.append("Выберите действие:")
-    return "\n".join(lines)
+        whitelist_block = "Белый список пуст."
+
+    return screen(
+        "🔒 <b>Блокировка бота</b>",
+        status_block,
+        primary_line,
+        whitelist_block,
+        hint="Выберите действие:",
+    )
 
 
 def admin_debug_lockdown_add_prompt_text() -> str:

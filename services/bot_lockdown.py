@@ -106,27 +106,13 @@ async def set_lockdown_enabled(enabled: bool) -> None:
     await bot_settings_db.set_bot_lockdown_enabled(enabled)
     if not enabled:
         _was_draining = False
-
-
-async def on_manual_lockdown_enabled() -> None:
-    """Вызывается при включении ручной блокировки из админки."""
-    global _was_draining
-    from services.lockdown_alerts import (
-        notify_admins_lockdown_draining,
-        notify_admins_lockdown_full,
-    )
-
+        return
     status = await get_lockdown_status()
-    if status.draining:
-        _was_draining = True
-        await notify_admins_lockdown_draining(pending_count=status.pending_orders)
-    else:
-        _was_draining = False
-        await notify_admins_lockdown_full(immediate=True)
+    _was_draining = status.draining
 
 
 async def sync_lockdown_drain_state() -> None:
-    """После завершения PENDING: уведомить админов о полной блокировке."""
+    """После завершения PENDING: обновить фазу (без отдельных уведомлений в ЛС)."""
     global _was_draining
     if not await is_lockdown_enabled():
         _was_draining = False
@@ -134,10 +120,7 @@ async def sync_lockdown_drain_state() -> None:
 
     status = await get_lockdown_status()
     if _was_draining and status.full_manual and status.primary_ok:
-        from services.lockdown_alerts import notify_admins_lockdown_full
-
         _was_draining = False
-        await notify_admins_lockdown_full(immediate=False)
     elif status.draining:
         _was_draining = True
 

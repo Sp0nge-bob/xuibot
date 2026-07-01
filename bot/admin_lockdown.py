@@ -9,7 +9,6 @@ from services.bot_lockdown import (
     get_lockdown_status,
     get_whitelist,
     is_lockdown_enabled,
-    on_manual_lockdown_enabled,
     remove_from_whitelist,
     set_lockdown_enabled,
     whitelist_users_info,
@@ -55,10 +54,14 @@ async def cb_admin_lockdown_toggle(cb: CallbackQuery):
     current = await is_lockdown_enabled()
     enabling = not current
     await set_lockdown_enabled(enabling)
-    if enabling:
-        await on_manual_lockdown_enabled()
-    label = "включена" if enabling else "снята"
-    await safe_cb_answer(cb, f"Блокировка {label}")
+    status = await get_lockdown_status()
+    if not enabling:
+        toast = "Блокировка снята"
+    elif status.draining:
+        toast = f"Ожидание {status.pending_orders} оплат"
+    else:
+        toast = "Блокировка активна"
+    await safe_cb_answer(cb, toast)
     await _show_lockdown_menu(cb)
 
 
