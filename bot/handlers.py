@@ -230,7 +230,7 @@ async def _notify_admins(text: str):
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
-    from bot.faq_album import clear_faq_album
+    from bot.faq_view import dismiss_faq_view
     from bot.ticket_chat import clear_active_session
     from services.referral import (
         notify_referrer_friend_bound,
@@ -240,7 +240,7 @@ async def cmd_start(message: Message, state: FSMContext):
 
     if message.from_user:
         clear_active_session(message.from_user.id)
-    await clear_faq_album(message.bot, message.chat.id)
+    await dismiss_faq_view(message.bot, message.chat.id)
     await state.clear()
     referral_notice = None
     if message.from_user and message.text:
@@ -311,14 +311,14 @@ async def cb_referral_program(cb: CallbackQuery):
 
 @router.callback_query(F.data == "main_menu")
 async def cb_main_menu(cb: CallbackQuery, state: FSMContext):
-    from bot.faq_album import clear_faq_album
+    from bot.faq_view import dismiss_faq_view
     from bot.ticket_chat import clear_active_session
 
     if cb.from_user:
         clear_active_session(cb.from_user.id)
-    await clear_faq_album(cb.bot, cb.message.chat.id)
+    had_faq_view = await dismiss_faq_view(cb.bot, cb.message.chat.id)
     await _clear_promo_input_state(state)
-    await _show_main_menu(cb, edit=True, state=state)
+    await _show_main_menu(cb, edit=not had_faq_view, state=state)
 
 
 @router.callback_query(F.data.startswith("resume_pay:"))
