@@ -14,6 +14,7 @@ from .admin import router as admin_router
 from .admin_menu import router as admin_menu_router
 from .admin_tickets import router as admin_tickets_router
 from .admin_debug import router as admin_debug_router
+from .admin_lockdown import router as admin_lockdown_router
 from .admin_start_text import router as admin_start_text_router
 from .admin_nodes import router as admin_nodes_router
 from .admin_payments import router as admin_payments_router
@@ -27,7 +28,7 @@ from .admin_server_status import router as admin_server_status_router
 from .server_status import router as server_status_router
 from .faq import router as faq_router
 from .policy import router as policy_router
-from .middlewares import ActionLockMiddleware, PrimaryGateMiddleware
+from .middlewares import ActionLockMiddleware, MaintenanceLockdownMiddleware
 from services.primary_gate import ensure_primary_ready_at_startup
 from .scheduler import reschedule_backup_job, run_full_nodes_sync, start_scheduler
 from .sender import send_message
@@ -39,10 +40,10 @@ bot = Bot(
 )
 dp = Dispatcher()
 
-_primary_gate = PrimaryGateMiddleware()
+_lockdown = MaintenanceLockdownMiddleware()
 _action_lock = ActionLockMiddleware()
-dp.callback_query.middleware(_primary_gate)
-dp.message.middleware(_primary_gate)
+dp.callback_query.middleware(_lockdown)
+dp.message.middleware(_lockdown)
 dp.callback_query.middleware(_action_lock)
 dp.message.middleware(_action_lock)
 
@@ -53,6 +54,7 @@ dp.include_router(admin_router)
 dp.include_router(admin_menu_router)
 dp.include_router(admin_tickets_router)
 dp.include_router(admin_debug_router)
+dp.include_router(admin_lockdown_router)
 dp.include_router(admin_start_text_router)
 dp.include_router(admin_nodes_router)
 dp.include_router(admin_payments_router)

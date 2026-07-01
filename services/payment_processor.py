@@ -53,6 +53,14 @@ def _callback_amount_acceptable(
     return order - tolerance <= callback <= max_allowed
 
 
+async def _sync_lockdown_after_pending_end() -> None:
+    try:
+        from services.bot_lockdown import sync_lockdown_drain_state
+        await sync_lockdown_drain_state()
+    except Exception as e:
+        logger.debug("Lockdown drain sync: {}", e)
+
+
 async def _try_refund_reversal(order: Dict[str, Any]) -> dict | None:
     try:
         return await apply_refund_reversal(order)
@@ -161,6 +169,7 @@ async def handle_platega_status(
             return PaymentProcessResult(handled=False)
         if not await db.mark_order_paid_if_pending(tx_id):
             return PaymentProcessResult(handled=True, already_paid=True)
+        await _sync_lockdown_after_pending_end()
         try:
             fresh_order = await db.get_order_by_platega_tx(tx_id) or order
             fulfillment = await fulfill_paid_order(fresh_order)
@@ -190,11 +199,15 @@ async def handle_platega_status(
         was_paid = order["status"] == "paid"
         reversal = await _try_refund_reversal(order) if was_paid else None
         await db.update_order_status(tx_id, "failed")
+        if order["status"] == "pending":
+            await _sync_lockdown_after_pending_end()
         msg = await _chargeback_user_message(order, reversal=reversal) if notify else None
         return PaymentProcessResult(handled=True, user_message=msg)
 
     if status in ("CANCELED", "FAILED"):
         await db.update_order_status(tx_id, "failed")
+        if order["status"] == "pending":
+            await _sync_lockdown_after_pending_end()
         msg = payment_failed_user_text(order, status=status) if notify else None
         return PaymentProcessResult(handled=True, user_message=msg)
 

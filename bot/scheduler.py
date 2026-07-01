@@ -72,6 +72,11 @@ async def expire_stale_pending_orders_job():
     count = await db.expire_stale_pending_orders(settings.STALE_PENDING_ORDER_HOURS)
     if count:
         logger.info("Старые pending-заказы: помечено failed={}", count)
+        try:
+            from services.bot_lockdown import sync_lockdown_drain_state
+            await sync_lockdown_drain_state()
+        except Exception as e:
+            logger.debug("Lockdown drain sync after expire: {}", e)
     else:
         logger.info("Старые pending-заказы: очистка не требуется")
 

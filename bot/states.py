@@ -33,6 +33,7 @@ class AdminStates(StatesGroup):
     waiting_privacy_policy_url = State()
     waiting_terms_of_service_url = State()
     waiting_backup_interval = State()
+    waiting_lockdown_whitelist = State()
 
 
 class AdminPricingStates(StatesGroup):

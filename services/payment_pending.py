@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
-from config.settings import settings
+from services.test_mode import is_test_mode
 from services import platega_simulator as platega_sim
 from services.platega import parse_status_response
 from services.platega_client import get_transaction_status
@@ -52,7 +52,7 @@ def _parse_platega_expires_in(raw: str | None) -> str | None:
 
 async def fetch_pending_expires_in(tx_id: str, order: dict[str, Any]) -> str | None:
     """Актуальный таймер: Platega API → fallback 30 мин от создания заказа."""
-    is_test = settings.TEST_MODE and tx_id.startswith("test-")
+    is_test = await is_test_mode() and tx_id.startswith("test-")
     if is_test:
         try:
             sim = platega_sim.simulate_get_status(tx_id)
@@ -92,7 +92,7 @@ async def get_resumable_pending_order(tg_id: int) -> dict[str, Any] | None:
     if not tx_id:
         return None
     redirect = (order.get("payment_redirect") or "").strip()
-    is_test = settings.TEST_MODE and tx_id.startswith("test-")
+    is_test = await is_test_mode() and tx_id.startswith("test-")
     if not redirect and not is_test:
         return None
     expires_in = expires_in_from_order_created(order.get("created_at"))

@@ -42,10 +42,11 @@ from services.pricing import get_plan_quote, list_plans, quote_from_order, quote
 from services.subscription_labels import normalize_display_name, subscription_display_name
 from services.subscription_sync import get_active_subscriptions_for_ui
 from services.promo_redeem import redeem_promo_code
+from services.test_mode import is_test_mode
 from services.trial import claim_trial, get_trial_button_visible
 from services.xui import build_sub_link
 from .fulfillment_delivery import deliver_fulfillment
-from .ui_helpers import safe_cb_answer, send_or_edit
+from .ui_helpers import safe_cb_answer, send_or_edit, user_answer, user_cb_message_answer
 from .keyboards import (
     main_menu_kb,
     purchase_hub_kb,
@@ -91,6 +92,26 @@ from .messages import (
 from .states import UserStates
 
 router = Router()
+
+
+async def _block_new_payment_cb(cb: CallbackQuery) -> bool:
+    from services.bot_lockdown import get_new_payment_block_message
+
+    msg = await get_new_payment_block_message(cb.from_user.id)
+    if not msg:
+        return False
+    await safe_cb_answer(cb, msg, show_alert=True)
+    return True
+
+
+async def _block_new_payment_msg(message: Message) -> bool:
+    from services.bot_lockdown import get_new_payment_block_message
+
+    msg = await get_new_payment_block_message(message.from_user.id)
+    if not msg:
+        return False
+    await user_answer(message, msg, reply_markup=back_to_main_kb())
+    return True
 
 
 def _payment_failure_kb(order: dict, result) -> "InlineKeyboardMarkup":
@@ -192,6 +213,7 @@ async def _show_main_menu(
         announcement = safe_html_fragment(announcement)
     refund_pending = await tickets_db.get_approved_refunds_pending_chargeback(user.id)
     pending_order = await get_resumable_pending_order(user.id)
+    test_mode = await is_test_mode()
     text = main_menu_text(
         user.first_name,
         user.username,
@@ -202,6 +224,7 @@ async def _show_main_menu(
         pending_discount_promo=pending_promo,
         pending_discount_expires_at=pending_expires,
         pending_payment_plan_name=pending_order.get("plan_name") if pending_order else None,
+        test_mode=test_mode,
     )
     if prepend_text:
         text = f"{prepend_text}\n\n{text}"
@@ -214,7 +237,7 @@ async def _show_main_menu(
         if edit:
             await send_or_edit(target, text, kb)
         else:
-            await target.message.answer(text, reply_markup=kb)
+            await user_answer(target.message, text, reply_markup=kb)
     else:
         await target.answer(text, reply_markup=kb)
 
@@ -399,6 +422,8 @@ async def _purchase_hub_referral_welcome(tg_id: int) -> bool:
 
 @router.callback_query(F.data == "tariffs")
 async def cb_tariffs(cb: CallbackQuery, state: FSMContext):
+    if await _block_new_payment_cb(cb):
+        return
     await _clear_promo_input_state(state)
     await safe_cb_answer(cb)
     welcome = await _purchase_hub_referral_welcome(cb.from_user.id)
@@ -411,6 +436,8 @@ async def cb_tariffs(cb: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "purchase_plans")
 async def cb_purchase_plans(cb: CallbackQuery, state: FSMContext):
+    if await _block_new_payment_cb(cb):
+        return
     await _clear_promo_input_state(state)
     has_paid = await _user_has_paid_subs(cb.from_user.id)
     extend_blocked = await tickets_db.is_extend_blocked_by_pending_refund(cb.from_user.id)
@@ -426,6 +453,8 @@ async def cb_purchase_plans(cb: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("select_plan:"))
 async def cb_select_plan(cb: CallbackQuery, state: FSMContext):
+    if await _block_new_payment_cb(cb):
+        return
     plan_id = cb.data.split(":", 1)[1]
     quote = await _checkout_quote(state, plan_id, cb.from_user.id)
     if not quote:
@@ -454,6 +483,8 @@ async def cb_select_plan(cb: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("purchase_new:"))
 async def cb_purchase_new(cb: CallbackQuery, state: FSMContext):
+    if await _block_new_payment_cb(cb):
+        return
     plan_id = cb.data.split(":", 1)[1]
     quote = await _checkout_quote(state, plan_id, cb.from_user.id)
     if not quote:
@@ -479,6 +510,8 @@ async def cb_purchase_new(cb: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("purchase_extend:"))
 async def cb_purchase_extend(cb: CallbackQuery, state: FSMContext):
+    if await _block_new_payment_cb(cb):
+        return
     if await tickets_db.is_extend_blocked_by_pending_refund(cb.from_user.id):
         await safe_cb_answer(cb, EXTEND_BLOCKED_REFUND_PENDING_MSG, show_alert=True)
         return
@@ -527,6 +560,8 @@ async def cb_purchase_extend(cb: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.regexp(r"^purchase_extend_sub:[^:]+:\d+$"))
 async def cb_purchase_extend_sub(cb: CallbackQuery, state: FSMContext):
+    if await _block_new_payment_cb(cb):
+        return
     if await tickets_db.is_extend_blocked_by_pending_refund(cb.from_user.id):
         await safe_cb_answer(cb, EXTEND_BLOCKED_REFUND_PENDING_MSG, show_alert=True)
         return
@@ -567,6 +602,8 @@ async def cb_purchase_extend_sub(cb: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("extend_plan:"))
 async def cb_extend_plan(cb: CallbackQuery, state: FSMContext):
+    if await _block_new_payment_cb(cb):
+        return
     if await tickets_db.is_extend_blocked_by_pending_refund(cb.from_user.id):
         await safe_cb_answer(cb, EXTEND_BLOCKED_REFUND_PENDING_MSG, show_alert=True)
         return
@@ -613,12 +650,16 @@ async def cb_extend_plan(cb: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("pay:"))
 async def cb_pay(cb: CallbackQuery, state: FSMContext):
+    if await _block_new_payment_cb(cb):
+        return
     _, plan_id, method_key = cb.data.split(":", 2)
     await _prompt_sub_display_name(cb, state, plan_id, method_key)
 
 
 @router.callback_query(F.data.startswith("pay_extend:"))
 async def cb_pay_extend(cb: CallbackQuery, state: FSMContext):
+    if await _block_new_payment_cb(cb):
+        return
     if await tickets_db.is_extend_blocked_by_pending_refund(cb.from_user.id):
         await safe_cb_answer(cb, EXTEND_BLOCKED_REFUND_PENDING_MSG, show_alert=True)
         return
@@ -704,12 +745,12 @@ async def msg_sub_display_name(message: Message, state: FSMContext):
     method_key = data.get("pending_method_key")
     if not plan_id or not method_key:
         await state.clear()
-        await message.answer("Сессия истекла.", reply_markup=back_to_main_kb())
+        await user_answer(message,"Сессия истекла.", reply_markup=back_to_main_kb())
         return
 
     name = normalize_display_name(message.text or "")
     if not name:
-        await message.answer(
+        await user_answer(message,
             "❌ Название: 1–32 символа, буквы, цифры и обычная пунктуация.",
             reply_markup=sub_name_prompt_kb(),
         )
@@ -717,7 +758,9 @@ async def msg_sub_display_name(message: Message, state: FSMContext):
 
     await state.set_state(None)
     await state.update_data(pending_sub_display_name=name)
-    await message.answer("⏳ Создаём счёт на оплату...")
+    if await _block_new_payment_msg(message):
+        return
+    await user_answer(message,"⏳ Создаём счёт на оплату...")
     await _start_payment_message(
         message,
         plan_id,
@@ -779,20 +822,24 @@ async def _start_payment(
     if from_message:
         message = cb
         tg_id = message.from_user.id
+        if await _block_new_payment_msg(message):
+            return
     else:
         message = cb.message
         tg_id = cb.from_user.id
+        if await _block_new_payment_cb(cb):
+            return
     quote = await _checkout_quote(state, plan_id, tg_id)
     method = get_payment_method_by_key(method_key)
     if not quote or not method:
         if from_message:
-            await message.answer("Неверные данные оплаты", reply_markup=back_to_main_kb())
+            await user_answer(message,"Неверные данные оплаты", reply_markup=back_to_main_kb())
         else:
             await safe_cb_answer(cb, "Неверные данные оплаты", show_alert=True)
         return
     if not await pay_methods_db.is_payment_method_enabled(method_key):
         if from_message:
-            await message.answer("Этот способ оплаты отключён", reply_markup=back_to_main_kb())
+            await user_answer(message,"Этот способ оплаты отключён", reply_markup=back_to_main_kb())
         else:
             await safe_cb_answer(cb, "Этот способ оплаты отключён", show_alert=True)
         return
@@ -802,13 +849,13 @@ async def _start_payment(
     if extend:
         if await tickets_db.is_extend_blocked_by_pending_refund(tg_id):
             if from_message:
-                await message.answer(EXTEND_BLOCKED_REFUND_PENDING_MSG, reply_markup=back_to_main_kb())
+                await user_answer(message,EXTEND_BLOCKED_REFUND_PENDING_MSG, reply_markup=back_to_main_kb())
             else:
                 await safe_cb_answer(cb, EXTEND_BLOCKED_REFUND_PENDING_MSG, show_alert=True)
             return
         if not subscription_id:
             if from_message:
-                await message.answer("Выберите подписку для продления", reply_markup=back_to_main_kb())
+                await user_answer(message,"Выберите подписку для продления", reply_markup=back_to_main_kb())
             else:
                 await safe_cb_answer(cb, "Выберите подписку для продления", show_alert=True)
             return
@@ -819,7 +866,7 @@ async def _start_payment(
 
     async def _payment_reply(text: str, kb=None) -> None:
         if from_message:
-            await message.answer(text, reply_markup=kb)
+            await user_answer(message,text, reply_markup=kb)
         else:
             await send_or_edit(cb, text, kb)
 
@@ -840,7 +887,7 @@ async def _start_payment(
     )
     preview = format_request_preview(req["path"], req["body"])
 
-    if settings.TEST_MODE:
+    if await is_test_mode():
         await _payment_reply(
             test_payment_text(
                 plan, method["name"], method["emoji"],
@@ -920,6 +967,8 @@ async def _start_payment(
 
 @router.callback_query(F.data.startswith("test_scenario:"))
 async def cb_test_scenario(cb: CallbackQuery, state: FSMContext):
+    if await _block_new_payment_cb(cb):
+        return
     parts = cb.data.split(":")
     plan_id = parts[1]
     method_key = parts[2]
@@ -1143,9 +1192,10 @@ async def _pending_payment_view(
     has_paid = await db.count_paid_subscriptions(order["tg_id"], active_only=True) > 0
     expires_in = await fetch_pending_expires_in(tx_id, order)
     redirect = (order.get("payment_redirect") or "").strip()
-    if not redirect and settings.TEST_MODE and tx_id.startswith("test-"):
+    test_mode = await is_test_mode()
+    if not redirect and test_mode and tx_id.startswith("test-"):
         redirect = f"https://pay.platega.test/sim/{tx_id}"
-    is_test = settings.TEST_MODE and tx_id.startswith("test-")
+    is_test = test_mode and tx_id.startswith("test-")
     note = status_note
     if rechecked and not note and not is_payment_window_expired(expires_in):
         note = PENDING_RECHECK_NOTE
@@ -1185,13 +1235,13 @@ async def _respond_payment_flow(cb: CallbackQuery, order: dict, tx_id: str, flow
     status = flow.status
 
     if not result.handled and not result.user_message:
-        await cb.message.answer("Не удалось обработать статус. Попробуйте позже.")
+        await user_cb_message_answer(cb,"Не удалось обработать статус. Попробуйте позже.")
         return
     if result.already_paid:
-        await cb.message.answer("Оплата уже обработана!", reply_markup=back_to_main_kb())
+        await user_cb_message_answer(cb,"Оплата уже обработана!", reply_markup=back_to_main_kb())
         return
     if result.amount_mismatch and result.user_message:
-        await cb.message.answer(
+        await user_cb_message_answer(cb,
             result.user_message,
             reply_markup=_payment_failure_kb(order, result),
         )
@@ -1217,12 +1267,12 @@ async def _respond_payment_flow(cb: CallbackQuery, order: dict, tx_id: str, flow
             return
     if result.user_message:
         fresh_order = await db.get_order_by_platega_tx(tx_id) or order
-        await cb.message.answer(
+        await user_cb_message_answer(cb,
             result.user_message,
             reply_markup=_payment_failure_kb(fresh_order, result),
         )
         return
-    await cb.message.answer("Не удалось обработать статус. Попробуйте позже.")
+    await user_cb_message_answer(cb,"Не удалось обработать статус. Попробуйте позже.")
 
 
 async def _process_payment_check(
@@ -1247,7 +1297,7 @@ async def _process_payment_check(
         )
     except Exception as e:
         logger.exception("Check payment error: {}", e)
-        await cb.message.answer("Не удалось проверить оплату. Попробуйте позже.")
+        await user_cb_message_answer(cb,"Не удалось проверить оплату. Попробуйте позже.")
         return
 
     if simulate_success and not flow.result.handled and not flow.status:
@@ -1258,7 +1308,7 @@ async def _process_payment_check(
 
 
 async def _process_pending_test_outcome(cb: CallbackQuery, tx_id: str, outcome: PendingTestOutcome) -> None:
-    if not settings.TEST_MODE:
+    if not await is_test_mode():
         await safe_cb_answer(cb, "Доступно только в тестовом режиме", show_alert=True)
         return
 
@@ -1283,7 +1333,7 @@ async def _process_pending_test_outcome(cb: CallbackQuery, tx_id: str, outcome: 
         return
     except Exception as e:
         logger.exception("Pending test outcome error: {}", e)
-        await cb.message.answer("Ошибка симуляции. Попробуйте позже.")
+        await user_cb_message_answer(cb,"Ошибка симуляции. Попробуйте позже.")
         return
 
     if outcome == PendingTestOutcome.SIM_CONFIRM and not flow.result.handled and not flow.status:
@@ -1427,23 +1477,23 @@ async def msg_sub_rename(message: Message, state: FSMContext):
     sub_id = data.get("rename_subscription_id")
     if not sub_id:
         await state.clear()
-        await message.answer("Сессия истекла.", reply_markup=back_to_main_kb())
+        await user_answer(message,"Сессия истекла.", reply_markup=back_to_main_kb())
         return
 
     name = normalize_display_name(message.text or "")
     if not name:
-        await message.answer("❌ Название: 1–32 символа, буквы, цифры и обычная пунктуация.")
+        await user_answer(message,"❌ Название: 1–32 символа, буквы, цифры и обычная пунктуация.")
         return
 
     sub = await db.get_subscription_by_id(int(sub_id))
     if not sub or sub["tg_id"] != message.from_user.id:
         await state.clear()
-        await message.answer("Подписка не найдена.", reply_markup=back_to_main_kb())
+        await user_answer(message,"Подписка не найдена.", reply_markup=back_to_main_kb())
         return
 
     await db.update_subscription_display_name(int(sub_id), name)
     await state.clear()
-    await message.answer(f"✅ Подписка переименована в <b>{name}</b>")
+    await user_answer(message,f"✅ Подписка переименована в <b>{name}</b>")
     from .tickets import show_subscription_detail
     await show_subscription_detail(message, message.from_user.id, int(sub_id))
 
@@ -1483,26 +1533,26 @@ async def msg_promo_code(message: Message, state: FSMContext):
         return
     if cmd:
         await _clear_promo_input_state(state)
-        await message.answer("Ввод промокода отменён.", reply_markup=promo_kb)
+        await user_answer(message,"Ввод промокода отменён.", reply_markup=promo_kb)
         return
 
     code = (message.text or "").strip()
     if not code:
-        await message.answer(
+        await user_answer(message,
             "Промокод не введён. Откройте «Покупка» → «Применить промокод» и попробуйте снова.",
             reply_markup=promo_kb,
         )
         return
 
-    await message.answer("⏳ Проверяем промокод…")
+    await user_answer(message,"⏳ Проверяем промокод…")
     try:
         result = await redeem_promo_code(message.from_user.id, code)
     except ValueError as e:
-        await message.answer(f"❌ {e}", reply_markup=promo_kb)
+        await user_answer(message,f"❌ {e}", reply_markup=promo_kb)
         return
     except Exception as e:
         logger.exception("Promo redeem error: {}", e)
-        await message.answer(
+        await user_answer(message,
             "❌ Не удалось активировать промокод. Попробуйте позже.",
             reply_markup=promo_kb,
         )
@@ -1521,14 +1571,14 @@ async def msg_promo_code(message: Message, state: FSMContext):
         return
 
     if result.kind == "grant_choice" and result.promo_id and result.message:
-        await message.answer(
+        await user_answer(message,
             result.message,
             reply_markup=grant_promo_choice_kb(result.promo_id),
         )
         return
 
     if result.message:
-        await message.answer(result.message, reply_markup=promo_kb if from_purchase else back_to_main_kb())
+        await user_answer(message,result.message, reply_markup=promo_kb if from_purchase else back_to_main_kb())
 
 
 async def _deliver_grant_fulfillment(cb: CallbackQuery, fulfillment) -> None:
@@ -1693,7 +1743,7 @@ async def cb_sub_link(cb: CallbackQuery):
         )
         followup = sub_link_standalone_message(link)
         if followup:
-            await cb.message.answer(followup, reply_markup=kb)
+            await user_cb_message_answer(cb,followup, reply_markup=kb)
     else:
         await cb.message.answer_photo(
             photo,

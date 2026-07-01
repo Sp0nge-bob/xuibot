@@ -216,12 +216,70 @@ def admin_debug_entry_confirm_kb() -> InlineKeyboardMarkup:
     ])
 
 
-def admin_debug_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
+def admin_debug_lockdown_kb(
+    whitelist: list,
+    *,
+    enabled: bool = False,
+    add_mode: bool = False,
+) -> InlineKeyboardMarkup:
+    toggle_label = "🔓 Снять блокировку" if enabled else "🔒 Заблокировать бот"
+    rows: list[list[InlineKeyboardButton]] = [
+        [InlineKeyboardButton(
+            text=toggle_label,
+            callback_data="adm:debug:lockdown:toggle",
+        )],
+        [InlineKeyboardButton(
+            text="➕ Добавить TG ID",
+            callback_data="adm:debug:lockdown:add",
+        )],
+    ]
+    for u in whitelist[:12]:
+        tg_id = int(u["tg_id"])
+        label = u.get("username") or u.get("first_name") or str(tg_id)
+        if len(label) > 14:
+            label = label[:11] + "…"
+        rows.append([InlineKeyboardButton(
+            text=f"🗑 {label}",
+            callback_data=f"adm:debug:lockdown:remove:{tg_id}",
+        )])
+    back_label = "« К блокировке" if add_mode else "« К отладке"
+    back_data = "adm:debug:lockdown" if add_mode else "adm:debug:enter"
+    rows.append([InlineKeyboardButton(text=back_label, callback_data=back_data)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_debug_kb(
+    *,
+    test_mode: bool = False,
+    test_mode_overridden: bool = False,
+    lockdown_active: bool = False,
+) -> InlineKeyboardMarkup:
+    test_toggle = (
+        "⏸ Выключить TEST_MODE"
+        if test_mode
+        else "▶️ Включить TEST_MODE"
+    )
+    rows: list[list[InlineKeyboardButton]] = [
+        [InlineKeyboardButton(
+            text=test_toggle,
+            callback_data="adm:debug:test_mode_toggle",
+        )],
+    ]
+    if test_mode_overridden:
+        rows.append([InlineKeyboardButton(
+            text="↩️ TEST_MODE из .env",
+            callback_data="adm:debug:test_mode_reset",
+        )])
+    lockdown_label = "🔒 Блокировка · активна" if lockdown_active else "🔒 Блокировка"
+    rows.append([InlineKeyboardButton(
+        text=lockdown_label,
+        callback_data="adm:debug:lockdown",
+    )])
+    rows += [
         [
             InlineKeyboardButton(
-                text="🗑 Пробные",
-                callback_data="adm:trial:reset_all",
+                text="🎁 Пробные",
+                callback_data="adm:trial",
             ),
             InlineKeyboardButton(
                 text="🎟 Промокоды",
@@ -243,7 +301,8 @@ def admin_debug_kb() -> InlineKeyboardMarkup:
             callback_data="adm:debug:users_reset",
         )],
         [InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")],
-    ])
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def admin_debug_users_reset_confirm_kb() -> InlineKeyboardMarkup:
@@ -690,7 +749,7 @@ def admin_trial_kb(grants: list, *, trial_count: int = 0) -> InlineKeyboardMarku
             text=f"🔄 {label}",
             callback_data=f"adm:trial_reset:{g['tg_id']}",
         )])
-    rows.append([InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")])
+    rows.append([InlineKeyboardButton(text="« К отладке", callback_data="adm:debug:enter")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

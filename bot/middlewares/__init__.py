@@ -1,4 +1,7 @@
 from .action_lock import ActionLockMiddleware
-from .primary_gate import PrimaryGateMiddleware
+from .maintenance_lockdown import MaintenanceLockdownMiddleware
 
-__all__ = ["ActionLockMiddleware", "PrimaryGateMiddleware"]
+__all__ = [
+    "ActionLockMiddleware",
+    "MaintenanceLockdownMiddleware",
+]

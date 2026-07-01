@@ -3,7 +3,7 @@ import re
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from loguru import logger
 
 from config.settings import settings
@@ -37,7 +37,7 @@ from .admin_users import (
     subscription_kind_label,
     unique_tg_users_from_subs,
 )
-from .admin_auth import is_admin
+from .admin_auth import is_admin, is_debug_admin
 from .admin_keyboards import (
     admin_menu_kb,
     admin_back_kb,
@@ -842,7 +842,7 @@ async def _active_trial_count() -> int:
 
 @router.callback_query(F.data == "adm:trial")
 async def cb_admin_trial_menu(cb: CallbackQuery, state: FSMContext):
-    if not is_admin(cb.from_user.id):
+    if not is_debug_admin(cb.from_user.id):
         return
     await state.set_state(None)
     grants = await trial_db.list_recent_trial_grants()
@@ -857,7 +857,7 @@ async def cb_admin_trial_menu(cb: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "adm:trial:reset_all")
 async def cb_admin_trial_reset_all_confirm(cb: CallbackQuery):
-    if not is_admin(cb.from_user.id):
+    if not is_debug_admin(cb.from_user.id):
         return
     trial_count = await _active_trial_count()
     grants_count = await trial_db.count_trial_grants()
@@ -874,7 +874,7 @@ async def cb_admin_trial_reset_all_confirm(cb: CallbackQuery):
 
 @router.callback_query(F.data == "adm:trial:reset_all:confirm")
 async def cb_admin_trial_reset_all(cb: CallbackQuery):
-    if not is_admin(cb.from_user.id):
+    if not is_debug_admin(cb.from_user.id):
         return
     await safe_cb_answer(cb, "Сбрасываем все пробные…")
     await send_or_edit(cb, "⏳ Сброс всех пробных подписок…")
@@ -908,7 +908,7 @@ async def cb_admin_trial_reset_all(cb: CallbackQuery):
 
 @router.callback_query(F.data == "adm:trial:search")
 async def cb_admin_trial_search(cb: CallbackQuery, state: FSMContext):
-    if not is_admin(cb.from_user.id):
+    if not is_debug_admin(cb.from_user.id):
         return
     await state.set_state(AdminStates.waiting_trial_reset)
     await safe_cb_answer(cb)
@@ -917,13 +917,15 @@ async def cb_admin_trial_search(cb: CallbackQuery, state: FSMContext):
         "🔍 <b>Сброс пробного периода</b>\n\n"
         "Отправьте TG ID пользователя.\n"
         "Для отмены: /admin",
-        admin_back_kb(),
+        InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="« К пробным", callback_data="adm:trial")],
+        ]),
     )
 
 
 @router.message(AdminStates.waiting_trial_reset)
 async def msg_admin_trial_reset_search(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
+    if not is_debug_admin(message.from_user.id):
         return
     raw = (message.text or "").strip()
     if not raw.isdigit():

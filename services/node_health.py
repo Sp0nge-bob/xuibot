@@ -30,6 +30,9 @@ async def check_node_health(node: dict[str, Any]) -> dict[str, Any]:
 
     if node_id:
         await nodes_db.record_health_check(node_id, ok=ok, latency_ms=latency_ms, error=error)
+        if not node.get("is_primary"):
+            from services.secondary_node_notice import invalidate_secondary_node_notice_cache
+            invalidate_secondary_node_notice_cache()
 
     uptime = await nodes_db.get_uptime_24h(node_id) if node_id else None
     return {

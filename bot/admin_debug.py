@@ -9,8 +9,15 @@ from db import promo_pending as pending_db
 from db import tickets as tickets_db
 from db import trial_grants as trial_db
 from services.xui import remove_client_everywhere
-from config.settings import settings
-from .admin_auth import is_admin
+from services.bot_lockdown import get_lockdown_status, get_whitelist
+from services.test_mode import (
+    clear_test_mode_override,
+    is_test_mode,
+    is_test_mode_overridden,
+    set_test_mode,
+    test_mode_source_label,
+)
+from .admin_auth import is_debug_admin
 from .admin_keyboards import (
     admin_back_kb,
     admin_debug_entry_confirm_kb,
@@ -33,8 +40,15 @@ from .ui_helpers import safe_cb_answer, send_or_edit
 router = Router()
 
 
-def _debug_allowed(user_id: int) -> bool:
-    return is_admin(user_id) and settings.ALLOW_DEBUG_ADMIN
+async def _debug_kb():
+    test_mode = await is_test_mode()
+    overridden = await is_test_mode_overridden()
+    lockdown = await get_lockdown_status()
+    return admin_debug_kb(
+        test_mode=test_mode,
+        test_mode_overridden=overridden,
+        lockdown_active=lockdown.restricted,
+    )
 
 
 async def _show_debug_menu(cb: CallbackQuery) -> None:
@@ -45,6 +59,10 @@ async def _show_debug_menu(cb: CallbackQuery) -> None:
     tickets_count = await tickets_db.count_tickets()
     ticket_messages_count = await tickets_db.count_ticket_messages()
     users_count = await db.count_users()
+    test_mode = await is_test_mode()
+    test_mode_source = await test_mode_source_label()
+    lockdown = await get_lockdown_status()
+    whitelist_count = len(await get_whitelist())
     await send_or_edit(
         cb,
         admin_debug_menu_text(
@@ -55,14 +73,18 @@ async def _show_debug_menu(cb: CallbackQuery) -> None:
             tickets_count=tickets_count,
             ticket_messages_count=ticket_messages_count,
             users_count=users_count,
+            test_mode=test_mode,
+            test_mode_source=test_mode_source,
+            lockdown_summary=lockdown.summary_label,
+            lockdown_whitelist_count=whitelist_count,
         ),
-        admin_debug_kb(),
+        await _debug_kb(),
     )
 
 
 @router.callback_query(F.data == "adm:debug")
 async def cb_admin_debug_entry(cb: CallbackQuery):
-    if not _debug_allowed(cb.from_user.id):
+    if not is_debug_admin(cb.from_user.id):
         return
     await safe_cb_answer(cb)
     await send_or_edit(cb, admin_debug_entry_confirm_text(), admin_debug_entry_confirm_kb())
@@ -70,15 +92,35 @@ async def cb_admin_debug_entry(cb: CallbackQuery):
 
 @router.callback_query(F.data == "adm:debug:enter")
 async def cb_admin_debug_menu(cb: CallbackQuery):
-    if not _debug_allowed(cb.from_user.id):
+    if not is_debug_admin(cb.from_user.id):
         return
     await safe_cb_answer(cb)
     await _show_debug_menu(cb)
 
 
+@router.callback_query(F.data == "adm:debug:test_mode_toggle")
+async def cb_admin_debug_test_mode_toggle(cb: CallbackQuery):
+    if not is_debug_admin(cb.from_user.id):
+        return
+    current = await is_test_mode()
+    await set_test_mode(not current)
+    label = "включён" if not current else "выключен"
+    await safe_cb_answer(cb, f"TEST_MODE {label}")
+    await _show_debug_menu(cb)
+
+
+@router.callback_query(F.data == "adm:debug:test_mode_reset")
+async def cb_admin_debug_test_mode_reset(cb: CallbackQuery):
+    if not is_debug_admin(cb.from_user.id):
+        return
+    await clear_test_mode_override()
+    await safe_cb_answer(cb, "TEST_MODE из .env")
+    await _show_debug_menu(cb)
+
+
 @router.callback_query(F.data == "adm:debug:promos_reset")
 async def cb_admin_debug_promos_reset_confirm(cb: CallbackQuery):
-    if not _debug_allowed(cb.from_user.id):
+    if not is_debug_admin(cb.from_user.id):
         return
 
     uses_count = await promo_db.count_promo_uses()
@@ -96,7 +138,7 @@ async def cb_admin_debug_promos_reset_confirm(cb: CallbackQuery):
 
 @router.callback_query(F.data == "adm:debug:promos_reset:confirm")
 async def cb_admin_debug_promos_reset(cb: CallbackQuery):
-    if not _debug_allowed(cb.from_user.id):
+    if not is_debug_admin(cb.from_user.id):
         return
 
     await safe_cb_answer(cb, "Очищаем…")
@@ -117,12 +159,12 @@ async def cb_admin_debug_promos_reset(cb: CallbackQuery):
         f"Удалено pending: <b>{result['pending_deleted']}</b>\n"
         "Счётчики <code>used_count</code> обнулены."
     )
-    await send_or_edit(cb, text, admin_debug_kb())
+    await send_or_edit(cb, text, await _debug_kb())
 
 
 @router.callback_query(F.data == "adm:debug:orders_reset")
 async def cb_admin_debug_orders_reset_confirm(cb: CallbackQuery):
-    if not _debug_allowed(cb.from_user.id):
+    if not is_debug_admin(cb.from_user.id):
         return
 
     orders_count = await db.count_orders()
@@ -136,7 +178,7 @@ async def cb_admin_debug_orders_reset_confirm(cb: CallbackQuery):
 
 @router.callback_query(F.data == "adm:debug:orders_reset:confirm")
 async def cb_admin_debug_orders_reset(cb: CallbackQuery):
-    if not _debug_allowed(cb.from_user.id):
+    if not is_debug_admin(cb.from_user.id):
         return
 
     await safe_cb_answer(cb, "Удаляем…")
@@ -156,12 +198,12 @@ async def cb_admin_debug_orders_reset(cb: CallbackQuery):
         f"Удалено заказов: <b>{result['orders_deleted']}</b>\n"
         f"Тикетов отвязано от заказов: <b>{result['tickets_unlinked']}</b>"
     )
-    await send_or_edit(cb, text, admin_debug_kb())
+    await send_or_edit(cb, text, await _debug_kb())
 
 
 @router.callback_query(F.data == "adm:debug:tickets_reset")
 async def cb_admin_debug_tickets_reset_confirm(cb: CallbackQuery):
-    if not _debug_allowed(cb.from_user.id):
+    if not is_debug_admin(cb.from_user.id):
         return
 
     tickets_count = await tickets_db.count_tickets()
@@ -179,7 +221,7 @@ async def cb_admin_debug_tickets_reset_confirm(cb: CallbackQuery):
 
 @router.callback_query(F.data == "adm:debug:tickets_reset:confirm")
 async def cb_admin_debug_tickets_reset(cb: CallbackQuery):
-    if not _debug_allowed(cb.from_user.id):
+    if not is_debug_admin(cb.from_user.id):
         return
 
     await safe_cb_answer(cb, "Удаляем…")
@@ -199,12 +241,12 @@ async def cb_admin_debug_tickets_reset(cb: CallbackQuery):
         f"Удалено тикетов: <b>{result['tickets_deleted']}</b>\n"
         f"Удалено сообщений: <b>{result['messages_deleted']}</b>"
     )
-    await send_or_edit(cb, text, admin_debug_kb())
+    await send_or_edit(cb, text, await _debug_kb())
 
 
 @router.callback_query(F.data == "adm:debug:users_reset")
 async def cb_admin_debug_users_reset_confirm(cb: CallbackQuery):
-    if not _debug_allowed(cb.from_user.id):
+    if not is_debug_admin(cb.from_user.id):
         return
 
     users_count = await db.count_users()
@@ -218,7 +260,7 @@ async def cb_admin_debug_users_reset_confirm(cb: CallbackQuery):
 
 @router.callback_query(F.data == "adm:debug:users_reset:confirm")
 async def cb_admin_debug_users_reset(cb: CallbackQuery):
-    if not _debug_allowed(cb.from_user.id):
+    if not is_debug_admin(cb.from_user.id):
         return
 
     await safe_cb_answer(cb, "Удаляем…")
@@ -263,4 +305,4 @@ async def cb_admin_debug_users_reset(cb: CallbackQuery):
         text += f"\nОшибок на панели: <b>{panel_errors}</b>"
     if grants_deleted:
         text += f"\nСброшено пробных лимитов: <b>{grants_deleted}</b>"
-    await send_or_edit(cb, text, admin_debug_kb())
+    await send_or_edit(cb, text, await _debug_kb())

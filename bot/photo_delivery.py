@@ -6,7 +6,7 @@ from typing import Union
 from aiogram import Bot
 from aiogram.types import FSInputFile, InputMediaPhoto
 
-from bot.ui_helpers import clamp_telegram_text
+from bot.ui_helpers import clamp_telegram_text, prepare_user_text
 
 PhotoMedia = Union[str, FSInputFile]
 CAPTION_LIMIT = 1024
@@ -39,6 +39,7 @@ async def send_photos_with_text(
     *,
     reply_markup=None,
     parse_mode: str = "HTML",
+    user_id: int | None = None,
 ) -> list[int]:
     """
     Доставка текста с фото по правилам Telegram.
@@ -51,6 +52,8 @@ async def send_photos_with_text(
     Возвращает message_id всех отправленных сообщений просмотра.
     """
     body = (text or "").strip()
+    if body and user_id is not None:
+        body = (await prepare_user_text(body, user_id)).strip()
     caption = clamp_telegram_text(body, limit=CAPTION_LIMIT) if body else None
 
     if not photos:
@@ -81,9 +84,12 @@ async def send_photos_with_text(
     message_ids = [msg.message_id for msg in album_messages]
 
     if reply_markup:
+        nav_text = MEDIA_GROUP_ACTION_HINT
+        if user_id is not None:
+            nav_text = await prepare_user_text(nav_text, user_id)
         nav = await bot.send_message(
             chat_id,
-            MEDIA_GROUP_ACTION_HINT,
+            nav_text,
             reply_markup=reply_markup,
             parse_mode=parse_mode,
         )

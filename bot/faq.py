@@ -9,7 +9,7 @@ from .faq_view import dismiss_faq_view, set_faq_view_message_ids
 from .faq_delivery import send_activation_setup_faq, send_faq_article
 from .keyboards import faq_article_nav_kb, faq_list_kb
 from .messages import faq_empty_text, faq_menu_text
-from .ui_helpers import safe_cb_answer
+from .ui_helpers import safe_cb_answer, user_answer, user_cb_message_answer
 
 router = Router()
 
@@ -36,9 +36,9 @@ async def _open_faq_article(
 async def show_faq_menu_message(message: Message) -> None:
     articles = await faq_db.list_articles(published_only=True)
     if not articles:
-        await message.answer(faq_empty_text(), reply_markup=faq_list_kb([]))
+        await user_answer(message, faq_empty_text(), reply_markup=faq_list_kb([]))
         return
-    await message.answer(faq_menu_text(len(articles)), reply_markup=faq_list_kb(articles))
+    await user_answer(message, faq_menu_text(len(articles)), reply_markup=faq_list_kb(articles))
 
 
 @router.message(Command("faq"))
@@ -55,7 +55,7 @@ async def cb_faq_menu(cb: CallbackQuery):
     articles = await faq_db.list_articles(published_only=True)
     text = faq_empty_text() if not articles else faq_menu_text(len(articles))
     kb = faq_list_kb(articles if articles else [])
-    await cb.message.answer(text, reply_markup=kb)
+    await user_cb_message_answer(cb, text, reply_markup=kb)
 
 
 @router.callback_query(F.data == "faq:builtin:activation")

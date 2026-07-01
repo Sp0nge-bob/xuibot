@@ -164,6 +164,11 @@ async def collect_diagnostics(
     from bot.polling_lock import get_polling_lock_info
     from bot.scheduler import scheduler
 
+    from services.test_mode import is_test_mode, is_test_mode_overridden
+
+    test_mode = await is_test_mode()
+    test_mode_overridden = await is_test_mode_overridden()
+
     lock = get_polling_lock_info()
     stats = await db.get_admin_stats()
     summary = await nodes_db.nodes_summary()
@@ -225,9 +230,9 @@ async def collect_diagnostics(
     elif not settings.START_BOT_IN_WEBAPP:
         issues.append("webhook-процесс (app.py)")
 
-    if not public_health_url and not settings.TEST_MODE:
+    if not public_health_url and not test_mode:
         issues.append("PUBLIC_WEBHOOK_URL не задан")
-    if settings.TEST_MODE and (settings.PUBLIC_WEBHOOK_URL or "").strip():
+    if test_mode and (settings.PUBLIC_WEBHOOK_URL or "").strip():
         issues.append("TEST_MODE + PUBLIC_WEBHOOK_URL")
 
     overall_ok = len(issues) == 0
@@ -255,7 +260,8 @@ async def collect_diagnostics(
         "nodes_summary": summary,
         "nodes": nodes_report,
         "config": {
-            "test_mode": settings.TEST_MODE,
+            "test_mode": test_mode,
+            "test_mode_overridden": test_mode_overridden,
             "start_bot_in_webapp": settings.START_BOT_IN_WEBAPP,
             "webhook_port": settings.WEBHOOK_PORT,
             "webhook_path": settings.WEBHOOK_PATH,
@@ -592,8 +598,12 @@ def format_diagnostics_text(report: dict[str, Any]) -> str:
     lines.append("<b>━━ Конфиг ━━</b>")
     lines.append(f"PID: <code>{cfg.get('pid')}</code>")
     test = "да" if cfg.get("test_mode") else "нет"
+    test_src = "БД" if cfg.get("test_mode_overridden") else ".env"
     mono = "да" if cfg.get("start_bot_in_webapp") else "нет"
-    lines.append(f"TEST_MODE: <code>{test}</code> · START_BOT_IN_WEBAPP: <code>{mono}</code>")
+    lines.append(
+        f"TEST_MODE: <code>{test}</code> ({test_src}) · "
+        f"START_BOT_IN_WEBAPP: <code>{mono}</code>"
+    )
     wh_path = cfg.get("webhook_path") or settings.WEBHOOK_PATH
     lines.append(f"Webhook path: <code>{html.escape(wh_path)}</code>")
 

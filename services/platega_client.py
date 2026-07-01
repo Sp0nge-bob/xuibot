@@ -1,7 +1,7 @@
 """Фасад Platega: реальный API или симулятор в TEST_MODE."""
 from typing import Any, Dict, Optional
 
-from config.settings import settings
+from services.test_mode import is_test_mode
 
 from . import platega as real
 from . import platega_simulator as sim
@@ -26,7 +26,7 @@ async def create_transaction(
     metadata: Optional[Dict[str, Any]] = None,
     payment_method: Optional[int] = None,
 ) -> Dict[str, Any]:
-    if settings.TEST_MODE:
+    if await is_test_mode():
         if payment_method is None:
             raise PlategaAPIError("В тестовом режиме нужен payment_method")
         return sim.simulate_create(
@@ -50,6 +50,6 @@ async def create_transaction(
 
 
 async def get_transaction_status(transaction_id: str) -> Dict[str, Any]:
-    if settings.TEST_MODE and transaction_id.startswith("test-"):
+    if await is_test_mode() and transaction_id.startswith("test-"):
         return sim.simulate_get_status(transaction_id)
     return await real.get_transaction_status(transaction_id)

@@ -39,7 +39,7 @@ from .ticket_chat import (
     set_active_session,
     get_active_session,
 )
-from .ui_helpers import safe_cb_answer, send_or_edit
+from .ui_helpers import safe_cb_answer, send_or_edit, user_answer, user_cb_message_answer
 
 router = Router()
 
@@ -152,13 +152,13 @@ async def msg_sub_email_search(message: Message, state: FSMContext):
 
     query = raw.strip()
     if not query:
-        await message.answer(
+        await user_answer(message,
             "❌ Введите email, например <code>tg123456789_2</code>",
             reply_markup=sub_email_search_kb(),
         )
         return
     if not normalize_email_query(query):
-        await message.answer(
+        await user_answer(message,
             "❌ Формат: <code>tg123456789</code> или <code>tg123456789_2</code>",
             reply_markup=sub_email_search_kb(),
         )
@@ -168,7 +168,7 @@ async def msg_sub_email_search(message: Message, state: FSMContext):
     sub = match_subscription_by_email(subs, query)
     await state.set_state(None)
     if not sub:
-        await message.answer(
+        await user_answer(message,
             f"🔍 Подписка <code>{query}</code> не найдена среди ваших активных.",
             reply_markup=sub_email_search_kb(),
         )
@@ -267,7 +267,7 @@ async def cb_ticket_session(cb: CallbackQuery, state: FSMContext):
     prev = get_active_session(cb.from_user.id)
     await _enter_ticket_session(cb, state, ticket_id)
     if prev and prev != ticket_id:
-        await cb.message.answer(f"ℹ️ Переключились на тикет #{ticket_id}")
+        await user_cb_message_answer(cb, f"ℹ️ Переключились на тикет #{ticket_id}")
 
 
 @router.callback_query(F.data.startswith("ticket_session_end:"))
@@ -405,7 +405,7 @@ async def msg_ticket_relay(message: Message, state: FSMContext):
     ticket_id = data.get("ticket_chat_id")
     if not ticket_id:
         await state.clear()
-        await message.answer("Сессия истекла.")
+        await user_answer(message,"Сессия истекла.")
         return
 
     if message.text:
@@ -435,7 +435,7 @@ async def msg_ticket_relay(message: Message, state: FSMContext):
     if not ticket or ticket["tg_id"] != message.from_user.id:
         await state.clear()
         clear_active_session(message.from_user.id)
-        await message.answer("Тикет недоступен.")
+        await user_answer(message,"Тикет недоступен.")
         return
 
     from bot import bot as tg_bot
@@ -448,11 +448,11 @@ async def msg_ticket_relay(message: Message, state: FSMContext):
     if not ok:
         await state.clear()
         clear_active_session(message.from_user.id, ticket_id=ticket_id)
-        await message.answer("❌ Тикет закрыт.", reply_markup=back_to_main_kb())
+        await user_answer(message,"❌ Тикет закрыт.", reply_markup=back_to_main_kb())
         return
 
     if ticket_id and get_active_session(message.from_user.id) == ticket_id:
-        await message.answer("✅ Отправлено", reply_markup=ticket_session_kb(ticket_id))
+        await user_answer(message,"✅ Отправлено", reply_markup=ticket_session_kb(ticket_id))
 
 
 async def show_subscription_detail(

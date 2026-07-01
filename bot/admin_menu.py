@@ -34,12 +34,11 @@ ADMIN_HUBS: dict[str, HubDef] = {
     "billing": {
         "root_label": "💰 Монетизация",
         "title": "💰 Монетизация",
-        "description": "Тарифы, способы оплаты, промокоды и пробный период.",
+        "description": "Тарифы, способы оплаты и промокоды.",
         "items": [
             ("💰 Тарифы", "adm:plans"),
             ("💳 Оплата", "adm:payments"),
             ("🎟 Промокоды", "adm:promos"),
-            ("🎁 Пробный", "adm:trial"),
         ],
     },
     "clients": {

@@ -651,6 +651,15 @@ async def expire_stale_pending_orders(hours: int = 48) -> int:
         return cur.rowcount
 
 
+async def count_pending_orders() -> int:
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT COUNT(*) FROM orders WHERE status = 'pending'",
+        ) as cur:
+            row = await cur.fetchone()
+            return int(row[0] or 0)
+
+
 async def get_pending_order(tg_id: int) -> Optional[Dict[str, Any]]:
     async with get_db() as db:
 

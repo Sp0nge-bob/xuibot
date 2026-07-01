@@ -20,6 +20,9 @@ SETTING_PAID_LIMIT_IP = "paid_limit_ip"
 SETTING_PRIVACY_POLICY_URL = "privacy_policy_url"
 SETTING_TERMS_OF_SERVICE_URL = "terms_of_service_url"
 SETTING_PAYMENT_ADMIN_NOTIFY = "payment_admin_notify_enabled"
+SETTING_TEST_MODE = "test_mode"
+SETTING_BOT_LOCKDOWN = "bot_lockdown"
+SETTING_BOT_LOCKDOWN_WHITELIST = "bot_lockdown_whitelist"
 
 _SYNC_DISABLED_TRUTHY = frozenset({"1", "true", "yes", "on"})
 
@@ -441,3 +444,66 @@ async def clear_privacy_policy_url() -> None:
 
 async def clear_terms_of_service_url() -> None:
     await set_setting(SETTING_TERMS_OF_SERVICE_URL, "")
+
+
+async def is_test_mode_overridden() -> bool:
+    raw = await get_setting(SETTING_TEST_MODE)
+    return raw is not None and str(raw).strip() != ""
+
+
+async def get_test_mode_override() -> bool | None:
+    """None — использовать TEST_MODE из .env."""
+    raw = await get_setting(SETTING_TEST_MODE)
+    if raw is None or not str(raw).strip():
+        return None
+    return str(raw).strip().lower() in _SYNC_DISABLED_TRUTHY
+
+
+async def set_test_mode(enabled: bool) -> None:
+    await set_setting(SETTING_TEST_MODE, "1" if enabled else "0")
+
+
+async def clear_test_mode_override() -> None:
+    async with get_db() as db:
+        await db.execute(
+            "DELETE FROM bot_settings WHERE key = ?",
+            (SETTING_TEST_MODE,),
+        )
+        await db.commit()
+
+
+async def is_bot_lockdown_enabled() -> bool:
+    raw = await get_setting(SETTING_BOT_LOCKDOWN)
+    return (raw or "").strip().lower() in _SYNC_DISABLED_TRUTHY
+
+
+async def set_bot_lockdown_enabled(enabled: bool) -> None:
+    await set_setting(SETTING_BOT_LOCKDOWN, "1" if enabled else "0")
+
+
+async def get_bot_lockdown_whitelist() -> List[int]:
+    raw = await get_setting(SETTING_BOT_LOCKDOWN_WHITELIST)
+    if not raw or not str(raw).strip():
+        return []
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
+        return []
+    result: list[int] = []
+    for item in data:
+        try:
+            result.append(int(item))
+        except (TypeError, ValueError):
+            continue
+    return sorted(set(result))
+
+
+async def set_bot_lockdown_whitelist(tg_ids: List[int]) -> List[int]:
+    unique = sorted({int(x) for x in tg_ids})
+    await set_setting(
+        SETTING_BOT_LOCKDOWN_WHITELIST,
+        json.dumps(unique, separators=(",", ":")),
+    )
+    return unique

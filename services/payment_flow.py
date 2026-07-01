@@ -5,7 +5,7 @@ from typing import Any, Optional
 
 from loguru import logger
 
-from config.settings import settings
+from services.test_mode import is_test_mode
 from services import platega_simulator as platega_sim
 from services.payment_processor import PaymentProcessResult, handle_platega_status
 from services.platega_client import get_transaction_status
@@ -28,8 +28,8 @@ class PaymentFlowResult:
     callback_body: Optional[dict[str, Any]] = None
 
 
-def _require_test_tx(tx_id: str) -> None:
-    if not (settings.TEST_MODE and tx_id.startswith("test-")):
+async def _require_test_tx(tx_id: str) -> None:
+    if not (await is_test_mode() and tx_id.startswith("test-")):
         raise ValueError("Тестовые исходы доступны только для test-* в TEST_MODE")
 
 
@@ -73,7 +73,7 @@ async def check_payment_status(
 ) -> PaymentFlowResult:
     """Как кнопка «Проверить оплату»: GET status → handle_platega_status."""
     if simulate_confirm:
-        _require_test_tx(tx_id)
+        await _require_test_tx(tx_id)
         if not platega_sim.simulate_payment_completed(tx_id):
             return PaymentFlowResult(
                 result=PaymentProcessResult(handled=False),
@@ -82,7 +82,7 @@ async def check_payment_status(
 
     status, status_data = await fetch_and_parse_status(tx_id)
     parsed = parse_status_response(status_data)
-    if settings.TEST_MODE and tx_id.startswith("test-"):
+    if await is_test_mode() and tx_id.startswith("test-"):
         try:
             callback_body = _build_callback_body(tx_id, status)
         except KeyError:
@@ -113,7 +113,7 @@ async def apply_pending_test_outcome(
     notify: bool = True,
 ) -> PaymentFlowResult:
     """Симуляция исходов PENDING для TEST_MODE (кнопки бота и автотесты)."""
-    _require_test_tx(tx_id)
+    await _require_test_tx(tx_id)
 
     if outcome == PendingTestOutcome.CHECK_STILL_PENDING:
         platega_sim.set_scenario(

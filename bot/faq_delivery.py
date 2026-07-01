@@ -33,7 +33,7 @@ async def send_faq_article(
     header = _build_faq_header(article)
     file_ids = [p["file_id"] for p in photos if p.get("file_id")]
     return await send_photos_with_text(
-        bot, chat_id, header, file_ids, reply_markup=reply_markup,
+        bot, chat_id, header, file_ids, reply_markup=reply_markup, user_id=chat_id,
     )
 
 
@@ -47,5 +47,6 @@ async def send_activation_setup_faq(
     """Встроенная FAQ-статья — тот же текст и скриншоты, что после оплаты/пробного."""
     header = _build_faq_header(article)
     return await send_photos_with_text(
-        bot, chat_id, header, load_happ_setup_photos(), reply_markup=reply_markup,
+        bot, chat_id, header, load_happ_setup_photos(),
+        reply_markup=reply_markup, user_id=chat_id,
     )

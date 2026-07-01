@@ -16,6 +16,7 @@ from config.settings import settings
 from db import database as db
 from db.connection import DB_PATH
 from db import bot_settings as bot_settings_db
+from services.test_mode import is_test_mode
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _BACKUP_DIR = _PROJECT_ROOT / "data" / "backups"
@@ -56,7 +57,7 @@ async def _build_manifest() -> dict[str, Any]:
         "db_path": DB_PATH,
         "stats": stats,
         "sync_disabled": sync_disabled,
-        "test_mode": settings.TEST_MODE,
+        "test_mode": await is_test_mode(),
     }
 
 

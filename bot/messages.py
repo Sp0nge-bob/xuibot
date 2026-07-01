@@ -93,6 +93,7 @@ def main_menu_text(
     pending_discount_promo: Optional[Dict[str, Any]] = None,
     pending_discount_expires_at: Optional[str] = None,
     pending_payment_plan_name: Optional[str] = None,
+    test_mode: bool = False,
 ) -> str:
     blocks: list[str] = [user_chip(first_name, username, template=greeting_template)]
 
@@ -124,7 +125,7 @@ def main_menu_text(
             f"   └ Тариф: <b>{pending_payment_plan_name}</b> — нажмите «Вернуться к оплате»"
         )
 
-    footer = "⚠️ <i>Тестовый режим включён</i>" if settings.TEST_MODE else None
+    footer = "⚠️ <i>Тестовый режим включён</i>" if test_mode else None
     return screen(
         f"🌐 <b>{brand_name()}</b>",
         *blocks,
@@ -908,10 +909,18 @@ def admin_debug_menu_text(
     tickets_count: int = 0,
     ticket_messages_count: int = 0,
     users_count: int = 0,
+    test_mode: bool = False,
+    test_mode_source: str = ".env",
+    lockdown_summary: str = "выкл",
+    lockdown_whitelist_count: int = 0,
 ) -> str:
+    test_label = "вкл" if test_mode else "выкл"
     return (
         "🧪 <b>Отладка</b>\n"
         "━━━━━━━━━━━━━━━━\n\n"
+        f"🧪 TEST_MODE: <b>{test_label}</b> (<code>{test_mode_source}</code>)\n"
+        f"🔒 Ограничение доступа: <b>{lockdown_summary}</b>"
+        f" · белый список: <b>{lockdown_whitelist_count}</b>\n"
         f"🎁 Активных пробных подписок: <b>{trial_count}</b>\n"
         f"🎟 Применений промокодов (promo_uses): <b>{promo_uses}</b>\n"
         f"⏳ Ожидающих скидок (pending): <b>{promo_pending}</b>\n"
@@ -919,6 +928,73 @@ def admin_debug_menu_text(
         f"🎫 Тикетов: <b>{tickets_count}</b> · сообщений: <b>{ticket_messages_count}</b>\n"
         f"👥 Пользователей в БД: <b>{users_count}</b>\n\n"
         "Выберите действие:"
+    )
+
+
+def admin_debug_lockdown_menu_text(
+    *,
+    manual_enabled: bool,
+    primary_ok: bool,
+    pending_orders: int = 0,
+    draining: bool = False,
+    whitelist: list,
+) -> str:
+    manual_status = (
+        "🔒 <b>Ручная блокировка включена</b>"
+        if manual_enabled
+        else "🔓 Ручная блокировка выключена"
+    )
+    primary_status = (
+        "🟢 <b>★ Primary доступна</b>"
+        if primary_ok
+        else "🔴 <b>★ Primary недоступна</b> — доступ ограничен автоматически"
+    )
+    lines = [
+        "🔒 <b>Блокировка бота</b>",
+        "━━━━━━━━━━━━━━━━",
+        "",
+        manual_status,
+        primary_status,
+        "",
+    ]
+    if draining:
+        lines += [
+            f"⏳ <b>Ожидание оплат</b> — PENDING-заказов: <b>{pending_orders}</b>",
+            "Новые тарифы и оплаты заблокированы; текущие платежи дорабатываются.",
+            "После завершения всех PENDING — полная блокировка.",
+            "",
+        ]
+    elif manual_enabled and primary_ok:
+        lines += [
+            "Полная блокировка активна (кроме админов и белого списка).",
+            "",
+        ]
+    else:
+        lines += [
+            "При полной блокировке бот недоступен всем пользователям, "
+            "кроме админов и TG ID из белого списка.",
+            "",
+        ]
+    if whitelist:
+        lines.append("<b>Белый список:</b>")
+        for u in whitelist:
+            label = u.get("username") or u.get("first_name") or str(u["tg_id"])
+            if u.get("username") and not str(label).startswith("@"):
+                label = f"@{u['username']}"
+            lines.append(f"• {label} · <code>{u['tg_id']}</code>")
+    else:
+        lines.append("Белый список пуст.")
+    lines.append("")
+    lines.append("Выберите действие:")
+    return "\n".join(lines)
+
+
+def admin_debug_lockdown_add_prompt_text() -> str:
+    return (
+        "➕ <b>Добавить в белый список</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        "Отправьте TG ID пользователя, которому нужен доступ во время блокировки.\n"
+        "Для отмены: кнопка «К блокировке»."
     )
 
 
