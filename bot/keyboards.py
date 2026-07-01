@@ -30,6 +30,13 @@ from ui.theme import (
 )
 
 
+def lockdown_support_kb() -> InlineKeyboardMarkup:
+    """Кнопка поддержки на экране техобслуживания."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=BTN_SUPPORT_SHORT, callback_data="support")],
+    ])
+
+
 def nav_row(
     back_callback: str | None = None,
     *,

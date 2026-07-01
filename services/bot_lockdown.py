@@ -4,6 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from aiogram.types import CallbackQuery, Message, TelegramObject
+
 from config.settings import settings
 from db import bot_settings as bot_settings_db
 from services.primary_gate import is_primary_operational
@@ -18,7 +20,7 @@ def maintenance_message() -> str:
     return screen(
         "🔧 <b>Техническое обслуживание</b>",
         "Бот временно недоступен — проводим плановые работы.",
-        hint="Попробуйте зайти позже. При срочном вопросе — напишите в поддержку.",
+        hint="Попробуйте зайти позже или нажмите «Поддержка» ниже.",
         footer="🙏 <i>Спасибо за понимание</i>",
     )
 
@@ -27,7 +29,7 @@ def primary_unavailable_message() -> str:
     return screen(
         "⚠️ <b>Сервис временно недоступен</b>",
         "Панель VPN сейчас на обслуживании — подключения могут не работать.",
-        hint="Попробуйте позже или напишите в поддержку.",
+        hint="Попробуйте позже или нажмите «Поддержка» ниже.",
     )
 
 
@@ -162,6 +164,31 @@ async def _is_privileged_async(tg_id: int) -> bool:
     if tg_id in settings.BOT_ADMINS:
         return True
     return int(tg_id) in await get_whitelist()
+
+
+async def is_support_interaction_allowed(
+    event: TelegramObject,
+    data: dict[str, Any],
+) -> bool:
+    """Тикеты и переписка с поддержкой доступны даже при полной блокировке."""
+    if isinstance(event, CallbackQuery):
+        cb_data = (event.data or "").strip()
+        if cb_data in ("support", "ticket_create"):
+            return True
+        if cb_data.startswith(("ticket_", "support_from_order:", "refund")):
+            return True
+        return False
+
+    if isinstance(event, Message):
+        from aiogram.fsm.context import FSMContext
+        from bot.states import UserStates
+
+        state: FSMContext | None = data.get("state")
+        if state:
+            current = await state.get_state()
+            if current == UserStates.in_ticket_chat.state:
+                return True
+    return False
 
 
 async def is_user_allowed(tg_id: int) -> bool:
