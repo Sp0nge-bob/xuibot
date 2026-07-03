@@ -96,11 +96,11 @@ async def check_nodes_health_job():
     await apply_primary_health_results(results)
     await process_health_transitions(results)
     if not results:
-        logger.info("Health нод: нет включённых нод")
+        logger.debug("Health нод: нет включённых нод")
         return
     ok = sum(1 for r in results if r.get("ok"))
     if ok == len(results):
-        logger.info("Health нод: {}/{} доступны", ok, len(results))
+        logger.debug("Health нод: {}/{} доступны", ok, len(results))
     else:
         bad = [
             f"{r.get('name') or r.get('node_id')} ({r.get('error') or 'fail'})"
