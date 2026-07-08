@@ -22,16 +22,26 @@ async def _migrate_faq_schema(db) -> None:
 
 
 async def ensure_builtin_faq_articles() -> None:
-    """Встроенные статьи FAQ (создаются один раз при первом запуске)."""
+    """Встроенные статьи FAQ: создаются при первом запуске, текст синхронизируется из кода."""
     from services.fulfillment_text import activation_setup_body
 
+    body = activation_setup_body()
     async with get_db() as db:
         async with db.execute(
             "SELECT id FROM faq_articles WHERE builtin_key = ?",
             (BUILTIN_ACTIVATION_KEY,),
         ) as cur:
-            if await cur.fetchone():
-                return
+            existing = await cur.fetchone()
+
+        if existing:
+            await db.execute(
+                """UPDATE faq_articles
+                   SET title = ?, body = ?, updated_at = CURRENT_TIMESTAMP
+                   WHERE builtin_key = ?""",
+                (BUILTIN_ACTIVATION_TITLE, body, BUILTIN_ACTIVATION_KEY),
+            )
+            await db.commit()
+            return
 
         async with db.execute("SELECT COALESCE(MIN(sort_order), 0) FROM faq_articles") as cur:
             min_sort = int((await cur.fetchone())[0] or 0)
@@ -42,7 +52,7 @@ async def ensure_builtin_faq_articles() -> None:
                VALUES (?, ?, ?, 1, ?, CURRENT_TIMESTAMP)""",
             (
                 BUILTIN_ACTIVATION_TITLE,
-                activation_setup_body(),
+                body,
                 min_sort - 1,
                 BUILTIN_ACTIVATION_KEY,
             ),
