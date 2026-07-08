@@ -13,6 +13,10 @@ from services.admin_diagnostics import (
     format_diagnostics_section,
     format_diagnostics_summary,
 )
+from services.panel_server_status import (
+    format_server_status_short,
+    normalize_server_status_obj,
+)
 
 
 def _base_report(**overrides) -> dict:
@@ -61,6 +65,15 @@ def _base_report(**overrides) -> dict:
                 "error": None,
                 "uptime_24h": 0.99,
                 "checked_live": True,
+                "server_status": normalize_server_status_obj({
+                    "cpu": 12.5,
+                    "mem": {"current": 2147483648, "total": 8589934592},
+                    "swap": {"current": 0, "total": 4294967296},
+                    "disk": {"current": 53687091200, "total": 268435456000},
+                }),
+                "server_status_ok": True,
+                "server_status_error": None,
+                "server_status_checked": True,
             },
         ],
         "fsm": {
@@ -131,12 +144,40 @@ def test_section_store_no_business_stats():
     assert "платных" not in text.lower()
 
 
+def test_summary_shows_node_resources():
+    text = format_diagnostics_summary(_base_report())
+    assert "Ресурсы нод" in text
+    assert "CPU 12.5%" in text
+    assert "RAM 2.0/8.0 GB" in text
+
+
+def test_section_vpn_shows_server_status():
+    text = format_diagnostics_section(_base_report(), "vpn")
+    assert "server/status" in text
+    assert "Swap 0.0/4.0 GB" in text
+
+
+def test_format_server_status_short_from_apistatus_sample():
+    status = normalize_server_status_obj({
+        "cpu": 12.5,
+        "mem": {"current": 2147483648, "total": 8589934592},
+        "swap": {"current": 0, "total": 4294967296},
+        "disk": {"current": 53687091200, "total": 268435456000},
+    })
+    short = format_server_status_short(status)
+    assert "CPU 12.5%" in short
+    assert "Disk 50.0/250.0 GB (20%)" in short
+
+
 def main():
     test_summary_ok()
     test_summary_redis_issue()
     test_recommendations_redis()
     test_section_proc_has_scheduler()
     test_section_store_no_business_stats()
+    test_summary_shows_node_resources()
+    test_section_vpn_shows_server_status()
+    test_format_server_status_short_from_apistatus_sample()
     print("admin diagnostics unit tests: OK")
 
 

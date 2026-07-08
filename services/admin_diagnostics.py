@@ -19,6 +19,10 @@ from db import xui_nodes as nodes_db
 from db.connection import DB_PATH
 from services.fulfillment_queue import fulfillment_queue_status
 from services.node_health import check_all_nodes_health
+from services.panel_server_status import (
+    fetch_all_nodes_server_status,
+    format_server_status_short,
+)
 from services.primary_gate import (
     is_primary_ready,
     primary_unavailable_reason,
@@ -240,6 +244,7 @@ async def collect_diagnostics(
     started = time.monotonic()
 
     nodes_live: list[dict[str, Any]] = []
+    server_status_by_id: dict[int, dict[str, Any]] = {}
     if full_node_check:
         await refresh_primary_ready()
         try:
@@ -327,12 +332,20 @@ async def collect_diagnostics(
                 "detail": _clip(f"{type(e).__name__}: {e}"),
             }
 
+    if full_node_check and nodes_db_list:
+        try:
+            server_status_by_id = await fetch_all_nodes_server_status(nodes_db_list)
+        except Exception as e:
+            logger.exception("Diagnostics server/status failed: {}", e)
+            server_status_by_id = {}
+
     lock = get_polling_lock_info()
     nodes_report: list[dict[str, Any]] = []
     for node in nodes_db_list:
         nid = int(node.get("id") or 0)
         live = live_by_id.get(nid, {})
         ok = live.get("ok") if live else node.get("is_healthy")
+        srv = server_status_by_id.get(nid, {})
         nodes_report.append({
             "id": nid,
             "name": node.get("name") or f"#{nid}",
@@ -343,6 +356,10 @@ async def collect_diagnostics(
             "error": live.get("error") or node.get("last_health_error"),
             "uptime_24h": live.get("uptime_24h"),
             "checked_live": bool(live),
+            "server_status": srv.get("status"),
+            "server_status_ok": srv.get("ok"),
+            "server_status_error": srv.get("error"),
+            "server_status_checked": bool(srv) and not srv.get("skipped"),
         })
 
     local_probe = probes.get("local_webhook") or {}
@@ -680,9 +697,11 @@ def format_diagnostics_summary(report: dict[str, Any]) -> str:
             f"{html.escape(str(fsm.get('backend') or '—').upper())} · "
             f"bot.db <b>{db_file.get('size_mb', 0)}</b> MB"
         ),
-        "",
-        "<i>Нажмите раздел для подробностей</i>",
     ]
+    resource_lines = _format_nodes_resource_lines(report.get("nodes") or [], limit=4)
+    if resource_lines:
+        blocks += ["", "<b>── Ресурсы нод ──</b>", *resource_lines]
+    blocks += ["", "<i>Нажмите раздел для подробностей</i>"]
     return screen("🔍 <b>Диагностика системы</b>", "\n".join(blocks))
 
 
@@ -828,6 +847,31 @@ def _format_web_section(report: dict[str, Any]) -> str:
     return _truncate_telegram(screen("🌐 <b>Webhook</b>", "\n".join(lines)))
 
 
+def _format_nodes_resource_lines(
+    nodes: list[dict[str, Any]],
+    *,
+    limit: int | None = None,
+) -> list[str]:
+    lines: list[str] = []
+    enabled = [n for n in nodes if n.get("is_enabled")]
+    shown = enabled if limit is None else enabled[:limit]
+    for n in shown:
+        star = " ★" if n.get("is_primary") else ""
+        name = html.escape(n.get("name") or "—")
+        if not n.get("server_status_checked"):
+            lines.append(f"⚪{star} {name} — <i>не проверялось</i>")
+            continue
+        if n.get("server_status_ok") is False:
+            err = _clip(str(n.get("server_status_error") or "ошибка"), 50)
+            lines.append(f"🔴{star} {name} — <code>{html.escape(err)}</code>")
+            continue
+        short = format_server_status_short(n.get("server_status"))
+        lines.append(f"{_icon(n.get('ok'))}{star} {name} — {short}")
+    if limit is not None and len(enabled) > limit:
+        lines.append(f"<i>… ещё {len(enabled) - limit} нод</i>")
+    return lines
+
+
 def _format_nodes_lines(nodes: list[dict[str, Any]], *, limit: int | None = None) -> list[str]:
     lines: list[str] = []
     shown = nodes if limit is None else nodes[:limit]
@@ -892,6 +936,9 @@ def _format_vpn_section(report: dict[str, Any]) -> str:
             f"healthy <b>{summary.get('healthy', 0)}</b>/<b>{summary.get('enabled', 0)}</b>"
         ),
         *_format_nodes_lines(nodes, limit=None),
+        "",
+        "<b>── Ресурсы (server/status) ──</b>",
+        *_format_nodes_resource_lines(nodes, limit=None),
     ]
     return _truncate_telegram(screen("🖧 <b>VPN</b>", "\n".join(lines)))
 
