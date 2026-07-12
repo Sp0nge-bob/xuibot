@@ -1119,6 +1119,64 @@ def _admin_order_user_label(order: Dict[str, Any]) -> str:
     return f"<code>{tg_id}</code>" if tg_id else "—"
 
 
+def _admin_order_paid_at(order: Dict[str, Any]) -> str:
+    raw = order.get("paid_at") or order.get("created_at") or ""
+    if not raw:
+        return "—"
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", ""))
+        return dt.strftime("%d.%m.%Y %H:%M")
+    except ValueError:
+        return str(raw)[:16].replace("T", " ")
+
+
+def _admin_order_type_icon(order_type: str | None) -> str:
+    return "🔄" if (order_type or "new") == "extend" else "🆕"
+
+
+def _admin_order_type_label(order_type: str | None) -> str:
+    return "Продление" if (order_type or "new") == "extend" else "Покупка"
+
+
+def _admin_order_extras_line(order: Dict[str, Any]) -> str | None:
+    promo = (order.get("promo_code") or "").strip()
+    discount = int(order.get("discount_amount") or 0)
+    parts: list[str] = []
+    if promo:
+        parts.append(f"🎟 <code>{html.escape(promo)}</code>")
+    elif discount > 0:
+        parts.append(f"👥 −{discount} ₽")
+    if str(order.get("platega_tx_id") or "").startswith("test-"):
+        parts.append("🧪 тест")
+    return " · ".join(parts) if parts else None
+
+
+def _admin_order_list_card(order: Dict[str, Any]) -> str:
+    icon = _admin_order_type_icon(order.get("order_type"))
+    action = _admin_order_type_label(order.get("order_type"))
+    plan = html.escape(str(order.get("plan_name") or "—"))
+    amount = int(order.get("amount") or 0)
+    lines = [
+        f"{icon} <b>#{order.get('id')}</b>  ·  {_admin_order_paid_at(order)}",
+        f"📦 {plan}  ·  {money(amount)}  ·  <i>{action}</i>",
+        f"👤 {_admin_order_user_label(order)}  ·  <code>{order.get('tg_id')}</code>",
+    ]
+    extras = _admin_order_extras_line(order)
+    if extras:
+        lines.append(extras)
+    return "\n".join(lines)
+
+
+def admin_order_button_label(order: Dict[str, Any]) -> str:
+    order_id = int(order["id"])
+    amount = int(order.get("amount") or 0)
+    icon = _admin_order_type_icon(order.get("order_type"))
+    paid = _admin_order_paid_at(order)[:10]
+    plan = (order.get("plan_name") or "—")[:14]
+    label = f"{icon} #{order_id} · {paid} · {amount} ₽ · {plan}"
+    return label[:64]
+
+
 def _admin_order_status_label(status: str | None) -> str:
     mapping = {
         "paid": "✅ оплачен",
@@ -1135,37 +1193,51 @@ def admin_debug_orders_list_text(
     total_paid: int,
     page_size: int,
 ) -> str:
-    lines = [
-        "🧾 <b>Оплаченные заказы</b>",
-        "━━━━━━━━━━━━━━━━",
-        "",
-    ]
+    from ui.theme import SEP
+
     if total_paid == 0:
-        lines.append("Оплаченных заказов в БД нет.")
-    elif not orders:
-        lines.append("На этой странице заказов нет.")
-    else:
-        start = page * page_size + 1
-        end = start + len(orders) - 1
-        lines.append(f"Показаны <b>{start}–{end}</b> из <b>{total_paid}</b>:")
-        lines.append("")
-        for order in orders:
-            paid = (order.get("paid_at") or order.get("created_at") or "")[:16].replace("T", " ")
-            order_type = order.get("order_type") or "new"
-            action = "продление" if order_type == "extend" else "покупка"
-            plan = html.escape(str(order.get("plan_name") or "—"))
-            amount = int(order.get("amount") or 0)
-            lines.append(
-                f"• <b>#{order.get('id')}</b> · {paid} · {action}\n"
-                f"  {_admin_order_user_label(order)} · <code>{order.get('tg_id')}</code>\n"
-                f"  {plan} · <b>{amount} ₽</b>"
-            )
-    return "\n".join(lines)
+        return screen(
+            "💳 <b>Оплаченные заказы</b>",
+            "📭 <i>Оплаченных заказов в БД пока нет.</i>",
+        )
+    if not orders:
+        return screen(
+            "💳 <b>Оплаченные заказы</b>",
+            "На этой странице записей нет.",
+            hint="Вернитесь на предыдущую страницу",
+        )
+
+    start = page * page_size + 1
+    end = start + len(orders) - 1
+    total_pages = max(1, (total_paid + page_size - 1) // page_size)
+    cards: list[str] = []
+    for idx, order in enumerate(orders):
+        if idx > 0:
+            cards.append(SEP)
+        cards.append(_admin_order_list_card(order))
+
+    return screen(
+        "💳 <b>Оплаченные заказы</b>",
+        (
+            f"📄 Страница <b>{page + 1}</b> из <b>{total_pages}</b>  ·  "
+            f"записи <b>{start}–{end}</b> из <b>{total_paid}</b>"
+        ),
+        "\n".join(cards),
+        hint="Нажмите заказ ниже, чтобы открыть подробности",
+    )
 
 
 def admin_debug_order_detail_text(order: Dict[str, Any]) -> str:
-    paid = (order.get("paid_at") or order.get("created_at") or "")[:16].replace("T", " ")
-    created = (order.get("created_at") or "")[:16].replace("T", " ")
+    paid = _admin_order_paid_at(order)
+    created_raw = order.get("created_at") or ""
+    try:
+        created = (
+            datetime.fromisoformat(str(created_raw).replace("Z", "")).strftime("%d.%m.%Y %H:%M")
+            if created_raw
+            else "—"
+        )
+    except ValueError:
+        created = str(created_raw)[:16].replace("T", " ") or "—"
     order_type = order.get("order_type") or "new"
     action = "Продление" if order_type == "extend" else "Покупка"
     method_key = (order.get("payment_method") or "").strip()

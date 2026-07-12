@@ -346,24 +346,25 @@ def admin_debug_orders_list_kb(
     page_size: int,
     total_paid: int,
 ) -> InlineKeyboardMarkup:
+    from bot.messages import admin_order_button_label
+
     rows: list[list[InlineKeyboardButton]] = []
     for order in orders:
         order_id = int(order["id"])
-        amount = int(order.get("amount") or 0)
-        plan = (order.get("plan_name") or "—")[:18]
         rows.append([InlineKeyboardButton(
-            text=f"#{order_id} · {amount} ₽ · {plan}",
+            text=admin_order_button_label(order),
             callback_data=f"adm:debug:orders:view:{order_id}:{page}",
         )])
     nav: list[InlineKeyboardButton] = []
+    total_pages = max(1, (total_paid + page_size - 1) // page_size)
     if page > 0:
         nav.append(InlineKeyboardButton(
-            text="◀️ Назад",
+            text=f"◀️ Стр. {page}/{total_pages}",
             callback_data=f"adm:debug:orders:list:{page - 1}",
         ))
     if (page + 1) * page_size < total_paid:
         nav.append(InlineKeyboardButton(
-            text="Вперёд ▶️",
+            text=f"Стр. {page + 2}/{total_pages} ▶️",
             callback_data=f"adm:debug:orders:list:{page + 1}",
         ))
     if nav:

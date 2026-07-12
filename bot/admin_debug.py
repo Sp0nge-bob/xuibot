@@ -45,7 +45,7 @@ from .ui_helpers import safe_cb_answer, send_or_edit
 
 router = Router()
 
-_ORDERS_PAGE_SIZE = 8
+_ORDERS_PAGE_SIZE = 6
 
 
 async def _orders_stats() -> dict[str, int]:
