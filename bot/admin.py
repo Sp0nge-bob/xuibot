@@ -70,6 +70,17 @@ def _user_label(username: str | None, first_name: str | None, tg_id: int) -> str
     return str(tg_id)
 
 
+async def _trial_issued_at_label(tg_id: int) -> str | None:
+    grant = await trial_db.get_last_trial_grant(tg_id)
+    if grant and grant.get("granted_at"):
+        return str(grant["granted_at"])
+    subs = await db.get_active_subscriptions(tg_id)
+    for sub in subs:
+        if is_trial_email(sub.get("client_email")) and sub.get("start_date"):
+            return str(sub["start_date"])
+    return None
+
+
 def _admin_stats_block(stats: dict[str, int], *, usage_line: str = "") -> str:
     lines = [
         f"👥 Пользователей: <b>{stats['users']}</b>",
@@ -936,7 +947,9 @@ async def msg_admin_trial_reset_search(message: Message, state: FSMContext):
     user = await db.get_or_create_user(tg_id)
     label = _user_label(user.get("username"), user.get("first_name"), tg_id)
     await message.answer(
-        admin_trial_reset_confirm_text(tg_id, label),
+        admin_trial_reset_confirm_text(
+            tg_id, label, issued_at=await _trial_issued_at_label(tg_id),
+        ),
         reply_markup=admin_trial_reset_confirm_kb(tg_id),
     )
 
@@ -951,7 +964,9 @@ async def cb_admin_trial_reset_confirm(cb: CallbackQuery):
     await safe_cb_answer(cb)
     await send_or_edit(
         cb,
-        admin_trial_reset_confirm_text(tg_id, label),
+        admin_trial_reset_confirm_text(
+            tg_id, label, issued_at=await _trial_issued_at_label(tg_id),
+        ),
         admin_trial_reset_confirm_kb(tg_id),
     )
 

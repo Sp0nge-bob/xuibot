@@ -289,7 +289,7 @@ def admin_debug_kb(
         [
             InlineKeyboardButton(
                 text="🧾 Заказы",
-                callback_data="adm:debug:orders_reset",
+                callback_data="adm:debug:orders",
             ),
             InlineKeyboardButton(
                 text="🎫 Тикеты",
@@ -325,13 +325,70 @@ def admin_debug_tickets_reset_confirm_kb() -> InlineKeyboardMarkup:
     ])
 
 
+def admin_debug_orders_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="📋 Оплаченные заказы",
+            callback_data="adm:debug:orders:list:0",
+        )],
+        [InlineKeyboardButton(
+            text="🗑 Сбросить историю",
+            callback_data="adm:debug:orders_reset",
+        )],
+        [InlineKeyboardButton(text="« К отладке", callback_data="adm:debug:enter")],
+    ])
+
+
+def admin_debug_orders_list_kb(
+    orders: list,
+    *,
+    page: int,
+    page_size: int,
+    total_paid: int,
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for order in orders:
+        order_id = int(order["id"])
+        amount = int(order.get("amount") or 0)
+        plan = (order.get("plan_name") or "—")[:18]
+        rows.append([InlineKeyboardButton(
+            text=f"#{order_id} · {amount} ₽ · {plan}",
+            callback_data=f"adm:debug:orders:view:{order_id}:{page}",
+        )])
+    nav: list[InlineKeyboardButton] = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(
+            text="◀️ Назад",
+            callback_data=f"adm:debug:orders:list:{page - 1}",
+        ))
+    if (page + 1) * page_size < total_paid:
+        nav.append(InlineKeyboardButton(
+            text="Вперёд ▶️",
+            callback_data=f"adm:debug:orders:list:{page + 1}",
+        ))
+    if nav:
+        rows.append(nav)
+    rows.append([InlineKeyboardButton(text="« К заказам", callback_data="adm:debug:orders")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_debug_order_detail_kb(*, order_id: int, page: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="« К списку",
+            callback_data=f"adm:debug:orders:list:{page}",
+        )],
+        [InlineKeyboardButton(text="« К заказам", callback_data="adm:debug:orders")],
+    ])
+
+
 def admin_debug_orders_reset_confirm_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="⚠️ Подтвердить удаление",
             callback_data="adm:debug:orders_reset:confirm",
         )],
-        [InlineKeyboardButton(text="« Отмена", callback_data="adm:debug:enter")],
+        [InlineKeyboardButton(text="« Отмена", callback_data="adm:debug:orders")],
     ])
 
 

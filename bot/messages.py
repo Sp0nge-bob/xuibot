@@ -1,4 +1,5 @@
 """Тексты интерфейса бота."""
+import html
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -1070,16 +1071,147 @@ def admin_debug_promo_reset_confirm_text(*, uses_count: int, pending_count: int)
     )
 
 
-def admin_trial_reset_confirm_text(tg_id: int, label: str) -> str:
+def admin_trial_reset_confirm_text(
+    tg_id: int,
+    label: str,
+    *,
+    issued_at: str | None = None,
+) -> str:
+    issued_line = (issued_at or "—")[:16].replace("T", " ")
     return (
         "🔄 <b>Сброс пробного периода</b>\n"
         "━━━━━━━━━━━━━━━━\n\n"
         f"Пользователь: {label}\n"
-        f"TG ID: <code>{tg_id}</code>\n\n"
+        f"TG ID: <code>{tg_id}</code>\n"
+        f"Выдана подписка: <b>{issued_line}</b>\n\n"
         "Будет удалена запись о выдаче пробного периода.\n"
         "Активная пробная подписка (tgfree) будет снята с панели.\n\n"
         "Продолжить?"
     )
+
+
+def admin_debug_orders_menu_text(
+    *,
+    total_count: int,
+    paid_count: int,
+    pending_count: int,
+    failed_count: int,
+) -> str:
+    return (
+        "🧾 <b>Заказы</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        f"Всего в БД: <b>{total_count}</b>\n"
+        f"✅ Оплаченных: <b>{paid_count}</b>\n"
+        f"⏳ Ожидают оплаты: <b>{pending_count}</b>\n"
+        f"❌ Неуспешных: <b>{failed_count}</b>\n\n"
+        "Просмотрите проведённые оплаты или сбросьте всю историю заказов."
+    )
+
+
+def _admin_order_user_label(order: Dict[str, Any]) -> str:
+    username = (order.get("username") or "").strip()
+    first_name = (order.get("first_name") or "").strip()
+    tg_id = order.get("tg_id")
+    if username:
+        return f"@{html.escape(username)}"
+    if first_name:
+        return html.escape(first_name)
+    return f"<code>{tg_id}</code>" if tg_id else "—"
+
+
+def _admin_order_status_label(status: str | None) -> str:
+    mapping = {
+        "paid": "✅ оплачен",
+        "pending": "⏳ ожидает",
+        "failed": "❌ неуспешен",
+    }
+    return mapping.get((status or "").strip(), status or "—")
+
+
+def admin_debug_orders_list_text(
+    orders: list[Dict[str, Any]],
+    *,
+    page: int,
+    total_paid: int,
+    page_size: int,
+) -> str:
+    lines = [
+        "🧾 <b>Оплаченные заказы</b>",
+        "━━━━━━━━━━━━━━━━",
+        "",
+    ]
+    if total_paid == 0:
+        lines.append("Оплаченных заказов в БД нет.")
+    elif not orders:
+        lines.append("На этой странице заказов нет.")
+    else:
+        start = page * page_size + 1
+        end = start + len(orders) - 1
+        lines.append(f"Показаны <b>{start}–{end}</b> из <b>{total_paid}</b>:")
+        lines.append("")
+        for order in orders:
+            paid = (order.get("paid_at") or order.get("created_at") or "")[:16].replace("T", " ")
+            order_type = order.get("order_type") or "new"
+            action = "продление" if order_type == "extend" else "покупка"
+            plan = html.escape(str(order.get("plan_name") or "—"))
+            amount = int(order.get("amount") or 0)
+            lines.append(
+                f"• <b>#{order.get('id')}</b> · {paid} · {action}\n"
+                f"  {_admin_order_user_label(order)} · <code>{order.get('tg_id')}</code>\n"
+                f"  {plan} · <b>{amount} ₽</b>"
+            )
+    return "\n".join(lines)
+
+
+def admin_debug_order_detail_text(order: Dict[str, Any]) -> str:
+    paid = (order.get("paid_at") or order.get("created_at") or "")[:16].replace("T", " ")
+    created = (order.get("created_at") or "")[:16].replace("T", " ")
+    order_type = order.get("order_type") or "new"
+    action = "Продление" if order_type == "extend" else "Покупка"
+    method_key = (order.get("payment_method") or "").strip()
+    method_line = ""
+    if method_key:
+        from config.payments import get_payment_method_by_key
+
+        method = get_payment_method_by_key(method_key)
+        if method:
+            method_line = f"🏦 Способ: {method['emoji']} <b>{method['name']}</b>\n"
+
+    lines = [
+        f"🧾 <b>Заказ #{order.get('id')}</b>",
+        "━━━━━━━━━━━━━━━━",
+        "",
+        f"Статус: <b>{_admin_order_status_label(order.get('status'))}</b>",
+        f"👤 Клиент: {_admin_order_user_label(order)}",
+        f"🆔 TG ID: <code>{order.get('tg_id')}</code>",
+        "",
+        f"📦 {action}: <b>{html.escape(str(order.get('plan_name') or '—'))}</b>",
+        f"💰 Сумма: <b>{int(order.get('amount') or 0)} ₽</b>",
+    ]
+    if order.get("original_amount") and int(order.get("original_amount") or 0) != int(
+        order.get("amount") or 0
+    ):
+        lines.append(f"💵 Без скидки: <b>{int(order['original_amount'])} ₽</b>")
+    if method_line:
+        lines.append(method_line.rstrip())
+    promo = (order.get("promo_code") or "").strip()
+    discount = int(order.get("discount_amount") or 0)
+    if promo:
+        lines.append(f"🎟 Промокод: <code>{html.escape(promo)}</code>")
+    elif discount > 0:
+        lines.append(f"👥 Реферальная скидка: <b>−{discount} ₽</b>")
+    lines += [
+        "",
+        f"🆔 TX Platega: <code>{order.get('platega_tx_id') or '—'}</code>",
+        f"📱 Подписка: <code>{order.get('sub_display_name') or '—'}</code>",
+        f"🔗 subscription_id: <code>{order.get('subscription_id') or '—'}</code>",
+        "",
+        f"🕐 Создан: <b>{created or '—'}</b>",
+        f"🕐 Оплачен: <b>{paid or '—'}</b>",
+    ]
+    if str(order.get("platega_tx_id") or "").startswith("test-"):
+        lines += ["", "⚠️ <i>Тестовый режим — оплата симулирована</i>"]
+    return "\n".join(lines)
 
 
 def _order_payment_lines(order: Dict[str, Any]) -> list[str]:

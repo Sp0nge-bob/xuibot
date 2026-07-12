@@ -313,6 +313,43 @@ async def count_orders() -> int:
             return int((await cur.fetchone())[0])
 
 
+async def count_orders_by_status(status: str) -> int:
+    async with get_db() as db:
+        await _apply_pragmas(db)
+        async with db.execute(
+            "SELECT COUNT(*) FROM orders WHERE status = ?",
+            (status,),
+        ) as cur:
+            return int((await cur.fetchone())[0])
+
+
+async def list_orders(
+    *,
+    status: str | None = None,
+    limit: int = 10,
+    offset: int = 0,
+) -> List[Dict[str, Any]]:
+    """Заказы с данными пользователя (для админ-отладки)."""
+    sql = """
+        SELECT o.*, u.username, u.first_name
+        FROM orders o
+        LEFT JOIN users u ON u.tg_id = o.tg_id
+    """
+    params: list[Any] = []
+    if status:
+        sql += " WHERE o.status = ?"
+        params.append(status)
+    sql += """
+        ORDER BY COALESCE(o.paid_at, o.created_at) DESC, o.id DESC
+        LIMIT ? OFFSET ?
+    """
+    params.extend([limit, offset])
+    async with get_db() as db:
+        await _apply_pragmas(db)
+        async with db.execute(sql, params) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
+
 async def reset_all_orders() -> dict[str, int]:
     """Удалить все заказы и отвязать ссылки (подписки, тикеты, промо)."""
     async with get_db() as db:

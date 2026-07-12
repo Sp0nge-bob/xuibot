@@ -22,6 +22,9 @@ from .admin_keyboards import (
     admin_back_kb,
     admin_debug_entry_confirm_kb,
     admin_debug_kb,
+    admin_debug_order_detail_kb,
+    admin_debug_orders_kb,
+    admin_debug_orders_list_kb,
     admin_debug_orders_reset_confirm_kb,
     admin_debug_promo_reset_confirm_kb,
     admin_debug_tickets_reset_confirm_kb,
@@ -30,6 +33,9 @@ from .admin_keyboards import (
 from .messages import (
     admin_debug_entry_confirm_text,
     admin_debug_menu_text,
+    admin_debug_order_detail_text,
+    admin_debug_orders_list_text,
+    admin_debug_orders_menu_text,
     admin_debug_orders_reset_confirm_text,
     admin_debug_promo_reset_confirm_text,
     admin_debug_tickets_reset_confirm_text,
@@ -38,6 +44,21 @@ from .messages import (
 from .ui_helpers import safe_cb_answer, send_or_edit
 
 router = Router()
+
+_ORDERS_PAGE_SIZE = 8
+
+
+async def _orders_stats() -> dict[str, int]:
+    total = await db.count_orders()
+    paid = await db.count_orders_by_status("paid")
+    pending = await db.count_orders_by_status("pending")
+    failed = await db.count_orders_by_status("failed")
+    return {
+        "total": total,
+        "paid": paid,
+        "pending": pending,
+        "failed": failed,
+    }
 
 
 async def _debug_kb():
@@ -160,6 +181,80 @@ async def cb_admin_debug_promos_reset(cb: CallbackQuery):
         "Счётчики <code>used_count</code> обнулены."
     )
     await send_or_edit(cb, text, await _debug_kb())
+
+
+@router.callback_query(F.data == "adm:debug:orders")
+async def cb_admin_debug_orders_menu(cb: CallbackQuery):
+    if not is_debug_admin(cb.from_user.id):
+        return
+
+    stats = await _orders_stats()
+    await safe_cb_answer(cb)
+    await send_or_edit(
+        cb,
+        admin_debug_orders_menu_text(
+            total_count=stats["total"],
+            paid_count=stats["paid"],
+            pending_count=stats["pending"],
+            failed_count=stats["failed"],
+        ),
+        admin_debug_orders_kb(),
+    )
+
+
+@router.callback_query(F.data.startswith("adm:debug:orders:list:"))
+async def cb_admin_debug_orders_list(cb: CallbackQuery):
+    if not is_debug_admin(cb.from_user.id):
+        return
+
+    page = int(cb.data.split(":")[-1])
+    total_paid = await db.count_orders_by_status("paid")
+    orders = await db.list_orders(
+        status="paid",
+        limit=_ORDERS_PAGE_SIZE,
+        offset=page * _ORDERS_PAGE_SIZE,
+    )
+    await safe_cb_answer(cb)
+    await send_or_edit(
+        cb,
+        admin_debug_orders_list_text(
+            orders,
+            page=page,
+            total_paid=total_paid,
+            page_size=_ORDERS_PAGE_SIZE,
+        ),
+        admin_debug_orders_list_kb(
+            orders,
+            page=page,
+            page_size=_ORDERS_PAGE_SIZE,
+            total_paid=total_paid,
+        ),
+    )
+
+
+@router.callback_query(F.data.startswith("adm:debug:orders:view:"))
+async def cb_admin_debug_order_detail(cb: CallbackQuery):
+    if not is_debug_admin(cb.from_user.id):
+        return
+
+    parts = cb.data.split(":")
+    order_id = int(parts[4])
+    page = int(parts[5]) if len(parts) > 5 else 0
+    order = await db.get_order_by_id(order_id)
+    if not order:
+        await safe_cb_answer(cb, "Заказ не найден", show_alert=True)
+        return
+
+    user = await db.get_user(int(order["tg_id"])) if order.get("tg_id") else None
+    if user:
+        order = {**order, "username": user.get("username"), "first_name": user.get("first_name")}
+
+    await safe_cb_answer(cb)
+    await send_or_edit(
+        cb,
+        admin_debug_order_detail_text(order),
+        admin_debug_order_detail_kb(order_id=order_id, page=page),
+    )
 
 
 @router.callback_query(F.data == "adm:debug:orders_reset")
