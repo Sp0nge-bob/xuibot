@@ -265,6 +265,43 @@ async def get_order_by_id(order_id: int) -> Optional[Dict[str, Any]]:
             return dict(row) if row else None
 
 
+async def get_subscription_by_order_id(order_id: int) -> Optional[Dict[str, Any]]:
+    """Подписка, созданная этим заказом (subscriptions.order_id)."""
+    async with get_db() as db:
+        await _apply_pragmas(db)
+        async with db.execute(
+            "SELECT * FROM subscriptions WHERE order_id = ? ORDER BY id DESC LIMIT 1",
+            (order_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
+async def resolve_subscription_for_order(order: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Связь заказ ↔ подписка: orders.subscription_id или subscriptions.order_id."""
+    if not order:
+        return None
+    sub_id = order.get("subscription_id")
+    if sub_id:
+        sub = await get_subscription_by_id(int(sub_id))
+        if sub:
+            return sub
+    order_id = order.get("id")
+    if order_id:
+        return await get_subscription_by_order_id(int(order_id))
+    return None
+
+
+async def set_order_subscription_id(order_id: int, subscription_id: int) -> None:
+    async with get_db() as db:
+        await _apply_pragmas(db)
+        await db.execute(
+            "UPDATE orders SET subscription_id = ? WHERE id = ?",
+            (subscription_id, order_id),
+        )
+        await db.commit()
+
+
 async def count_users() -> int:
     async with get_db() as db:
         await _apply_pragmas(db)

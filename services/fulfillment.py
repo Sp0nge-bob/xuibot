@@ -63,6 +63,8 @@ async def fulfill_paid_order(order: dict) -> FulfillmentResult:
         log_context=f"Order {order['id']}",
     )
     if result.subscription_id:
+        if order.get("id"):
+            await db.set_order_subscription_id(int(order["id"]), int(result.subscription_id))
         from services.referral import (
             apply_pending_referral_days_for_user,
             process_referral_rewards_for_order,

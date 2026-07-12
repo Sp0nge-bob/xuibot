@@ -82,10 +82,24 @@ def _parse_orders_msg_cb(data: str) -> tuple[str, int, int]:
 async def _enrich_order(order: dict) -> dict:
     if not order:
         return order
-    user = await db.get_user(int(order["tg_id"])) if order.get("tg_id") else None
-    if user:
-        return {**order, "username": user.get("username"), "first_name": user.get("first_name")}
-    return order
+    enriched = dict(order)
+    if order.get("tg_id"):
+        user = await db.get_user(int(order["tg_id"]))
+        if user:
+            enriched.update(
+                username=user.get("username"),
+                first_name=user.get("first_name"),
+            )
+    sub = await db.resolve_subscription_for_order(order)
+    if sub:
+        enriched.update(
+            subscription_id=sub["id"],
+            subscription_email=sub.get("client_email"),
+            subscription_display_name=sub.get("display_name"),
+            subscription_active=bool(sub.get("is_active")),
+            subscription_end_date=sub.get("end_date"),
+        )
+    return enriched
 
 
 async def _orders_stats() -> dict[str, int]:

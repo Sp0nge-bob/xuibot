@@ -1259,6 +1259,29 @@ def admin_debug_order_user_message_prompt_text(order: Dict[str, Any]) -> str:
     )
 
 
+def _admin_order_subscription_lines(order: Dict[str, Any]) -> list[str]:
+    sub_id = order.get("subscription_id")
+    if not sub_id:
+        return ["🔗 Подписка: <i>не привязана</i>"]
+    email = html.escape(str(order.get("subscription_email") or "—"))
+    active = order.get("subscription_active")
+    state = "🟢 активна" if active else "⚪ неактивна"
+    display = html.escape(
+        str(order.get("subscription_display_name") or order.get("sub_display_name") or "—")
+    )
+    end_raw = order.get("subscription_end_date")
+    end_s = "—"
+    if end_raw:
+        try:
+            end_s = datetime.fromisoformat(str(end_raw).replace("Z", "")).strftime("%d.%m.%Y")
+        except ValueError:
+            end_s = str(end_raw)[:10]
+    return [
+        f"🔗 Подписка: <b>#{sub_id}</b> · <code>{email}</code> · {state}",
+        f"📱 Название: <b>{display}</b> · до <b>{end_s}</b>",
+    ]
+
+
 def admin_debug_order_detail_text(order: Dict[str, Any]) -> str:
     paid = _admin_order_paid_at(order)
     created_raw = order.get("created_at") or ""
@@ -1307,8 +1330,7 @@ def admin_debug_order_detail_text(order: Dict[str, Any]) -> str:
     lines += [
         "",
         f"🆔 TX Platega: <code>{order.get('platega_tx_id') or '—'}</code>",
-        f"📱 Подписка: <code>{order.get('sub_display_name') or '—'}</code>",
-        f"🔗 subscription_id: <code>{order.get('subscription_id') or '—'}</code>",
+        *_admin_order_subscription_lines(order),
         "",
         f"🕐 Создан: <b>{created or '—'}</b>",
     ]
