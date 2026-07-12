@@ -325,11 +325,16 @@ def admin_debug_tickets_reset_confirm_kb() -> InlineKeyboardMarkup:
     ])
 
 
-def admin_debug_orders_kb() -> InlineKeyboardMarkup:
+def admin_debug_orders_kb(*, failed_count: int = 0) -> InlineKeyboardMarkup:
+    failed_label = f"❌ Неудачные ({failed_count})" if failed_count else "❌ Неудачные"
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="📋 Оплаченные заказы",
-            callback_data="adm:debug:orders:list:0",
+            callback_data="adm:debug:orders:list:paid:0",
+        )],
+        [InlineKeyboardButton(
+            text=failed_label,
+            callback_data="adm:debug:orders:list:failed:0",
         )],
         [InlineKeyboardButton(
             text="🗑 Сбросить историю",
@@ -342,9 +347,10 @@ def admin_debug_orders_kb() -> InlineKeyboardMarkup:
 def admin_debug_orders_list_kb(
     orders: list,
     *,
+    status: str,
     page: int,
     page_size: int,
-    total_paid: int,
+    total_count: int,
 ) -> InlineKeyboardMarkup:
     from bot.messages import admin_order_button_label
 
@@ -353,19 +359,19 @@ def admin_debug_orders_list_kb(
         order_id = int(order["id"])
         rows.append([InlineKeyboardButton(
             text=admin_order_button_label(order),
-            callback_data=f"adm:debug:orders:view:{order_id}:{page}",
+            callback_data=f"adm:debug:orders:view:{status}:{order_id}:{page}",
         )])
     nav: list[InlineKeyboardButton] = []
-    total_pages = max(1, (total_paid + page_size - 1) // page_size)
+    total_pages = max(1, (total_count + page_size - 1) // page_size)
     if page > 0:
         nav.append(InlineKeyboardButton(
             text=f"◀️ Стр. {page}/{total_pages}",
-            callback_data=f"adm:debug:orders:list:{page - 1}",
+            callback_data=f"adm:debug:orders:list:{status}:{page - 1}",
         ))
-    if (page + 1) * page_size < total_paid:
+    if (page + 1) * page_size < total_count:
         nav.append(InlineKeyboardButton(
             text=f"Стр. {page + 2}/{total_pages} ▶️",
-            callback_data=f"adm:debug:orders:list:{page + 1}",
+            callback_data=f"adm:debug:orders:list:{status}:{page + 1}",
         ))
     if nav:
         rows.append(nav)
@@ -373,11 +379,39 @@ def admin_debug_orders_list_kb(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def admin_debug_order_detail_kb(*, order_id: int, page: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
+def admin_debug_order_detail_kb(
+    *,
+    order_id: int,
+    status: str,
+    page: int,
+    can_message: bool = False,
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if can_message:
+        rows.append([InlineKeyboardButton(
+            text="💬 Написать клиенту",
+            callback_data=f"adm:debug:orders:msg:{status}:{order_id}:{page}",
+        )])
+    rows += [
         [InlineKeyboardButton(
             text="« К списку",
-            callback_data=f"adm:debug:orders:list:{page}",
+            callback_data=f"adm:debug:orders:list:{status}:{page}",
+        )],
+        [InlineKeyboardButton(text="« К заказам", callback_data="adm:debug:orders")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_debug_order_message_kb(
+    *,
+    order_id: int,
+    status: str,
+    page: int,
+) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="« К заказу",
+            callback_data=f"adm:debug:orders:view:{status}:{order_id}:{page}",
         )],
         [InlineKeyboardButton(text="« К заказам", callback_data="adm:debug:orders")],
     ])

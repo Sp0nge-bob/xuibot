@@ -34,6 +34,7 @@ class AdminStates(StatesGroup):
     waiting_terms_of_service_url = State()
     waiting_backup_interval = State()
     waiting_lockdown_whitelist = State()
+    in_order_user_message = State()
 
 
 class AdminPricingStates(StatesGroup):

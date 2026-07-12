@@ -1,6 +1,7 @@
 """Админские инструменты отладки."""
 from aiogram import Router, F
-from aiogram.types import CallbackQuery
+from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, Message
 from loguru import logger
 
 from db import database as db
@@ -23,6 +24,7 @@ from .admin_keyboards import (
     admin_debug_entry_confirm_kb,
     admin_debug_kb,
     admin_debug_order_detail_kb,
+    admin_debug_order_message_kb,
     admin_debug_orders_kb,
     admin_debug_orders_list_kb,
     admin_debug_orders_reset_confirm_kb,
@@ -34,6 +36,8 @@ from .messages import (
     admin_debug_entry_confirm_text,
     admin_debug_menu_text,
     admin_debug_order_detail_text,
+    admin_debug_order_user_message_prompt_text,
+    admin_debug_order_user_message_to_client,
     admin_debug_orders_list_text,
     admin_debug_orders_menu_text,
     admin_debug_orders_reset_confirm_text,
@@ -41,11 +45,47 @@ from .messages import (
     admin_debug_tickets_reset_confirm_text,
     admin_debug_users_reset_confirm_text,
 )
+from .states import AdminStates
 from .ui_helpers import safe_cb_answer, send_or_edit
 
 router = Router()
 
 _ORDERS_PAGE_SIZE = 6
+_ORDER_STATUSES = frozenset({"paid", "failed"})
+
+
+def _parse_orders_list_cb(data: str) -> tuple[str, int]:
+    parts = (data or "").split(":")
+    if len(parts) >= 6 and parts[4] in _ORDER_STATUSES:
+        return parts[4], int(parts[5])
+    if len(parts) >= 5:
+        return "paid", int(parts[4])
+    return "paid", 0
+
+
+def _parse_orders_view_cb(data: str) -> tuple[str, int, int]:
+    parts = (data or "").split(":")
+    if len(parts) >= 7 and parts[4] in _ORDER_STATUSES:
+        return parts[4], int(parts[5]), int(parts[6])
+    if len(parts) >= 6:
+        return "paid", int(parts[4]), int(parts[5])
+    return "paid", 0, 0
+
+
+def _parse_orders_msg_cb(data: str) -> tuple[str, int, int]:
+    parts = (data or "").split(":")
+    if len(parts) >= 7 and parts[4] in _ORDER_STATUSES:
+        return parts[4], int(parts[5]), int(parts[6])
+    return "failed", 0, 0
+
+
+async def _enrich_order(order: dict) -> dict:
+    if not order:
+        return order
+    user = await db.get_user(int(order["tg_id"])) if order.get("tg_id") else None
+    if user:
+        return {**order, "username": user.get("username"), "first_name": user.get("first_name")}
+    return order
 
 
 async def _orders_stats() -> dict[str, int]:
@@ -198,19 +238,20 @@ async def cb_admin_debug_orders_menu(cb: CallbackQuery):
             pending_count=stats["pending"],
             failed_count=stats["failed"],
         ),
-        admin_debug_orders_kb(),
+        admin_debug_orders_kb(failed_count=stats["failed"]),
     )
 
 
 @router.callback_query(F.data.startswith("adm:debug:orders:list:"))
-async def cb_admin_debug_orders_list(cb: CallbackQuery):
+async def cb_admin_debug_orders_list(cb: CallbackQuery, state: FSMContext):
     if not is_debug_admin(cb.from_user.id):
         return
 
-    page = int(cb.data.split(":")[-1])
-    total_paid = await db.count_orders_by_status("paid")
+    await state.set_state(None)
+    status, page = _parse_orders_list_cb(cb.data or "")
+    total_count = await db.count_orders_by_status(status)
     orders = await db.list_orders(
-        status="paid",
+        status=status,
         limit=_ORDERS_PAGE_SIZE,
         offset=page * _ORDERS_PAGE_SIZE,
     )
@@ -219,41 +260,134 @@ async def cb_admin_debug_orders_list(cb: CallbackQuery):
         cb,
         admin_debug_orders_list_text(
             orders,
+            status=status,
             page=page,
-            total_paid=total_paid,
+            total_count=total_count,
             page_size=_ORDERS_PAGE_SIZE,
         ),
         admin_debug_orders_list_kb(
             orders,
+            status=status,
             page=page,
             page_size=_ORDERS_PAGE_SIZE,
-            total_paid=total_paid,
+            total_count=total_count,
         ),
     )
 
 
 @router.callback_query(F.data.startswith("adm:debug:orders:view:"))
-async def cb_admin_debug_order_detail(cb: CallbackQuery):
+async def cb_admin_debug_order_detail(cb: CallbackQuery, state: FSMContext):
     if not is_debug_admin(cb.from_user.id):
         return
 
-    parts = cb.data.split(":")
-    order_id = int(parts[4])
-    page = int(parts[5]) if len(parts) > 5 else 0
-    order = await db.get_order_by_id(order_id)
+    await state.set_state(None)
+    status, order_id, page = _parse_orders_view_cb(cb.data or "")
+    order = await _enrich_order(await db.get_order_by_id(order_id))
     if not order:
         await safe_cb_answer(cb, "Заказ не найден", show_alert=True)
         return
 
-    user = await db.get_user(int(order["tg_id"])) if order.get("tg_id") else None
-    if user:
-        order = {**order, "username": user.get("username"), "first_name": user.get("first_name")}
-
+    can_message = (
+        status == "failed"
+        and (order.get("status") or "").strip() == "failed"
+        and bool(order.get("tg_id"))
+    )
     await safe_cb_answer(cb)
     await send_or_edit(
         cb,
         admin_debug_order_detail_text(order),
-        admin_debug_order_detail_kb(order_id=order_id, page=page),
+        admin_debug_order_detail_kb(
+            order_id=order_id,
+            status=status,
+            page=page,
+            can_message=can_message,
+        ),
+    )
+
+
+@router.callback_query(F.data.startswith("adm:debug:orders:msg:"))
+async def cb_admin_debug_order_message_start(cb: CallbackQuery, state: FSMContext):
+    if not is_debug_admin(cb.from_user.id):
+        return
+
+    status, order_id, page = _parse_orders_msg_cb(cb.data or "")
+    order = await _enrich_order(await db.get_order_by_id(order_id))
+    if not order:
+        await safe_cb_answer(cb, "Заказ не найден", show_alert=True)
+        return
+    if (order.get("status") or "").strip() != "failed":
+        await safe_cb_answer(cb, "Сообщение доступно только для неудачных заказов", show_alert=True)
+        return
+    if not order.get("tg_id"):
+        await safe_cb_answer(cb, "У заказа нет TG ID", show_alert=True)
+        return
+
+    await state.set_state(AdminStates.in_order_user_message)
+    await state.update_data(
+        order_user_msg_order_id=order_id,
+        order_user_msg_status=status,
+        order_user_msg_page=page,
+    )
+    await safe_cb_answer(cb)
+    await send_or_edit(
+        cb,
+        admin_debug_order_user_message_prompt_text(order),
+        admin_debug_order_message_kb(order_id=order_id, status=status, page=page),
+    )
+
+
+@router.message(AdminStates.in_order_user_message)
+async def msg_admin_debug_order_user_message(message: Message, state: FSMContext):
+    if not is_debug_admin(message.from_user.id):
+        return
+
+    data = await state.get_data()
+    order_id = int(data.get("order_user_msg_order_id") or 0)
+    status = str(data.get("order_user_msg_status") or "failed")
+    page = int(data.get("order_user_msg_page") or 0)
+    if not order_id:
+        await state.set_state(None)
+        await message.answer("Сессия истекла. Откройте заказ снова.")
+        return
+
+    raw = (message.text or "").strip()
+    if not raw:
+        await message.answer("Отправьте текстовое сообщение.")
+        return
+    if raw.startswith("/"):
+        cmd = raw.split()[0].split("@")[0].lower()
+        if cmd == "/admin":
+            await state.set_state(None)
+            from bot.admin import _admin_menu_text, admin_menu_kb
+            await message.answer(await _admin_menu_text(), reply_markup=admin_menu_kb())
+        return
+
+    order = await _enrich_order(await db.get_order_by_id(order_id))
+    if not order or (order.get("status") or "").strip() != "failed":
+        await state.set_state(None)
+        await message.answer("❌ Заказ не найден или уже не в статусе failed.")
+        return
+
+    tg_id = int(order["tg_id"])
+    text = admin_debug_order_user_message_to_client(order, raw)
+    try:
+        from bot import bot as tg_bot
+        await tg_bot.send_message(tg_id, text)
+    except Exception as e:
+        logger.warning("Failed order message to {}: {}", tg_id, e)
+        await message.answer(
+            f"❌ Не удалось отправить: <code>{type(e).__name__}</code>",
+            reply_markup=admin_debug_order_message_kb(
+                order_id=order_id, status=status, page=page,
+            ),
+        )
+        return
+
+    await message.answer(
+        f"✅ Сообщение отправлено клиенту <code>{tg_id}</code>",
+        reply_markup=admin_debug_order_message_kb(
+            order_id=order_id, status=status, page=page,
+        ),
     )
 
 
