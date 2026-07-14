@@ -72,6 +72,52 @@ dp.include_router(faq_router)
 dp.include_router(policy_router)
 
 
+async def _background_node_startup(primary_result: dict) -> None:
+    """Health нод, sync и воркеры — не блокирует polling."""
+    try:
+        await asyncio.wait_for(
+            initialize_nodes_at_startup(
+                primary_result=primary_result,
+                background=True,
+            ),
+            timeout=120,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Node startup (background): таймаут 120s")
+    except Exception as e:
+        logger.exception("Node startup (background) failed: {}", e)
+
+    try:
+        await run_full_nodes_sync(source="startup")
+    except Exception as e:
+        logger.exception("Стартовая синхронизация нод (background) failed: {}", e)
+
+    try:
+        await start_secondary_sync_workers()
+    except Exception as e:
+        logger.exception("Secondary sync workers (background) failed: {}", e)
+
+
+async def _blocking_node_startup(primary_result: dict) -> None:
+    """Старое поведение: ждать все ноды до polling (STARTUP_BLOCK_ON_ALL_NODES=true)."""
+    try:
+        await asyncio.wait_for(
+            initialize_nodes_at_startup(primary_result=primary_result, background=False),
+            timeout=90,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Node startup: таймаут 90s — вторичные ноды не полностью инициализированы")
+    except Exception as e:
+        logger.exception("Node startup failed: {}", e)
+
+    try:
+        await run_full_nodes_sync(source="startup")
+    except Exception as e:
+        logger.exception("Стартовая синхронизация нод failed: {}", e)
+
+    await start_secondary_sync_workers()
+
+
 async def start_bot():
     """Запуск бота с проверкой токена и polling."""
     import asyncio
@@ -85,7 +131,10 @@ async def start_bot():
     from bot.polling_lock import release_polling_lock
 
     try:
-        await asyncio.wait_for(ensure_primary_ready_at_startup(), timeout=60)
+        primary_result = await asyncio.wait_for(
+            ensure_primary_ready_at_startup(),
+            timeout=60,
+        )
     except asyncio.TimeoutError as e:
         release_polling_lock()
         raise RuntimeError(
@@ -99,27 +148,17 @@ async def start_bot():
     start_scheduler()
     await reschedule_backup_job()
 
-    try:
-        await asyncio.wait_for(initialize_nodes_at_startup(), timeout=90)
-    except asyncio.TimeoutError:
-        logger.warning("Node startup: таймаут 90s — вторичные ноды не полностью инициализированы")
-    except Exception as e:
-        logger.exception("Node startup failed: {}", e)
+    if settings.STARTUP_BLOCK_ON_ALL_NODES:
+        await _blocking_node_startup(primary_result)
+
+    async def _delete_webhook_safe() -> None:
+        try:
+            await bot.delete_webhook(drop_pending_updates=False)
+        except Exception as e:
+            logger.warning("delete_webhook: {}", e)
 
     try:
-        await run_full_nodes_sync(source="startup")
-    except Exception as e:
-        logger.exception("Стартовая синхронизация нод failed: {}", e)
-
-    await start_secondary_sync_workers()
-
-    try:
-        await bot.delete_webhook(drop_pending_updates=False)
-    except Exception as e:
-        logger.warning("delete_webhook: {}", e)
-
-    try:
-        me = await bot.get_me()
+        _, me = await asyncio.gather(_delete_webhook_safe(), bot.get_me())
         logger.info("Подключён @{} ({})", me.username, me.id)
         from bot.commands import setup_bot_commands
 
@@ -127,8 +166,6 @@ async def start_bot():
     except Exception as e:
         logger.error("Ошибка get_me(): {}: {}", type(e).__name__, e)
         logger.error("Проверь BOT_TOKEN в .env и перезапусти бота.")
-        from bot.polling_lock import release_polling_lock
-
         release_polling_lock()
         return
 
@@ -141,7 +178,7 @@ async def start_bot():
 
     try:
         await configure_dispatcher_storage(dp)
-    except RuntimeError as e:
+    except RuntimeError:
         release_polling_lock()
         raise
 
@@ -153,6 +190,12 @@ async def start_bot():
         await send_pending_reboot_notification(bot)
     except Exception as e:
         logger.error("Reboot startup notify failed: {}", e)
+
+    if not settings.STARTUP_BLOCK_ON_ALL_NODES:
+        asyncio.create_task(
+            _background_node_startup(primary_result),
+            name="node_startup_bg",
+        )
 
     try:
         await dp.start_polling(

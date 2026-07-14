@@ -169,6 +169,10 @@ async def get_api_for_node(node: dict, *, force_new: bool = False) -> AsyncApi:
             logger.info("Connected to 3x-ui [{}] at {}", name, host)
         else:
             logger.debug("Reconnected to 3x-ui [{}] at {}", name, host)
+        try:
+            await ensure_bot_group_on_node(api, node_id)
+        except Exception as e:
+            logger.warning("ensure_bot_group [{}]: {}", name, e)
     return _apis[node_id]
 
 

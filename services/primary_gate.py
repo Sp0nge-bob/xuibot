@@ -77,7 +77,7 @@ async def is_primary_operational(*, max_age_sec: float = 30.0) -> bool:
     return _ready
 
 
-async def ensure_primary_ready_at_startup() -> None:
+async def ensure_primary_ready_at_startup() -> dict[str, Any]:
     """Жёсткая проверка перед стартом процесса. Неудача → RuntimeError."""
     primary = await _primary_node()
     if not primary:
@@ -98,7 +98,7 @@ async def ensure_primary_ready_at_startup() -> None:
             primary.get("name"),
             result.get("latency_ms"),
         )
-        return
+        return result
 
     err = str(result.get("error") or "недоступна")
     _set_state(ok=False, error=err)
