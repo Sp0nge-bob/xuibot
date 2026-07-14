@@ -17,16 +17,12 @@ from config.settings import settings
 from db import bot_settings as bot_settings_db
 from db import xui_nodes as nodes_db
 from db.connection import DB_PATH
+from services.diagnostics_nodes import probe_all_nodes_for_diagnostics
 from services.fulfillment_queue import fulfillment_queue_status
-from services.node_health import check_all_nodes_health
-from services.panel_server_status import (
-    fetch_all_nodes_server_status,
-    format_server_status_short,
-)
+from services.panel_server_status import format_server_status_short
 from services.primary_gate import (
     is_primary_ready,
     primary_unavailable_reason,
-    refresh_primary_ready,
 )
 from services.process_stats import fetch_bot_load_block
 from services.secondary_node_notice import has_unhealthy_secondary_node
@@ -235,25 +231,15 @@ def _fulfillment_view(report: dict[str, Any]) -> tuple[bool | None, str]:
     return False, "нет связи с app.py"
 
 
-async def collect_diagnostics(
+async def _collect_diagnostics_impl(
     *,
     bot: Any = None,
     full_node_check: bool = True,
 ) -> dict[str, Any]:
-    """Технический отчёт для экрана «Диагностика»."""
+    """Внутренний сбор отчёта (без общего таймаута)."""
     started = time.monotonic()
 
-    nodes_live: list[dict[str, Any]] = []
-    server_status_by_id: dict[int, dict[str, Any]] = {}
-    if full_node_check:
-        await refresh_primary_ready()
-        try:
-            nodes_live = await check_all_nodes_health()
-        except Exception as e:
-            logger.exception("Diagnostics node health failed: {}", e)
-            nodes_live = []
-
-    live_by_id = {int(r.get("node_id") or 0): r for r in nodes_live if r.get("node_id")}
+    probe_by_id: dict[int, dict[str, Any]] = {}
 
     local_health_url = f"http://127.0.0.1:{settings.WEBHOOK_PORT}/health"
     public_health_url = _public_health_url()
@@ -313,39 +299,75 @@ async def collect_diagnostics(
     fsm_info = _unwrap(7, {"backend": "memory", "ok": True, "detail": "—"})
     process_load_html = _unwrap(8, "") or ""
 
-    tg_info: dict[str, Any] = {"ok": None, "detail": "не проверялось"}
-    if bot is not None:
+    async def _telegram_probe() -> dict[str, Any]:
+        if bot is None:
+            return {"ok": None, "detail": "не проверялось"}
         tg_started = time.monotonic()
         try:
-            me = await bot.get_me()
+            me = await asyncio.wait_for(bot.get_me(), timeout=8.0)
             latency_ms = int((time.monotonic() - tg_started) * 1000)
-            tg_info = {
+            return {
                 "ok": True,
                 "latency_ms": latency_ms,
                 "detail": f"@{me.username}" if me.username else str(me.id),
             }
         except Exception as e:
             latency_ms = int((time.monotonic() - tg_started) * 1000)
-            tg_info = {
+            return {
                 "ok": False,
                 "latency_ms": latency_ms,
                 "detail": _clip(f"{type(e).__name__}: {e}"),
             }
 
-    if full_node_check and nodes_db_list:
-        try:
-            server_status_by_id = await fetch_all_nodes_server_status(nodes_db_list)
-        except Exception as e:
-            logger.exception("Diagnostics server/status failed: {}", e)
-            server_status_by_id = {}
+    async def _nodes_probe() -> list[dict[str, Any]]:
+        if not full_node_check or not nodes_db_list:
+            return []
+        enabled_count = len([n for n in nodes_db_list if n.get("is_enabled")])
+        node_budget = max(5.0, float(settings.DIAGNOSTICS_TOTAL_TIMEOUT_SEC) - 10.0)
+        per_node = min(
+            float(settings.DIAGNOSTICS_NODE_TIMEOUT_SEC),
+            node_budget / max(1, enabled_count),
+        )
+        return await asyncio.wait_for(
+            probe_all_nodes_for_diagnostics(nodes_db_list, timeout_sec=per_node),
+            timeout=node_budget,
+        )
+
+    tg_info: dict[str, Any] = {"ok": None, "detail": "не проверялось"}
+    node_live_results: list[dict[str, Any]] = []
+    try:
+        tg_result, nodes_result = await asyncio.gather(
+            _telegram_probe(),
+            _nodes_probe(),
+            return_exceptions=True,
+        )
+        if isinstance(tg_result, Exception):
+            tg_info = {"ok": False, "latency_ms": None, "detail": _clip(str(tg_result))}
+        else:
+            tg_info = tg_result
+        if isinstance(nodes_result, Exception):
+            if isinstance(nodes_result, asyncio.TimeoutError):
+                logger.warning(
+                    "Diagnostics nodes probe timeout — используем кэш БД",
+                )
+            else:
+                logger.exception("Diagnostics nodes probe failed: {}", nodes_result)
+        else:
+            node_live_results = nodes_result or []
+        probe_by_id = {
+            int(r.get("node_id") or 0): r
+            for r in node_live_results
+            if r.get("node_id")
+        }
+    except Exception as e:
+        logger.exception("Diagnostics parallel probes failed: {}", e)
 
     lock = get_polling_lock_info()
     nodes_report: list[dict[str, Any]] = []
     for node in nodes_db_list:
         nid = int(node.get("id") or 0)
-        live = live_by_id.get(nid, {})
+        live = probe_by_id.get(nid, {})
         ok = live.get("ok") if live else node.get("is_healthy")
-        srv = server_status_by_id.get(nid, {})
         nodes_report.append({
             "id": nid,
             "name": node.get("name") or f"#{nid}",
@@ -354,12 +376,12 @@ async def collect_diagnostics(
             "ok": ok if node.get("is_enabled") else None,
             "latency_ms": live.get("latency_ms") or node.get("health_latency_ms"),
             "error": live.get("error") or node.get("last_health_error"),
-            "uptime_24h": live.get("uptime_24h"),
+            "uptime_24h": live.get("uptime_24h") or node.get("uptime_24h"),
             "checked_live": bool(live),
-            "server_status": srv.get("status"),
-            "server_status_ok": srv.get("ok"),
-            "server_status_error": srv.get("error"),
-            "server_status_checked": bool(srv) and not srv.get("skipped"),
+            "server_status": live.get("server_status"),
+            "server_status_ok": live.get("server_status_ok"),
+            "server_status_error": live.get("server_status_error"),
+            "server_status_checked": bool(live.get("server_status_checked")),
         })
 
     local_probe = probes.get("local_webhook") or {}
@@ -425,7 +447,33 @@ async def collect_diagnostics(
         },
     }
     report["recommendations"] = build_recommendations(report)
+    if elapsed_ms > 10_000:
+        logger.warning("Diagnostics collect slow: {} ms", elapsed_ms)
     return report
+
+
+async def collect_diagnostics(
+    *,
+    bot: Any = None,
+    full_node_check: bool = True,
+) -> dict[str, Any]:
+    """Технический отчёт для экрана «Диагностика» (с общим таймаутом)."""
+    limit = float(settings.DIAGNOSTICS_TOTAL_TIMEOUT_SEC)
+    try:
+        return await asyncio.wait_for(
+            _collect_diagnostics_impl(bot=bot, full_node_check=full_node_check),
+            timeout=limit,
+        )
+    except asyncio.TimeoutError:
+        logger.error("Diagnostics total timeout ({}s) — частичный отчёт без live-нод", limit)
+        try:
+            return await asyncio.wait_for(
+                _collect_diagnostics_impl(bot=bot, full_node_check=False),
+                timeout=15.0,
+            )
+        except asyncio.TimeoutError:
+            logger.error("Diagnostics fallback timeout — повтор без общего лимита")
+            return await _collect_diagnostics_impl(bot=bot, full_node_check=False)
 
 
 def _build_issues_and_warnings(
@@ -859,7 +907,18 @@ def _format_nodes_resource_lines(
         star = " ★" if n.get("is_primary") else ""
         name = html.escape(n.get("name") or "—")
         if not n.get("server_status_checked"):
-            lines.append(f"⚪{star} {name} — <i>не проверялось</i>")
+            if n.get("checked_live"):
+                lines.append(f"⚪{star} {name} — <i>server/status недоступен</i>")
+            elif n.get("is_enabled") and n.get("ok") is not None:
+                lat = n.get("latency_ms")
+                lat_s = f" · {lat} ms" if lat is not None else ""
+                status = "online" if n.get("ok") else "offline"
+                lines.append(
+                    f"{_icon(n.get('ok'))}{star} {name} — "
+                    f"<i>кэш БД · {status}{lat_s}</i>"
+                )
+            else:
+                lines.append(f"⚪{star} {name} — <i>не проверялось</i>")
             continue
         if n.get("server_status_ok") is False:
             err = _clip(str(n.get("server_status_error") or "ошибка"), 50)

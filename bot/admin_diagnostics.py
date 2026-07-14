@@ -50,7 +50,11 @@ def _invalidate_cache() -> None:
     _cache_at = 0.0
 
 
-async def _get_report(*, force_refresh: bool) -> dict[str, Any]:
+async def _get_report(
+    *,
+    force_refresh: bool,
+    view: str = "summary",
+) -> dict[str, Any]:
     global _report_cache, _cache_at
     from bot import bot
 
@@ -62,7 +66,9 @@ async def _get_report(*, force_refresh: bool) -> dict[str, Any]:
     ):
         return _report_cache
 
-    report = await collect_diagnostics(bot=bot, full_node_check=True)
+    # Сводка из кэша БД — быстро; live-ноды и server/status — по «Обновить» или раздел VPN.
+    live_nodes = force_refresh or view == "vpn"
+    report = await collect_diagnostics(bot=bot, full_node_check=live_nodes)
     _report_cache = report
     _cache_at = now
     return report
@@ -112,7 +118,7 @@ async def _show_diagnostics(
     )
 
     try:
-        report = await _get_report(force_refresh=refresh)
+        report = await _get_report(force_refresh=refresh, view=view)
         text = _format_view(report, view)
         has_issues = not report.get("overall_ok", True)
         recs_count = len(report.get("recommendations") or [])
