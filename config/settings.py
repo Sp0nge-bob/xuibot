@@ -42,11 +42,11 @@ class Settings(BaseSettings):
     # Нагрузка на панель 3x-ui (для 1000+ клиентов)
     XUI_PANEL_CONCURRENCY: int = 5
     # Диагностика админки: таймаут на одну ноду и на весь сбор сводки
-    DIAGNOSTICS_NODE_TIMEOUT_SEC: float = 10.0
-    DIAGNOSTICS_TOTAL_TIMEOUT_SEC: float = 35.0
+    DIAGNOSTICS_NODE_TIMEOUT_SEC: float = 12.0
+    DIAGNOSTICS_TOTAL_TIMEOUT_SEC: float = 45.0
     # Старт бота: False = polling сразу после Primary, ноды в фоне
     STARTUP_BLOCK_ON_ALL_NODES: bool = False
-    STARTUP_NODE_TIMEOUT_SEC: float = 8.0
+    STARTUP_NODE_TIMEOUT_SEC: float = 12.0
     XUI_INBOUND_CACHE_TTL: int = 180
     XUI_REQUEST_DELAY_MS: int = 20
     XUI_SECONDARY_SYNC_WORKERS: int = 3

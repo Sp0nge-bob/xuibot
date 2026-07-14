@@ -335,15 +335,15 @@ async def _collect_diagnostics_impl(
     async def _nodes_probe() -> list[dict[str, Any]]:
         if not full_node_check or not nodes_db_list:
             return []
-        enabled_count = len([n for n in nodes_db_list if n.get("is_enabled")])
-        node_budget = max(5.0, float(settings.DIAGNOSTICS_TOTAL_TIMEOUT_SEC) - 10.0)
-        per_node = min(
-            float(settings.DIAGNOSTICS_NODE_TIMEOUT_SEC),
-            node_budget / max(1, enabled_count),
+        per_node = float(settings.DIAGNOSTICS_NODE_TIMEOUT_SEC)
+        # Ноды проверяются параллельно — wall time ≈ per_node, не per_node × count
+        gather_budget = min(
+            float(settings.DIAGNOSTICS_TOTAL_TIMEOUT_SEC) - 8.0,
+            per_node + 5.0,
         )
         return await asyncio.wait_for(
             probe_all_nodes_for_diagnostics(nodes_db_list, timeout_sec=per_node),
-            timeout=node_budget,
+            timeout=max(per_node + 2.0, gather_budget),
         )
 
     tg_info: dict[str, Any] = {"ok": None, "detail": "не проверялось"}

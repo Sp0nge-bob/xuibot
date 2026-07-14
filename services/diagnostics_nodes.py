@@ -78,7 +78,7 @@ async def probe_node_diagnostics(
         )
     except asyncio.TimeoutError:
         error = f"timeout {limit:.0f}s"
-        invalidate_api_cache(node_id)
+        # Не сбрасываем кэш API — медленная нода может договорить connect в фоне
         logger.warning("Diagnostics node {} ({}): {}", node_id, name, error)
     except Exception as e:
         error = f"{type(e).__name__}: {e}"[:200]
