@@ -4,14 +4,15 @@ from __future__ import annotations
 import asyncio
 
 from aiogram import Router
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 from loguru import logger
 
 from services.bot_restart import trigger_bot_restart
 from .admin_auth import is_admin
 
-router = Router()
+router = Router(name="admin_reboot")
 
 _REPLY_DELAY_SEC = 1.5
 
@@ -44,10 +45,15 @@ async def _perform_reboot(message: Message) -> None:
             pass
 
 
-@router.message(Command("reboot"))
-async def cmd_reboot(message: Message) -> None:
+@router.message(Command("reboot"), StateFilter("*"))
+async def cmd_reboot(message: Message, state: FSMContext) -> None:
     if not message.from_user or not is_admin(message.from_user.id):
         return
+    await state.clear()
+    logger.warning(
+        "Priority /reboot от admin tg_id={} — сброс FSM, запуск рестарта",
+        message.from_user.id,
+    )
     asyncio.create_task(
         _perform_reboot(message),
         name=f"admin_reboot_{message.from_user.id}",

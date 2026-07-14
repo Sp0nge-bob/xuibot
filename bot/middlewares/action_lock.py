@@ -6,6 +6,7 @@ from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, Message, TelegramObject
 from loguru import logger
 
+from bot.priority_commands import is_priority_reboot_message
 from bot.ui_helpers import safe_cb_answer
 from config.settings import settings
 
@@ -72,6 +73,10 @@ class ActionLockMiddleware(BaseMiddleware):
         self._trim_debounce_cache()
         return False
 
+    def release_user(self, user_id: int) -> None:
+        """Снять блокировку пользователя (для /reboot)."""
+        self._processing.discard(user_id)
+
     async def __call__(
         self,
         handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
@@ -83,6 +88,12 @@ class ActionLockMiddleware(BaseMiddleware):
 
         user_id = self._user_id(event)
         if user_id is None:
+            return await handler(event, data)
+
+        # /reboot у админа: абсолютный приоритет, снимает зависшую блокировку
+        if isinstance(event, Message) and is_priority_reboot_message(event):
+            self._processing.discard(user_id)
+            logger.warning("Priority /reboot от user {} — обход ActionLock", user_id)
             return await handler(event, data)
 
         if isinstance(event, CallbackQuery):
