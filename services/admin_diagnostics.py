@@ -18,6 +18,7 @@ from db import bot_settings as bot_settings_db
 from db import xui_nodes as nodes_db
 from db.connection import DB_PATH
 from services.diagnostics_nodes import probe_all_nodes_for_diagnostics
+from services.node_probe_budget import parallel_probe_wall_sec
 from services.fulfillment_queue import fulfillment_queue_status
 from services.panel_server_status import format_server_status_short
 from services.primary_gate import (
@@ -335,15 +336,16 @@ async def _collect_diagnostics_impl(
     async def _nodes_probe() -> list[dict[str, Any]]:
         if not full_node_check or not nodes_db_list:
             return []
+        enabled_count = len([n for n in nodes_db_list if n.get("is_enabled")])
         per_node = float(settings.DIAGNOSTICS_NODE_TIMEOUT_SEC)
-        # Ноды проверяются параллельно — wall time ≈ per_node, не per_node × count
-        gather_budget = min(
-            float(settings.DIAGNOSTICS_TOTAL_TIMEOUT_SEC) - 8.0,
-            per_node + 5.0,
+        gather_budget = parallel_probe_wall_sec(
+            enabled_count,
+            per_node_sec=per_node,
+            cap_sec=float(settings.DIAGNOSTICS_TOTAL_TIMEOUT_SEC) - 10.0,
         )
         return await asyncio.wait_for(
             probe_all_nodes_for_diagnostics(nodes_db_list, timeout_sec=per_node),
-            timeout=max(per_node + 2.0, gather_budget),
+            timeout=gather_budget,
         )
 
     tg_info: dict[str, Any] = {"ok": None, "detail": "не проверялось"}

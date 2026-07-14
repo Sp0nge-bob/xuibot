@@ -22,7 +22,8 @@ async def _probe_node_once(
 ) -> tuple[bool, dict[str, Any] | None, str | None]:
     """Подключение к панели и server/status с раздельными таймаутами."""
     started = time.monotonic()
-    connect_cap = min(max(3.0, limit_sec * 0.55), max(3.0, limit_sec - 2.0))
+    # Медленные панели чаще тормозят на connect/login — даём до 75% бюджета
+    connect_cap = min(max(5.0, limit_sec * 0.75), max(5.0, limit_sec - 2.0))
 
     api = await asyncio.wait_for(
         get_api_for_node(node, force_new=False),

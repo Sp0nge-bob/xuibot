@@ -75,12 +75,21 @@ dp.include_router(policy_router)
 async def _background_node_startup(primary_result: dict) -> None:
     """Health нод, sync и воркеры — не блокирует polling."""
     try:
+        from db import xui_nodes as nodes_db
+        from services.node_probe_budget import parallel_probe_wall_sec
+
+        nodes = await nodes_db.list_nodes(enabled_only=True)
+        bg_limit = parallel_probe_wall_sec(
+            len(nodes),
+            per_node_sec=settings.STARTUP_NODE_TIMEOUT_SEC,
+            cap_sec=180.0,
+        ) + 30.0
         await asyncio.wait_for(
             initialize_nodes_at_startup(
                 primary_result=primary_result,
                 background=True,
             ),
-            timeout=120,
+            timeout=bg_limit,
         )
     except asyncio.TimeoutError:
         logger.warning("Node startup (background): таймаут 120s")
