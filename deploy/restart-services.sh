@@ -9,5 +9,6 @@ TELEGRAM_UNIT="vpn-bot-telegram.service"
 WEB_UNIT="vpn-bot-web.service"
 
 rm -f "$APP_DIR/data/.polling.lock"
-systemctl restart "$TELEGRAM_UNIT"
+# Сначала webhook — иначе при /reboot из telegram-процесса скрипт обрывается на SIGTERM
 systemctl restart "$WEB_UNIT"
+systemctl restart "$TELEGRAM_UNIT"

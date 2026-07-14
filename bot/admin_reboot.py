@@ -29,11 +29,13 @@ async def _perform_reboot(message: Message) -> None:
         )
         await asyncio.sleep(_REPLY_DELAY_SEC)
         ok, detail = await trigger_bot_restart(reason=f"/reboot tg_id={admin_id}")
-        if not ok:
-            await message.answer(
-                "❌ <b>Не удалось перезапустить службы</b>\n"
-                f"<code>{detail[:350]}</code>",
-            )
+        if ok:
+            logger.info("Restart OK: {}", detail)
+            return
+        await message.answer(
+            "❌ <b>Не удалось перезапустить службы</b>\n"
+            f"<code>{detail[:350]}</code>",
+        )
     except Exception as e:
         logger.exception("Admin /reboot failed for tg_id={}: {}", admin_id, e)
         try:
