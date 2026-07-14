@@ -1,9 +1,25 @@
 # shellcheck shell=bash
 # Идемпотентная установка / обновление (пункт 1 меню)
 
+git_discard_deploy_script_drift() {
+    # install_restart_sudoers делает chmod 755 — иначе git pull падает на «local changes»
+    local rel
+    for rel in deploy/restart-services.sh deploy/vpn-bot-ctl.sh; do
+        [[ -f "$APP_DIR/$rel" ]] || continue
+        if git -C "$APP_DIR" diff --quiet -- "$rel" 2>/dev/null; then
+            continue
+        fi
+        warn "Сбрасываем локальные изменения $rel (обычно chmod от установки)"
+        git -C "$APP_DIR" restore --source=HEAD --staged --worktree -- "$rel" 2>/dev/null \
+            || git -C "$APP_DIR" checkout -- "$rel" 2>/dev/null \
+            || true
+    done
+}
+
 git_pull_repo() {
     [[ -d "$APP_DIR/.git" ]] || die "Не git-репозиторий: $APP_DIR/.git"
     fix_repo_ownership_for_git
+    git_discard_deploy_script_drift
     log "git pull в $APP_DIR"
     local before after
     before="$(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || echo '?')"

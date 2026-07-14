@@ -10,7 +10,8 @@ install_restart_sudoers() {
         return 0
     fi
 
-    chmod 755 "$script"
+    # +x в git (100755); chmod идемпотентен после установки
+    [[ -x "$script" ]] || chmod 755 "$script"
     cat >"$dest" <<EOF
 # VPN Bot: команда /reboot в Telegram ($SERVICE_USER)
 $SERVICE_USER ALL=(root) NOPASSWD: $script
