@@ -3,6 +3,10 @@
 # Вызывается из deploy/vpn-bot-ctl.sh и командой /reboot в Telegram (через sudo).
 set -euo pipefail
 
+if [[ "${1:-}" == "--check" ]]; then
+    exit 0
+fi
+
 DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$(cd "$DEPLOY_DIR/.." && pwd)"
 TELEGRAM_UNIT="vpn-bot-telegram.service"

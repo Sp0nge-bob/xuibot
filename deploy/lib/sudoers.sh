@@ -26,6 +26,13 @@ EOF
         fi
     fi
 
+    if sudo -u "$SERVICE_USER" -- sudo -n "$script" --check >/dev/null 2>&1; then
+        ok "sudo /reboot для $SERVICE_USER — OK"
+    else
+        warn "sudo /reboot для $SERVICE_USER не прошёл проверку — см. $dest"
+        return 1
+    fi
+
     ok "sudoers для /reboot: $dest"
     return 0
 }

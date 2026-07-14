@@ -61,7 +61,9 @@ async def _restart_via_script(script: Path, *, use_sudo: bool) -> tuple[bool, st
     Запуск restart-services.sh в отдельной сессии.
     Не ждём завершения: systemctl restart telegram убивает этот процесс (SIGTERM).
     """
-    cmd = ["sudo", "-n", "bash", str(script)] if use_sudo else ["bash", str(script)]
+    # sudoers: NOPASSWD на путь к скрипту — только прямой запуск, не «sudo bash script»
+    script_path = str(script.resolve())
+    cmd = ["sudo", "-n", script_path] if use_sudo else [script_path]
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         start_new_session=True,
