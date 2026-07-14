@@ -10,6 +10,10 @@ from aiogram.types import Message
 from loguru import logger
 
 from services.bot_restart import trigger_bot_restart
+from services.reboot_notify import (
+    clear_reboot_notify_pending,
+    schedule_reboot_success_notify,
+)
 from .admin_auth import is_admin
 
 router = Router(name="admin_reboot")
@@ -28,15 +32,18 @@ async def _perform_reboot(message: Message) -> None:
             "используйте <code>vpn-bot-ctl.sh</code> → пункт 3 на VPS.</i>",
         )
         await asyncio.sleep(_REPLY_DELAY_SEC)
+        await schedule_reboot_success_notify(admin_id)
         ok, detail = await trigger_bot_restart(reason=f"/reboot tg_id={admin_id}")
         if ok:
             logger.info("Restart OK: {}", detail)
             return
+        await clear_reboot_notify_pending()
         await message.answer(
             "❌ <b>Не удалось перезапустить службы</b>\n"
             f"<code>{detail[:350]}</code>",
         )
     except Exception as e:
+        await clear_reboot_notify_pending()
         logger.exception("Admin /reboot failed for tg_id={}: {}", admin_id, e)
         try:
             await message.answer(

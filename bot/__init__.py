@@ -146,6 +146,14 @@ async def start_bot():
         raise
 
     logger.info("Polling started")
+
+    try:
+        from services.reboot_notify import send_pending_reboot_notification
+
+        await send_pending_reboot_notification(bot)
+    except Exception as e:
+        logger.error("Reboot startup notify failed: {}", e)
+
     try:
         await dp.start_polling(
             bot,

@@ -59,6 +59,12 @@ async def set_setting(key: str, value: str):
         await db.commit()
 
 
+async def delete_setting(key: str) -> None:
+    async with get_db() as db:
+        await db.execute("DELETE FROM bot_settings WHERE key = ?", (key,))
+        await db.commit()
+
+
 def _parse_inbound_ids(raw: str) -> List[int]:
     return [int(x.strip()) for x in raw.split(",") if x.strip()]
 
