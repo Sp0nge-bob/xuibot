@@ -8,6 +8,9 @@ from pydantic_settings import BaseSettings, NoDecode
 class Settings(BaseSettings):
     # Telegram
     BOT_TOKEN: str
+    # /reboot: путь к deploy/restart-services.sh или полная shell-команда (опционально)
+    BOT_RESTART_SCRIPT: str = ""
+    BOT_RESTART_CMD: str = ""
     # Название в /start и пользовательских экранах (заголовок главного меню)
     BOT_BRAND: str = "VPN Bot"
     # NoDecode: иначе pydantic-settings парсит List как JSON и падает на "id1,id2"

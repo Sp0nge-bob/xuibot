@@ -16,6 +16,8 @@ source "$DEPLOY_DIR/lib/python.sh"
 source "$DEPLOY_DIR/lib/permissions.sh"
 # shellcheck source=lib/systemd.sh
 source "$DEPLOY_DIR/lib/systemd.sh"
+# shellcheck source=lib/sudoers.sh
+source "$DEPLOY_DIR/lib/sudoers.sh"
 # shellcheck source=lib/reconcile.sh
 source "$DEPLOY_DIR/lib/reconcile.sh"
 # shellcheck source=lib/logs.sh

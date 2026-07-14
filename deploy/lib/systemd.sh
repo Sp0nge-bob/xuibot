@@ -71,6 +71,7 @@ verify_services() {
 start_services() {
     stop_stray_processes
     write_units
+    install_restart_sudoers || true
     systemctl daemon-reload
     systemctl enable "$TELEGRAM_UNIT" "$WEB_UNIT"
     log "Запуск сервисов"
@@ -92,9 +93,14 @@ restart_services() {
         return 1
     fi
     log "Быстрый перезапуск (без обновления venv и unit-файлов)"
-    rm -f "$APP_DIR/data/.polling.lock"
-    systemctl restart "$TELEGRAM_UNIT"
-    systemctl restart "$WEB_UNIT"
+    install_restart_sudoers || true
+    if [[ -x "$APP_DIR/deploy/restart-services.sh" ]]; then
+        bash "$APP_DIR/deploy/restart-services.sh"
+    else
+        rm -f "$APP_DIR/data/.polling.lock"
+        systemctl restart "$TELEGRAM_UNIT"
+        systemctl restart "$WEB_UNIT"
+    fi
     if verify_services; then
         ok "Службы перезапущены"
         return 0

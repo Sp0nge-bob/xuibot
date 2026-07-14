@@ -24,6 +24,7 @@ from .admin_happ_crypto import router as admin_happ_crypto_router
 from .admin_limit_ip import router as admin_limit_ip_router
 from .admin_legal import router as admin_legal_router
 from .admin_diagnostics import router as admin_diagnostics_router
+from .admin_reboot import router as admin_reboot_router
 from .admin_server_status import router as admin_server_status_router
 from .server_status import router as server_status_router
 from .faq import router as faq_router
@@ -64,6 +65,7 @@ dp.include_router(admin_happ_crypto_router)
 dp.include_router(admin_limit_ip_router)
 dp.include_router(admin_legal_router)
 dp.include_router(admin_diagnostics_router)
+dp.include_router(admin_reboot_router)
 dp.include_router(admin_server_status_router)
 dp.include_router(faq_router)
 dp.include_router(policy_router)
