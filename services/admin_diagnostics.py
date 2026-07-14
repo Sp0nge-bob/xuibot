@@ -39,10 +39,23 @@ DIAGNOSTICS_SECTIONS: tuple[tuple[str, DiagnosticsSection], ...] = (
 _TELEGRAM_MAX = 4000
 
 
-def _icon(ok: bool | None) -> str:
-    if ok is True:
+def _as_ok(value: Any) -> bool | None:
+    """SQLite хранит флаги как 0/1 — приводим к bool для иконок и сравнений."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    try:
+        return bool(int(value))
+    except (TypeError, ValueError):
+        return bool(value)
+
+
+def _icon(ok: Any) -> str:
+    normalized = _as_ok(ok)
+    if normalized is True:
         return "🟢"
-    if ok is False:
+    if normalized is False:
         return "🔴"
     return "🟡"
 
@@ -367,13 +380,14 @@ async def _collect_diagnostics_impl(
     for node in nodes_db_list:
         nid = int(node.get("id") or 0)
         live = probe_by_id.get(nid, {})
-        ok = live.get("ok") if live else node.get("is_healthy")
+        raw_ok = live.get("ok") if live else node.get("is_healthy")
+        ok = _as_ok(raw_ok) if node.get("is_enabled") else None
         nodes_report.append({
             "id": nid,
             "name": node.get("name") or f"#{nid}",
             "is_primary": bool(node.get("is_primary")),
             "is_enabled": bool(node.get("is_enabled")),
-            "ok": ok if node.get("is_enabled") else None,
+            "ok": ok,
             "latency_ms": live.get("latency_ms") or node.get("health_latency_ms"),
             "error": live.get("error") or node.get("last_health_error"),
             "uptime_24h": live.get("uptime_24h") or node.get("uptime_24h"),
@@ -435,6 +449,7 @@ async def _collect_diagnostics_impl(
         "process_load_html": process_load_html,
         "secondary_degraded": secondary_degraded,
         "sync_disabled": sync_disabled,
+        "live_nodes_checked": full_node_check,
         "config": {
             "test_mode": test_mode,
             "test_mode_overridden": test_mode_overridden,

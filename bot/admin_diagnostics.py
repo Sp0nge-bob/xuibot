@@ -50,6 +50,16 @@ def _invalidate_cache() -> None:
     _cache_at = 0.0
 
 
+def _report_has_live_nodes(report: dict[str, Any]) -> bool:
+    if report.get("live_nodes_checked"):
+        return True
+    return any(
+        n.get("checked_live")
+        for n in (report.get("nodes") or [])
+        if n.get("is_enabled")
+    )
+
+
 async def _get_report(
     *,
     force_refresh: bool,
@@ -59,15 +69,17 @@ async def _get_report(
     from bot import bot
 
     now = time.monotonic()
-    if (
-        not force_refresh
-        and _report_cache is not None
+    needs_live = force_refresh or view == "vpn"
+    cache_fresh = (
+        _report_cache is not None
         and now - _cache_at <= _CACHE_TTL_SEC
-    ):
-        return _report_cache
+    )
+    if not force_refresh and cache_fresh:
+        if not needs_live or _report_has_live_nodes(_report_cache):
+            return _report_cache
 
-    # Сводка из кэша БД — быстро; live-ноды и server/status — по «Обновить» или раздел VPN.
-    live_nodes = force_refresh or view == "vpn"
+    # Сводка — кэш БД; раздел VPN и «Обновить» — live-ноды + server/status.
+    live_nodes = needs_live
     report = await collect_diagnostics(bot=bot, full_node_check=live_nodes)
     _report_cache = report
     _cache_at = now
@@ -95,7 +107,11 @@ def _loading_text(view: str) -> str:
     return screen(
         "🔍 <b>Диагностика</b>",
         f"Проверяем {label}…",
-        hint="Ноды, webhook, процессы и хранилища",
+        hint=(
+            "CPU/RAM нод, webhook, процессы"
+            if view == "vpn"
+            else "Ноды, webhook, процессы и хранилища"
+        ),
     )
 
 
