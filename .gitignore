@@ -23,6 +23,7 @@ build/
 *.log
 report/
 terminals/
+docs/infrastructure-and-mechanics.md
 vpn_platega_bot.egg-info/
 
 # Archives
