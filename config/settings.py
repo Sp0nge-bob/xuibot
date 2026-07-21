@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     # Старт бота: False = polling сразу после Primary, ноды в фоне
     STARTUP_BLOCK_ON_ALL_NODES: bool = False
     STARTUP_NODE_TIMEOUT_SEC: float = 25.0
+    # Автодиагностика при массовом/Primary fail → отчёт в ЛС админам
+    PANEL_OUTAGE_DIAG_ENABLED: bool = True
+    PANEL_OUTAGE_DIAG_COOLDOWN_SEC: int = 900  # мин. интервал между отчётами (флап)
+    PANEL_OUTAGE_DIAG_TIMEOUT_SEC: float = 12.0  # HTTP/DNS на один запрос
     XUI_INBOUND_CACHE_TTL: int = 180
     XUI_REQUEST_DELAY_MS: int = 20
     XUI_SECONDARY_SYNC_WORKERS: int = 3

@@ -108,6 +108,18 @@ async def check_nodes_health_job():
             if not r.get("ok")
         ]
         logger.warning("Health нод: {}/{} доступны, проблемы: {}", ok, len(results), "; ".join(bad))
+        try:
+            from services.panel_outage_diagnostics import (
+                maybe_schedule_panel_outage_diagnostics,
+            )
+
+            scheduled = await maybe_schedule_panel_outage_diagnostics(results)
+            if scheduled:
+                logger.warning(
+                    "Запущена автодиагностика панелей (отчёт придёт админам в ЛС)"
+                )
+        except Exception as e:
+            logger.error("Panel outage diagnostics schedule failed: {}", e)
 
 
 async def run_full_nodes_sync(*, source: str) -> None:
