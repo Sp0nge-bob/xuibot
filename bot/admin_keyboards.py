@@ -200,6 +200,36 @@ def admin_backup_kb(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def admin_logs_kb() -> InlineKeyboardMarkup:
+    """Пресеты хвоста логов + своё число."""
+    from services.log_export import LOG_TAIL_PRESETS
+
+    rows: list[list[InlineKeyboardButton]] = []
+    pair: list[InlineKeyboardButton] = []
+    for n in LOG_TAIL_PRESETS:
+        pair.append(InlineKeyboardButton(
+            text=f"📄 {n}",
+            callback_data=f"adm:logs:tail:{n}",
+        ))
+        if len(pair) == 2:
+            rows.append(pair)
+            pair = []
+    if pair:
+        rows.append(pair)
+    rows.append([InlineKeyboardButton(
+        text="✏️ Своё число строк",
+        callback_data="adm:logs:custom",
+    )])
+    rows.append([InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_logs_custom_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="« Отмена", callback_data="adm:logs")],
+    ])
+
+
 def admin_backup_interval_edit_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="« Отмена", callback_data="adm:backup")],

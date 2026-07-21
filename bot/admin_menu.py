@@ -75,9 +75,10 @@ ADMIN_HUBS: dict[str, HubDef] = {
     "system": {
         "root_label": "⚙️ Система",
         "title": "⚙️ Система",
-        "description": "Резервные копии и служебные инструменты.",
+        "description": "Резервные копии, логи и служебные инструменты.",
         "items": [
             ("💾 Бэкап", "adm:backup"),
+            ("📋 Логи", "adm:logs"),
         ],
     },
 }
