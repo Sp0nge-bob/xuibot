@@ -200,16 +200,45 @@ def admin_backup_kb(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def admin_logs_kb() -> InlineKeyboardMarkup:
-    """Пресеты хвоста логов + своё число."""
+def admin_logs_sources_kb(sources: list) -> InlineKeyboardMarkup:
+    """Список доступных логов: текущий bot.log + архивы botlog_*."""
+    rows: list[list[InlineKeyboardButton]] = []
+    for s in sources:
+        size = getattr(s, "size_bytes", 0) or 0
+        if size < 1024:
+            size_s = f"{size}B"
+        elif size < 1024 * 1024:
+            size_s = f"{size / 1024:.0f}K"
+        else:
+            size_s = f"{size / (1024 * 1024):.1f}M"
+        name = getattr(s, "path").name if getattr(s, "path", None) else s.id
+        # Кнопка ≤ ~60 символов; callback: adm:logs:src:active | arch0
+        if getattr(s, "is_active", False):
+            text = f"🟢 bot.log · {size_s}"
+        else:
+            short = name.removeprefix("botlog_").removesuffix(".log")
+            if len(short) > 22:
+                short = short[:21] + "…"
+            text = f"📦 {short} · {size_s}"
+        rows.append([InlineKeyboardButton(
+            text=text,
+            callback_data=f"adm:logs:src:{s.id}",
+        )])
+    rows.append([InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_logs_tail_kb(source_id: str) -> InlineKeyboardMarkup:
+    """Пресеты хвоста для выбранного файла + своё число."""
     from services.log_export import LOG_TAIL_PRESETS
 
+    sid = source_id or "active"
     rows: list[list[InlineKeyboardButton]] = []
     pair: list[InlineKeyboardButton] = []
     for n in LOG_TAIL_PRESETS:
         pair.append(InlineKeyboardButton(
             text=f"📄 {n}",
-            callback_data=f"adm:logs:tail:{n}",
+            callback_data=f"adm:logs:tail:{sid}:{n}",
         ))
         if len(pair) == 2:
             rows.append(pair)
@@ -218,15 +247,19 @@ def admin_logs_kb() -> InlineKeyboardMarkup:
         rows.append(pair)
     rows.append([InlineKeyboardButton(
         text="✏️ Своё число строк",
-        callback_data="adm:logs:custom",
+        callback_data=f"adm:logs:custom:{sid}",
     )])
-    rows.append([InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")])
+    rows.append([
+        InlineKeyboardButton(text="« К списку логов", callback_data="adm:logs"),
+        InlineKeyboardButton(text="« Админ", callback_data="adm:menu"),
+    ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def admin_logs_custom_kb() -> InlineKeyboardMarkup:
+def admin_logs_custom_kb(source_id: str = "active") -> InlineKeyboardMarkup:
+    sid = source_id or "active"
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="« Отмена", callback_data="adm:logs")],
+        [InlineKeyboardButton(text="« Отмена", callback_data=f"adm:logs:src:{sid}")],
     ])
 
 
