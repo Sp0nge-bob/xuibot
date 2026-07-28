@@ -1364,14 +1364,20 @@ def _admin_discount_lines(order: Dict[str, Any]) -> list[str]:
     return lines
 
 
+def _format_admin_dt(raw: str | None) -> str:
+    if not raw:
+        return "—"
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", ""))
+        return dt.strftime("%d.%m.%Y %H:%M")
+    except ValueError:
+        return str(raw)[:16].replace("T", " ")
+
+
 def admin_user_sub_last_payment_block(order: Dict[str, Any] | None) -> str:
     """Блок «последняя оплата» для карточки подписки в админке."""
     if not order:
-        return (
-            "\n\n💳 <b>Последняя оплата</b>\n"
-            "<i>Нет paid-заказов по этой подписке</i>\n"
-            "(trial / grant-промо / ещё не привязано)"
-        )
+        return ""
     order_type = order.get("order_type") or "new"
     action = _admin_order_type_label(order_type)
     plan = html.escape(str(order.get("plan_name") or "—"))
@@ -1393,6 +1399,43 @@ def admin_user_sub_last_payment_block(order: Dict[str, Any] | None) -> str:
     return "\n".join(lines)
 
 
+def admin_user_sub_grant_block(grant: Dict[str, Any] | None) -> str:
+    """Grant-промокод, которым выдана/продлена подписка."""
+    if not grant:
+        return ""
+    code = html.escape(str(grant.get("code") or "—"))
+    when = _format_admin_dt(grant.get("used_at"))
+    plan_id = (grant.get("plan_ids") or "").split(",")[0].strip()
+    plan_line = ""
+    if plan_id:
+        from config.plans import get_plan
+
+        plan = get_plan(plan_id)
+        if plan:
+            plan_line = (
+                f"\n📦 Тариф: <b>{html.escape(plan['name'])}</b> "
+                f"({plan['days']} дн.)"
+            )
+        else:
+            plan_line = f"\n📦 Тариф: <code>{html.escape(plan_id)}</code>"
+    return (
+        "\n\n🎟 <b>Промокод (grant)</b>\n"
+        f"Код: <code>{code}</code>\n"
+        f"Когда: <b>{when}</b>"
+        f"{plan_line}"
+    )
+
+
+def admin_user_sub_trial_block(trial: Dict[str, Any] | None) -> str:
+    if not trial:
+        return ""
+    when = _format_admin_dt(trial.get("granted_at"))
+    return (
+        "\n\n🎁 <b>Пробный период</b>\n"
+        f"Выдан: <b>{when}</b>"
+    )
+
+
 def admin_user_sub_detail_text(
     *,
     kind: str,
@@ -1404,10 +1447,22 @@ def admin_user_sub_detail_text(
     sub_link_id: str | None,
     display_name: str | None = None,
     last_order: Dict[str, Any] | None = None,
+    grant_use: Dict[str, Any] | None = None,
+    trial_grant: Dict[str, Any] | None = None,
 ) -> str:
     display = (display_name or "").strip()
     name_line = f"Название: <b>{html.escape(display)}</b>\n" if display else ""
     end_s = (end_date or "")[:10] or "—"
+    origin = ""
+    origin += admin_user_sub_last_payment_block(last_order)
+    origin += admin_user_sub_grant_block(grant_use)
+    origin += admin_user_sub_trial_block(trial_grant)
+    if not last_order and not grant_use and not trial_grant:
+        origin = (
+            "\n\n💳 <b>Источник</b>\n"
+            "<i>Нет paid-заказов, grant-промо и trial-записи</i>\n"
+            "(возможно, выдана вручную / старые данные)"
+        )
     return (
         "👤 <b>Подписка клиента</b>\n"
         "━━━━━━━━━━━━━━━━\n\n"
@@ -1419,7 +1474,7 @@ def admin_user_sub_detail_text(
         f"Клиент: <code>{html.escape(str(client_email or '—'))}</code>\n"
         f"До: <b>{end_s}</b>\n"
         f"subId: <code>{html.escape(str(sub_link_id or '—'))}</code>"
-        f"{admin_user_sub_last_payment_block(last_order)}"
+        f"{origin}"
     )
 
 

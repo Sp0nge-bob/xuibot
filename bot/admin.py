@@ -15,6 +15,7 @@ from db.plan_prices import set_plan_price
 from services.pricing import list_plans
 from config.plans import get_plan
 from db import trial_grants as trial_db
+from config.trial import is_trial_email
 from .messages import (
     admin_debug_order_detail_text,
     admin_plans_text,
@@ -26,7 +27,6 @@ from .messages import (
     admin_trial_reset_confirm_text,
     admin_user_sub_detail_text,
 )
-from config.trial import is_trial_email
 from services.trial import admin_reset_all_trial_subscriptions, admin_reset_trial
 from .states import AdminPricingStates, AdminStates
 from services.subscription_admin import admin_delete_subscription
@@ -313,6 +313,18 @@ async def _show_admin_user_sub_detail(
     kind = subscription_kind_label(sub.get("client_email"))
     paid_orders = await db.get_paid_orders_for_subscription(sub_id, limit=50)
     last_order = paid_orders[0] if paid_orders else None
+    grant_use = await promo_db.find_grant_use_heuristic_for_subscription(
+        tg_id=int(sub["tg_id"]),
+        subscription_id=sub_id,
+        start_date=str(sub.get("start_date") or "") or None,
+    )
+    trial_grant = None
+    if is_trial_email(sub.get("client_email")):
+        g = await trial_db.get_last_trial_grant(int(sub["tg_id"]))
+        if g:
+            g_sub = g.get("subscription_id")
+            if g_sub is None or int(g_sub) == sub_id:
+                trial_grant = g
     text = admin_user_sub_detail_text(
         kind=kind,
         label=label,
@@ -323,6 +335,8 @@ async def _show_admin_user_sub_detail(
         sub_link_id=sub.get("sub_id"),
         display_name=sub.get("display_name"),
         last_order=last_order,
+        grant_use=grant_use,
+        trial_grant=trial_grant,
     )
     category = (await state.get_data()).get("admin_user_category")
     kb = admin_user_detail_kb(

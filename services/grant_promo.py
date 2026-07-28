@@ -111,6 +111,16 @@ async def fulfill_grant_promo(
     if bonus_sub_id:
         await db.add_grant_bonus_days(bonus_sub_id, plan["days"])
 
-    await promo_db.record_grant_promo_use(promo["id"], tg_id)
-    logger.info("Grant promo {} redeemed by tg_id={} mode={}", promo["code"], tg_id, mode)
+    await promo_db.record_grant_promo_use(
+        promo["id"],
+        tg_id,
+        subscription_id=bonus_sub_id,
+    )
+    logger.info(
+        "Grant promo {} redeemed by tg_id={} mode={} sub={}",
+        promo["code"],
+        tg_id,
+        mode,
+        bonus_sub_id,
+    )
     return result

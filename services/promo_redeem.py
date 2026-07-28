@@ -81,7 +81,7 @@ async def redeem_promo_code(tg_id: int, code: str) -> PromoRedeemResult:
     if err:
         raise ValueError(err)
 
-    await promo_db.record_grant_promo_use(promo["id"], tg_id)
+    # Скидка учитывается в promo_uses только после успешной оплаты (apply_promo_on_paid_order).
     row = await pending_db.set_pending_discount(tg_id, promo)
     expires = datetime.fromisoformat(str(row["expires_at"]).replace("Z", ""))
     allowed = (promo.get("plan_ids") or "").strip()

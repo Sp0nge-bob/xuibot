@@ -58,6 +58,16 @@ async def init_promo_tables():
                 FOREIGN KEY(promo_id) REFERENCES promo_codes(id)
             )
         """)
+        async with db.execute("PRAGMA table_info(promo_uses)") as cur:
+            use_cols = {row[1] for row in await cur.fetchall()}
+        if "subscription_id" not in use_cols:
+            await db.execute(
+                "ALTER TABLE promo_uses ADD COLUMN subscription_id INTEGER"
+            )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_promo_uses_subscription "
+            "ON promo_uses(subscription_id)"
+        )
         await db.commit()
 
 
@@ -230,7 +240,12 @@ async def reset_all_promo_applications() -> dict[str, int]:
     }
 
 
-async def record_grant_promo_use(promo_id: int, tg_id: int) -> None:
+async def record_grant_promo_use(
+    promo_id: int,
+    tg_id: int,
+    *,
+    subscription_id: Optional[int] = None,
+) -> None:
     """Учёт grant-промокода. per_user_limit=0 — безлимит (как в _validate_promo_common)."""
     promo = await get_promo_by_id(promo_id)
     if not promo or not promo.get("is_active"):
@@ -256,7 +271,92 @@ async def record_grant_promo_use(promo_id: int, tg_id: int) -> None:
         if cur.rowcount == 0:
             raise ValueError("Промокод недоступен (лимит исчерпан)")
         await db.execute(
-            "INSERT INTO promo_uses (promo_id, tg_id, order_id) VALUES (?, ?, NULL)",
-            (promo_id, tg_id),
+            """INSERT INTO promo_uses (promo_id, tg_id, order_id, subscription_id)
+               VALUES (?, ?, NULL, ?)""",
+            (promo_id, tg_id, subscription_id),
         )
         await db.commit()
+
+
+async def get_grant_uses_for_subscription(
+    subscription_id: int,
+    *,
+    limit: int = 10,
+) -> List[Dict[str, Any]]:
+    """Grant-промо, применённые к подписке (новые записи с subscription_id)."""
+    async with get_db() as db:
+        async with db.execute(
+            """SELECT u.id AS use_id, u.tg_id, u.used_at, u.subscription_id,
+                      p.id AS promo_id, p.code, p.plan_ids, p.promo_type
+               FROM promo_uses u
+               JOIN promo_codes p ON p.id = u.promo_id
+               WHERE u.subscription_id = ?
+                 AND u.order_id IS NULL
+                 AND (p.promo_type = 'grant' OR p.discount_type = 'grant')
+               ORDER BY u.used_at DESC
+               LIMIT ?""",
+            (subscription_id, limit),
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
+
+async def find_grant_use_heuristic_for_subscription(
+    *,
+    tg_id: int,
+    subscription_id: int,
+    start_date: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Старые grant-записи без subscription_id: ближайший по времени used_at к start_date
+    подписки (окно ±2 суток) или последний grant этого пользователя.
+    """
+    # Сначала точная привязка
+    linked = await get_grant_uses_for_subscription(subscription_id, limit=1)
+    if linked:
+        return linked[0]
+
+    async with get_db() as db:
+        async with db.execute(
+            """SELECT u.id AS use_id, u.tg_id, u.used_at, u.subscription_id,
+                      p.id AS promo_id, p.code, p.plan_ids, p.promo_type
+               FROM promo_uses u
+               JOIN promo_codes p ON p.id = u.promo_id
+               WHERE u.tg_id = ?
+                 AND u.order_id IS NULL
+                 AND (u.subscription_id IS NULL OR u.subscription_id = ?)
+                 AND (p.promo_type = 'grant' OR p.discount_type = 'grant')
+               ORDER BY u.used_at DESC
+               LIMIT 20""",
+            (tg_id, subscription_id),
+        ) as cur:
+            rows = [dict(r) for r in await cur.fetchall()]
+
+    if not rows:
+        return None
+
+    # Уже с subscription_id (на всякий)
+    for r in rows:
+        if r.get("subscription_id") == subscription_id:
+            return r
+
+    if not start_date:
+        return rows[0]
+
+    try:
+        start = datetime.fromisoformat(str(start_date).replace("Z", ""))
+    except ValueError:
+        return rows[0]
+
+    best = None
+    best_delta = None
+    for r in rows:
+        try:
+            used = datetime.fromisoformat(str(r.get("used_at") or "").replace("Z", ""))
+        except ValueError:
+            continue
+        delta = abs((used - start).total_seconds())
+        # ±2 суток
+        if delta <= 2 * 86400 and (best_delta is None or delta < best_delta):
+            best = r
+            best_delta = delta
+    return best or rows[0]
