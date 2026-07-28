@@ -1141,12 +1141,13 @@ def admin_debug_orders_menu_text(
         f"✅ Оплаченных: <b>{paid_count}</b>\n"
         f"⏳ Ожидают оплаты: <b>{pending_count}</b>\n"
         f"❌ Неуспешных: <b>{failed_count}</b>\n\n"
-        "Просмотрите оплаты и неудачные заказы или сбросьте всю историю."
+        "Просмотрите оплаты, ожидающие и неудачные заказы или сбросьте историю."
     )
 
 
 _ORDER_LIST_TITLES = {
     "paid": "💳 <b>Оплаченные заказы</b>",
+    "pending": "⏳ <b>Ожидают оплаты</b>",
     "failed": "❌ <b>Неудачные заказы</b>",
 }
 
@@ -1196,14 +1197,23 @@ def _admin_order_extras_line(order: Dict[str, Any]) -> str | None:
 
 def _admin_order_list_card(order: Dict[str, Any]) -> str:
     status = (order.get("status") or "").strip()
-    status_mark = "❌" if status == "failed" else _admin_order_type_icon(order.get("order_type"))
+    if status == "failed":
+        status_mark = "❌"
+    elif status == "pending":
+        status_mark = "⏳"
+    else:
+        status_mark = _admin_order_type_icon(order.get("order_type"))
     action = _admin_order_type_label(order.get("order_type"))
     if status == "failed":
         action = f"{action} · не оплачен"
+    elif status == "pending":
+        action = f"{action} · ожидает"
     plan = html.escape(str(order.get("plan_name") or "—"))
     amount = int(order.get("amount") or 0)
+    # pending: paid_at пуст — показываем created
+    when = _admin_order_paid_at(order)
     lines = [
-        f"{status_mark} <b>#{order.get('id')}</b>  ·  {_admin_order_paid_at(order)}",
+        f"{status_mark} <b>#{order.get('id')}</b>  ·  {when}",
         f"📦 {plan}  ·  {money(amount)}  ·  <i>{action}</i>",
         f"👤 {_admin_order_user_label(order)}  ·  <code>{order.get('tg_id')}</code>",
     ]
@@ -1217,7 +1227,12 @@ def admin_order_button_label(order: Dict[str, Any]) -> str:
     order_id = int(order["id"])
     amount = int(order.get("amount") or 0)
     status = (order.get("status") or "").strip()
-    icon = "❌" if status == "failed" else _admin_order_type_icon(order.get("order_type"))
+    if status == "failed":
+        icon = "❌"
+    elif status == "pending":
+        icon = "⏳"
+    else:
+        icon = _admin_order_type_icon(order.get("order_type"))
     paid = _admin_order_paid_at(order)[:10]
     plan = (order.get("plan_name") or "—")[:14]
     label = f"{icon} #{order_id} · {paid} · {amount} ₽ · {plan}"
@@ -1244,11 +1259,11 @@ def admin_debug_orders_list_text(
     from ui.theme import SEP
 
     title = _ORDER_LIST_TITLES.get(status, "🧾 <b>Заказы</b>")
-    empty_hint = (
-        "📭 <i>Неудачных заказов в БД пока нет.</i>"
-        if status == "failed"
-        else "📭 <i>Оплаченных заказов в БД пока нет.</i>"
-    )
+    empty_hint = {
+        "failed": "📭 <i>Неудачных заказов в БД пока нет.</i>",
+        "pending": "📭 <i>Нет заказов, ожидающих оплаты.</i>",
+        "paid": "📭 <i>Оплаченных заказов в БД пока нет.</i>",
+    }.get(status, "📭 <i>Заказов нет.</i>")
     if total_count == 0:
         return screen(title, empty_hint)
     if not orders:
@@ -1267,11 +1282,11 @@ def admin_debug_orders_list_text(
             cards.append(SEP)
         cards.append(_admin_order_list_card(order))
 
-    hint = (
-        "Нажмите заказ ниже — можно написать клиенту"
-        if status == "failed"
-        else "Нажмите заказ ниже, чтобы открыть подробности"
-    )
+    hint = {
+        "failed": "Нажмите заказ ниже — можно написать клиенту",
+        "pending": "Ожидают webhook/оплаты · нажмите для подробностей",
+        "paid": "Нажмите заказ ниже, чтобы открыть подробности",
+    }.get(status, "Нажмите заказ ниже, чтобы открыть подробности")
     return screen(
         title,
         (
@@ -1317,6 +1332,134 @@ def _admin_order_subscription_lines(order: Dict[str, Any]) -> list[str]:
         f"🔗 Подписка: <b>#{sub_id}</b> · <code>{email}</code> · {state}",
         f"📱 Название: <b>{display}</b> · до <b>{end_s}</b>",
     ]
+
+
+def _admin_payment_method_line(order: Dict[str, Any]) -> str:
+    method_key = (order.get("payment_method") or "").strip()
+    if not method_key:
+        return "—"
+    from config.payments import get_payment_method_by_key
+
+    method = get_payment_method_by_key(method_key)
+    if method:
+        return f"{method['emoji']} {method['name']}"
+    return html.escape(method_key)
+
+
+def _admin_discount_lines(order: Dict[str, Any]) -> list[str]:
+    promo = (order.get("promo_code") or "").strip()
+    discount = int(order.get("discount_amount") or 0)
+    original = int(order.get("original_amount") or 0)
+    amount = int(order.get("amount") or 0)
+    lines: list[str] = []
+    if original and original != amount:
+        lines.append(f"💵 Без скидки: <b>{original} ₽</b>")
+    if promo:
+        disc = f" (−{discount} ₽)" if discount > 0 else ""
+        lines.append(f"🎟 Промокод: <code>{html.escape(promo)}</code>{disc}")
+    elif discount > 0:
+        lines.append(f"👥 Реферальная скидка: <b>−{discount} ₽</b>")
+    else:
+        lines.append("🏷 Скидка: <i>нет</i>")
+    return lines
+
+
+def admin_user_sub_last_payment_block(order: Dict[str, Any] | None) -> str:
+    """Блок «последняя оплата» для карточки подписки в админке."""
+    if not order:
+        return (
+            "\n\n💳 <b>Последняя оплата</b>\n"
+            "<i>Нет paid-заказов по этой подписке</i>\n"
+            "(trial / grant-промо / ещё не привязано)"
+        )
+    order_type = order.get("order_type") or "new"
+    action = _admin_order_type_label(order_type)
+    plan = html.escape(str(order.get("plan_name") or "—"))
+    amount = int(order.get("amount") or 0)
+    paid = _admin_order_paid_at(order)
+    lines = [
+        "",
+        "💳 <b>Последняя оплата</b> (покупка/продление)",
+        f"Тип: <b>{action}</b> · {plan}",
+        f"💰 Сумма: <b>{amount} ₽</b>",
+        *_admin_discount_lines(order),
+        f"🏦 Способ: {_admin_payment_method_line(order)}",
+        f"🧾 Заказ: <b>#{order.get('id')}</b>",
+        f"🆔 TX Platega: <code>{html.escape(str(order.get('platega_tx_id') or '—'))}</code>",
+        f"🕐 {paid}",
+    ]
+    if str(order.get("platega_tx_id") or "").startswith("test-"):
+        lines.append("⚠️ <i>Тестовый платёж</i>")
+    return "\n".join(lines)
+
+
+def admin_user_sub_detail_text(
+    *,
+    kind: str,
+    label: str,
+    tg_id: int,
+    sub_id: int,
+    client_email: str,
+    end_date: str,
+    sub_link_id: str | None,
+    display_name: str | None = None,
+    last_order: Dict[str, Any] | None = None,
+) -> str:
+    display = (display_name or "").strip()
+    name_line = f"Название: <b>{html.escape(display)}</b>\n" if display else ""
+    end_s = (end_date or "")[:10] or "—"
+    return (
+        "👤 <b>Подписка клиента</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        f"Тип: {kind}\n"
+        f"Имя: {label}\n"
+        f"TG ID: <code>{tg_id}</code>\n"
+        f"{name_line}"
+        f"Подписка: <code>#{sub_id}</code>\n"
+        f"Клиент: <code>{html.escape(str(client_email or '—'))}</code>\n"
+        f"До: <b>{end_s}</b>\n"
+        f"subId: <code>{html.escape(str(sub_link_id or '—'))}</code>"
+        f"{admin_user_sub_last_payment_block(last_order)}"
+    )
+
+
+def admin_sub_orders_list_text(
+    orders: list[Dict[str, Any]],
+    *,
+    sub_id: int,
+    page: int,
+    total_count: int,
+    page_size: int,
+) -> str:
+    from ui.theme import SEP
+
+    title = f"🧾 <b>Чеки · подписка #{sub_id}</b>"
+    if total_count == 0:
+        return screen(
+            title,
+            "📭 <i>Оплаченных заказов по этой подписке нет.</i>",
+            hint="Trial / grant-промо или заказ ещё не привязан",
+        )
+    if not orders:
+        return screen(title, "На этой странице записей нет.")
+
+    start = page * page_size + 1
+    end = start + len(orders) - 1
+    total_pages = max(1, (total_count + page_size - 1) // page_size)
+    cards: list[str] = []
+    for idx, order in enumerate(orders):
+        if idx > 0:
+            cards.append(SEP)
+        cards.append(_admin_order_list_card(order))
+    return screen(
+        title,
+        (
+            f"📄 Стр. <b>{page + 1}</b>/{total_pages} · "
+            f"<b>{start}–{end}</b> из <b>{total_count}</b>"
+        ),
+        "\n".join(cards),
+        hint="Нажмите чек — полная информация по платежу",
+    )
 
 
 def admin_debug_order_detail_text(order: Dict[str, Any]) -> str:

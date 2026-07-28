@@ -54,7 +54,7 @@ from .ui_helpers import safe_cb_answer, send_or_edit
 router = Router()
 
 _ORDERS_PAGE_SIZE = 6
-_ORDER_STATUSES = frozenset({"paid", "failed"})
+_ORDER_STATUSES = frozenset({"paid", "failed", "pending"})
 
 
 def _parse_orders_list_cb(data: str) -> tuple[str, int]:
@@ -307,7 +307,10 @@ async def cb_admin_debug_orders_menu(cb: CallbackQuery):
             pending_count=stats["pending"],
             failed_count=stats["failed"],
         ),
-        admin_debug_orders_kb(failed_count=stats["failed"]),
+        admin_debug_orders_kb(
+            failed_count=stats["failed"],
+            pending_count=stats["pending"],
+        ),
     )
 
 

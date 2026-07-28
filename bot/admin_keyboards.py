@@ -406,12 +406,23 @@ def admin_debug_tickets_reset_confirm_kb() -> InlineKeyboardMarkup:
     ])
 
 
-def admin_debug_orders_kb(*, failed_count: int = 0) -> InlineKeyboardMarkup:
+def admin_debug_orders_kb(
+    *,
+    failed_count: int = 0,
+    pending_count: int = 0,
+) -> InlineKeyboardMarkup:
     failed_label = f"❌ Неудачные ({failed_count})" if failed_count else "❌ Неудачные"
+    pending_label = (
+        f"⏳ Ожидают оплаты ({pending_count})" if pending_count else "⏳ Ожидают оплаты"
+    )
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="📋 Оплаченные заказы",
             callback_data="adm:debug:orders:list:paid:0",
+        )],
+        [InlineKeyboardButton(
+            text=pending_label,
+            callback_data="adm:debug:orders:list:pending:0",
         )],
         [InlineKeyboardButton(
             text=failed_label,
@@ -762,7 +773,9 @@ def admin_user_detail_kb(
     from_search: bool = False,
     category: str | None = None,
     from_picker: bool = False,
+    has_orders: bool = False,
 ) -> InlineKeyboardMarkup:
+    del has_orders  # кнопка чеков всегда — пустой список тоже информативен
     if from_picker:
         back = f"adm:tg:{tg_id}"
     elif from_search:
@@ -773,19 +786,83 @@ def admin_user_detail_kb(
         back = "adm:users:trial"
     else:
         back = "adm:users"
+    rows: list[list[InlineKeyboardButton]] = [
+        [InlineKeyboardButton(
+            text="🧾 Чеки на эту подписку",
+            callback_data=f"adm:sub:orders:{subscription_id}:0",
+        )],
+    ]
+    rows.append([
+        InlineKeyboardButton(
+            text="🔄 Сброс пробного",
+            callback_data=f"adm:trial_reset:{tg_id}",
+        ),
+        InlineKeyboardButton(
+            text="🗑 Удалить",
+            callback_data=f"adm:del_sub:{subscription_id}",
+        ),
+    ])
+    rows.append([
+        InlineKeyboardButton(text="« К списку", callback_data=back),
+        InlineKeyboardButton(text="« Админ", callback_data="adm:menu"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_sub_orders_kb(
+    subscription_id: int,
+    orders: list,
+    *,
+    page: int,
+    has_prev: bool,
+    has_next: bool,
+) -> InlineKeyboardMarkup:
+    from .messages import admin_order_button_label
+
+    rows: list[list[InlineKeyboardButton]] = []
+    for order in orders:
+        rows.append([InlineKeyboardButton(
+            text=admin_order_button_label(order),
+            callback_data=f"adm:sub:order:{subscription_id}:{order['id']}:{page}",
+        )])
+    nav: list[InlineKeyboardButton] = []
+    if has_prev:
+        nav.append(InlineKeyboardButton(
+            text="‹ Назад",
+            callback_data=f"adm:sub:orders:{subscription_id}:{page - 1}",
+        ))
+    if has_next:
+        nav.append(InlineKeyboardButton(
+            text="Вперёд ›",
+            callback_data=f"adm:sub:orders:{subscription_id}:{page + 1}",
+        ))
+    if nav:
+        rows.append(nav)
+    rows.append([
+        InlineKeyboardButton(
+            text="« К подписке",
+            callback_data=f"adm:user:{subscription_id}",
+        ),
+        InlineKeyboardButton(text="« Админ", callback_data="adm:menu"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_sub_order_detail_kb(
+    subscription_id: int,
+    *,
+    page: int = 0,
+) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="« К чекам",
+            callback_data=f"adm:sub:orders:{subscription_id}:{page}",
+        )],
         [
             InlineKeyboardButton(
-                text="🔄 Сброс пробного",
-                callback_data=f"adm:trial_reset:{tg_id}",
+                text="« К подписке",
+                callback_data=f"adm:user:{subscription_id}",
             ),
-            InlineKeyboardButton(
-                text="🗑 Удалить",
-                callback_data=f"adm:del_sub:{subscription_id}",
-            ),
-        ],
-        [
-            InlineKeyboardButton(text="« К списку", callback_data=back),
             InlineKeyboardButton(text="« Админ", callback_data="adm:menu"),
         ],
     ])

@@ -16,12 +16,15 @@ from services.pricing import list_plans
 from config.plans import get_plan
 from db import trial_grants as trial_db
 from .messages import (
+    admin_debug_order_detail_text,
     admin_plans_text,
     admin_promos_text,
     admin_promo_detail_text,
+    admin_sub_orders_list_text,
     admin_trial_menu_text,
     admin_trial_reset_all_confirm_text,
     admin_trial_reset_confirm_text,
+    admin_user_sub_detail_text,
 )
 from config.trial import is_trial_email
 from services.trial import admin_reset_all_trial_subscriptions, admin_reset_trial
@@ -52,6 +55,8 @@ from .admin_keyboards import (
     admin_users_search_kb,
     admin_user_subs_kb,
     admin_user_detail_kb,
+    admin_sub_orders_kb,
+    admin_sub_order_detail_kb,
     admin_delete_confirm_kb,
     admin_trial_kb,
     admin_trial_reset_all_confirm_kb,
@@ -60,6 +65,8 @@ from .admin_keyboards import (
 from .ui_helpers import safe_cb_answer, send_or_edit
 
 router = Router()
+
+_SUB_ORDERS_PAGE_SIZE = 6
 
 
 def _user_label(username: str | None, first_name: str | None, tg_id: int) -> str:
@@ -304,19 +311,18 @@ async def _show_admin_user_sub_detail(
     user = await db.get_or_create_user(sub["tg_id"])
     label = _user_label(user.get("username"), user.get("first_name"), sub["tg_id"])
     kind = subscription_kind_label(sub.get("client_email"))
-    display = (sub.get("display_name") or "").strip()
-    name_line = f"Название: <b>{display}</b>\n" if display else ""
-    text = (
-        "👤 <b>Подписка клиента</b>\n"
-        "━━━━━━━━━━━━━━━━\n\n"
-        f"Тип: {kind}\n"
-        f"Имя: {label}\n"
-        f"TG ID: <code>{sub['tg_id']}</code>\n"
-        f"{name_line}"
-        f"Подписка: <code>#{sub_id}</code>\n"
-        f"Клиент: <code>{sub['client_email']}</code>\n"
-        f"До: <b>{sub['end_date'][:10]}</b>\n"
-        f"subId: <code>{sub.get('sub_id') or '—'}</code>"
+    paid_orders = await db.get_paid_orders_for_subscription(sub_id, limit=50)
+    last_order = paid_orders[0] if paid_orders else None
+    text = admin_user_sub_detail_text(
+        kind=kind,
+        label=label,
+        tg_id=int(sub["tg_id"]),
+        sub_id=sub_id,
+        client_email=str(sub.get("client_email") or ""),
+        end_date=str(sub.get("end_date") or ""),
+        sub_link_id=sub.get("sub_id"),
+        display_name=sub.get("display_name"),
+        last_order=last_order,
     )
     category = (await state.get_data()).get("admin_user_category")
     kb = admin_user_detail_kb(
@@ -325,12 +331,53 @@ async def _show_admin_user_sub_detail(
         from_search=from_search,
         category=category,
         from_picker=from_picker,
+        has_orders=bool(paid_orders),
     )
     if isinstance(target, CallbackQuery):
         await safe_cb_answer(target)
         await send_or_edit(target, text, kb)
     else:
         await target.answer(text, reply_markup=kb)
+
+
+async def _show_admin_sub_orders(
+    cb: CallbackQuery,
+    state: FSMContext,
+    *,
+    sub_id: int,
+    page: int = 0,
+) -> None:
+    sub = await db.get_subscription_by_id(sub_id)
+    if not sub:
+        await safe_cb_answer(cb, "Подписка не найдена", show_alert=True)
+        return
+
+    page = max(0, int(page))
+    all_orders = await db.get_paid_orders_for_subscription(sub_id, limit=200)
+    total = len(all_orders)
+    page_size = _SUB_ORDERS_PAGE_SIZE
+    total_pages = max(1, (total + page_size - 1) // page_size) if total else 1
+    if page >= total_pages:
+        page = max(0, total_pages - 1)
+    start = page * page_size
+    page_orders = all_orders[start : start + page_size]
+
+    text = admin_sub_orders_list_text(
+        page_orders,
+        sub_id=sub_id,
+        page=page,
+        total_count=total,
+        page_size=page_size,
+    )
+    kb = admin_sub_orders_kb(
+        sub_id,
+        page_orders,
+        page=page,
+        has_prev=page > 0,
+        has_next=start + page_size < total,
+    )
+    await safe_cb_answer(cb)
+    await send_or_edit(cb, text, kb)
 
 
 async def _show_admin_user_subs_picker(
@@ -453,6 +500,55 @@ async def cb_admin_user_detail(cb: CallbackQuery, state: FSMContext):
         sub_id=sub_id,
         from_search=from_search,
         from_picker=from_picker,
+    )
+
+
+@router.callback_query(F.data.regexp(r"^adm:sub:orders:\d+:\d+$"))
+async def cb_admin_sub_orders(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    parts = (cb.data or "").split(":")
+    sub_id = int(parts[3])
+    page = int(parts[4])
+    await _show_admin_sub_orders(cb, state, sub_id=sub_id, page=page)
+
+
+@router.callback_query(F.data.regexp(r"^adm:sub:order:\d+:\d+:\d+$"))
+async def cb_admin_sub_order_detail(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    parts = (cb.data or "").split(":")
+    sub_id = int(parts[3])
+    order_id = int(parts[4])
+    page = int(parts[5])
+    order = await db.get_order_by_id(order_id)
+    if not order or (order.get("status") or "") != "paid":
+        await safe_cb_answer(cb, "Заказ не найден", show_alert=True)
+        return
+    # обогатить username для карточки
+    if order.get("tg_id"):
+        user = await db.get_user(int(order["tg_id"]))
+        if user:
+            order = {
+                **order,
+                "username": user.get("username"),
+                "first_name": user.get("first_name"),
+            }
+    sub = await db.get_subscription_by_id(sub_id)
+    if sub:
+        order = {
+            **order,
+            "subscription_id": sub_id,
+            "subscription_email": sub.get("client_email"),
+            "subscription_display_name": sub.get("display_name"),
+            "subscription_active": bool(sub.get("is_active")),
+            "subscription_end_date": sub.get("end_date"),
+        }
+    await safe_cb_answer(cb)
+    await send_or_edit(
+        cb,
+        admin_debug_order_detail_text(order),
+        admin_sub_order_detail_kb(sub_id, page=page),
     )
 
 
