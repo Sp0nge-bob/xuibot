@@ -15,6 +15,8 @@ LOG_TAIL_PRESETS: tuple[int, ...] = (100, 500, 1000, 5000)
 LOG_TAIL_MIN_LINES = 1
 LOG_TAIL_MAX_LINES = 50_000
 LOG_TAIL_MAX_BYTES = 20 * 1024 * 1024  # 20 MB
+# Целый файл: лимит Bot API ~50 MB
+LOG_FULL_MAX_BYTES = 48 * 1024 * 1024
 
 # id источника: active | arch0, arch1, …
 _SOURCE_ID_RE = re.compile(r"^(?:active|arch\d+)$")
@@ -45,6 +47,21 @@ class LogTailExport:
     source_id: str
     source_label: str
     source_size_bytes: int
+    truncated_by_size: bool
+
+
+@dataclass(frozen=True)
+class LogFullExport:
+    """Результат выгрузки файла целиком."""
+
+    content: bytes
+    filename: str
+    source_path: Path
+    source_id: str
+    source_label: str
+    source_size_bytes: int
+    exported_bytes: int
+    line_count: int
     truncated_by_size: bool
 
 
@@ -303,5 +320,98 @@ def export_log_tail(
         source_id=source.id,
         source_label=source.label,
         source_size_bytes=source_size,
+        truncated_by_size=truncated,
+    )
+
+
+def _resolve_source_or_raise(source_id: str) -> LogSource:
+    source = get_log_source(source_id)
+    if source is None:
+        if source_id == "active":
+            raise FileNotFoundError(
+                "Файл логов не найден (ожидается data/logs/bot.log). "
+                "Проверьте LOG_DIR и что бот уже писал логи."
+            )
+        raise FileNotFoundError(
+            f"Лог «{source_id}» не найден (архив удалён при ротации или перезапуске)."
+        )
+    if not source.path.is_file():
+        raise FileNotFoundError(f"Файл отсутствует: {source.path.name}")
+    return source
+
+
+def export_log_full(*, source_id: str = "active") -> LogFullExport:
+    """
+    Выгрузить выбранный лог целиком.
+    Если больше LOG_FULL_MAX_BYTES — отдаём хвост файла (конец) + пометка truncated.
+    """
+    source = _resolve_source_or_raise(source_id)
+    path = source.path
+
+    if source.is_active:
+        _flush_log_sinks()
+
+    source_size = path.stat().st_size
+    truncated = False
+
+    with path.open("rb") as f:
+        if source_size <= LOG_FULL_MAX_BYTES:
+            body = f.read()
+        else:
+            truncated = True
+            f.seek(max(0, source_size - LOG_FULL_MAX_BYTES))
+            body = f.read()
+            # выровнять на начало строки
+            nl = body.find(b"\n")
+            if nl != -1 and nl + 1 < len(body):
+                body = body[nl + 1 :]
+
+    line_count = body.count(b"\n")
+    if body and not body.endswith(b"\n"):
+        line_count += 1
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    stem = _safe_export_stem(source)
+    filename = f"bot_log_{stem}_full_{stamp}.txt"
+
+    header_lines = [
+        "# VPN Platega Bot — full log export",
+        f"# exported_at: {now}",
+        f"# source_id: {source.id}",
+        f"# source_label: {source.label}",
+        f"# source: {path.resolve()}",
+        f"# is_active_session: {str(source.is_active).lower()}",
+        f"# source_size_bytes: {source_size}",
+        f"# exported_bytes: {len(body)}",
+        f"# line_count_approx: {line_count}",
+        f"# truncated_by_size_limit: {str(truncated).lower()}",
+        f"# max_bytes: {LOG_FULL_MAX_BYTES}",
+        "#",
+        "# WARNING: may contain personal data, payment ids, panel hosts.",
+        "#" + "=" * 60,
+        "",
+    ]
+    if truncated:
+        header_lines.insert(
+            -2,
+            f"# NOTE: source larger than {LOG_FULL_MAX_BYTES} bytes — exported tail only.",
+        )
+    header = ("\n".join(header_lines)).encode("utf-8")
+    content = header + body
+    if len(content) > LOG_FULL_MAX_BYTES + 4096:
+        # header + body still over — drop header bulk, keep body tail
+        content = body[-LOG_FULL_MAX_BYTES:]
+        truncated = True
+
+    return LogFullExport(
+        content=content,
+        filename=filename,
+        source_path=path,
+        source_id=source.id,
+        source_label=source.label,
+        source_size_bytes=source_size,
+        exported_bytes=len(content),
+        line_count=line_count,
         truncated_by_size=truncated,
     )

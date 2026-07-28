@@ -249,6 +249,10 @@ def admin_logs_tail_kb(source_id: str) -> InlineKeyboardMarkup:
         text="✏️ Своё число строк",
         callback_data=f"adm:logs:custom:{sid}",
     )])
+    rows.append([InlineKeyboardButton(
+        text="📦 Весь файл",
+        callback_data=f"adm:logs:full:{sid}",
+    )])
     rows.append([
         InlineKeyboardButton(text="« К списку логов", callback_data="adm:logs"),
         InlineKeyboardButton(text="« Админ", callback_data="adm:menu"),
