@@ -339,6 +339,10 @@ def admin_debug_kb(
         callback_data="adm:debug:lockdown",
     )])
     rows += [
+        [InlineKeyboardButton(
+            text="📥 Подтянуть с панели",
+            callback_data="adm:debug:pull_panel",
+        )],
         [
             InlineKeyboardButton(
                 text="🎁 Пробные",
@@ -366,6 +370,16 @@ def admin_debug_kb(
         [InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_debug_pull_panel_confirm_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="⚠️ Да, подтянуть с ★ Primary",
+            callback_data="adm:debug:pull_panel:confirm",
+        )],
+        [InlineKeyboardButton(text="« Отмена", callback_data="adm:debug:enter")],
+    ])
 
 
 def admin_debug_users_reset_confirm_kb() -> InlineKeyboardMarkup:

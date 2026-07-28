@@ -117,20 +117,38 @@ async def _deactivate_after_primary_delete(sub: Dict[str, Any]) -> None:
     await db.deactivate_subscription(sub["id"])
 
 
-async def _apply_panel_to_db(sub: Dict[str, Any], client) -> Optional[Dict[str, Any]]:
+async def _apply_panel_to_db(
+    sub: Dict[str, Any],
+    client,
+    *,
+    panel_priority: bool = False,
+) -> Optional[Dict[str, Any]]:
+    """
+    Записать данные клиента панели в БД.
+    panel_priority=False (старое): end_date = max(panel, db), disable в панели игнор.
+    panel_priority=True: ★ Primary — источник истины (срок, enable, traffic, sub_id).
+    """
     if not client:
         await db.deactivate_subscription(sub["id"])
         return None
 
     now_ms = int(datetime.utcnow().timestamp() * 1000)
-    panel_expiry_ms = client.expiry_time or 0
-    db_expiry_ms = _iso_to_ms(sub["end_date"])
-    expiry_ms = max(panel_expiry_ms, db_expiry_ms)
+    panel_expiry_ms = int(client.expiry_time or 0)
+    db_expiry_ms = _iso_to_ms(str(sub["end_date"]))
 
-    # Ручной disable в панели игнорируем — деактивируем только по expiry.
-    if expiry_ms <= now_ms:
-        await db.deactivate_subscription(sub["id"])
-        return None
+    if panel_priority:
+        expiry_ms = panel_expiry_ms
+        # На панели выключен или срок прошёл — деактивируем в БД
+        if not bool(client.enable) or expiry_ms <= now_ms:
+            if sub.get("is_active"):
+                await db.deactivate_subscription(sub["id"])
+            return None
+    else:
+        expiry_ms = max(panel_expiry_ms, db_expiry_ms)
+        # Ручной disable в панели игнорируем — деактивируем только по expiry.
+        if expiry_ms <= now_ms:
+            await db.deactivate_subscription(sub["id"])
+            return None
 
     await db.update_subscription_from_panel(
         sub["id"],
@@ -138,12 +156,16 @@ async def _apply_panel_to_db(sub: Dict[str, Any], client) -> Optional[Dict[str, 
         sub_id=client.sub_id or sub.get("sub_id"),
         is_active=True,
         traffic_limit_gb=_client_traffic_limit_gb(client),
+        clear_expiry_reminder=panel_priority,
     )
     return await db.get_subscription_by_id(sub["id"])
 
 
 async def sync_subscription(
-    sub: Dict[str, Any], *, repair: bool = False,
+    sub: Dict[str, Any],
+    *,
+    repair: bool = False,
+    panel_priority: bool = False,
 ) -> Optional[Dict[str, Any]]:
     api = await get_api()
     await get_panel_cache(api).refresh(api)
@@ -166,6 +188,16 @@ async def sync_subscription(
         client = await fetch_panel_client(sub["client_email"])
 
     if not audit["present_allowed"]:
+        # panel_priority: не каскадим удаление на вторичные без явного repair —
+        # только деактивируем запись в БД (ручные правки / сверка).
+        if panel_priority:
+            logger.info(
+                "Pull from panel: {} нет в инбаундах Primary — деактивируем #{}",
+                sub["client_email"], sub["id"],
+            )
+            if sub.get("is_active"):
+                await db.deactivate_subscription(sub["id"])
+            return None
         logger.error(
             "Клиент {} отсутствует в инбаундах {} — каскад на вторичные",
             sub["client_email"], audit["allowed"],
@@ -180,7 +212,102 @@ async def sync_subscription(
             len(audit["present_allowed"]), len(audit["allowed"]), audit["missing_allowed"],
         )
 
-    return await _apply_panel_to_db(sub, client)
+    return await _apply_panel_to_db(sub, client, panel_priority=panel_priority)
+
+
+async def pull_all_subscriptions_from_primary() -> Dict[str, Any]:
+    """
+    Сверка всех активных подписок БД с ★ Primary.
+    Панель — приоритет: end_date, sub_id, traffic, enable → is_active.
+    Не пишет на панель (только БД).
+    """
+    import asyncio
+
+    from config.settings import settings
+
+    subs = await db.get_all_active_subscriptions()
+    stats: Dict[str, Any] = {
+        "total": len(subs),
+        "updated": 0,
+        "unchanged": 0,
+        "deactivated": 0,
+        "missing": 0,
+        "failed": 0,
+        "samples": [],  # короткие примеры изменений
+    }
+    if not subs:
+        return stats
+
+    # один refresh кэша на прогон
+    api = await get_api()
+    await get_panel_cache(api).refresh(api, force=True)
+
+    sem = asyncio.Semaphore(settings.XUI_PANEL_CONCURRENCY)
+    stats_lock = asyncio.Lock()
+
+    async def _bump(key: str, sample: str | None = None) -> None:
+        async with stats_lock:
+            stats[key] = int(stats.get(key) or 0) + 1
+            if sample and len(stats["samples"]) < 8:
+                stats["samples"].append(sample)
+
+    async def _one(sub: Dict[str, Any]) -> None:
+        email = sub.get("client_email") or "?"
+        sub_id = sub.get("id")
+        before_end = str(sub.get("end_date") or "")
+        before_active = bool(sub.get("is_active"))
+        try:
+            async with sem:
+                # без повторного full refresh в каждом sync — client fetch достаточно
+                client = await fetch_panel_client(email)
+                if not client:
+                    if before_active:
+                        await db.deactivate_subscription(int(sub_id))
+                        await _bump("deactivated", f"#{sub_id} {email}: нет на панели → off")
+                        await _bump("missing")
+                    else:
+                        await _bump("unchanged")
+                    return
+
+                updated = await _apply_panel_to_db(
+                    sub, client, panel_priority=True,
+                )
+                if updated is None:
+                    await _bump(
+                        "deactivated",
+                        f"#{sub_id} {email}: panel enable/expiry → off",
+                    )
+                    return
+
+                after_end = str(updated.get("end_date") or "")
+                # сравнение с точностью до секунды
+                changed = (
+                    before_end[:19] != after_end[:19]
+                    or (sub.get("sub_id") or "") != (updated.get("sub_id") or "")
+                    or int(sub.get("traffic_limit_gb") or 0)
+                    != int(updated.get("traffic_limit_gb") or 0)
+                )
+                if changed:
+                    await _bump(
+                        "updated",
+                        f"#{sub_id} {email}: {before_end[:10]} → {after_end[:10]}",
+                    )
+                else:
+                    await _bump("unchanged")
+        except Exception as e:
+            logger.exception("Pull from panel failed for #{} {}: {}", sub_id, email, e)
+            await _bump("failed", f"#{sub_id} {email}: error {type(e).__name__}")
+
+    await asyncio.gather(*[_one(s) for s in subs])
+    logger.info(
+        "Pull from Primary: total={} updated={} unchanged={} deactivated={} failed={}",
+        stats["total"],
+        stats["updated"],
+        stats["unchanged"],
+        stats["deactivated"],
+        stats["failed"],
+    )
+    return stats
 
 
 async def sync_user_subscriptions(tg_id: int, *, repair: bool = False) -> List[Dict[str, Any]]:

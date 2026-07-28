@@ -29,6 +29,7 @@ from .admin_keyboards import (
     admin_debug_orders_list_kb,
     admin_debug_orders_reset_confirm_kb,
     admin_debug_promo_reset_confirm_kb,
+    admin_debug_pull_panel_confirm_kb,
     admin_debug_tickets_reset_confirm_kb,
     admin_debug_users_reset_confirm_kb,
 )
@@ -42,6 +43,8 @@ from .messages import (
     admin_debug_orders_menu_text,
     admin_debug_orders_reset_confirm_text,
     admin_debug_promo_reset_confirm_text,
+    admin_debug_pull_panel_confirm_text,
+    admin_debug_pull_panel_result_text,
     admin_debug_tickets_reset_confirm_text,
     admin_debug_users_reset_confirm_text,
 )
@@ -191,6 +194,58 @@ async def cb_admin_debug_test_mode_reset(cb: CallbackQuery):
     await clear_test_mode_override()
     await safe_cb_answer(cb, "TEST_MODE из .env")
     await _show_debug_menu(cb)
+
+
+@router.callback_query(F.data == "adm:debug:pull_panel")
+async def cb_admin_debug_pull_panel_confirm(cb: CallbackQuery):
+    if not is_debug_admin(cb.from_user.id):
+        return
+    active_subs = len(await db.get_all_active_subscriptions())
+    await safe_cb_answer(cb)
+    await send_or_edit(
+        cb,
+        admin_debug_pull_panel_confirm_text(active_subs=active_subs),
+        admin_debug_pull_panel_confirm_kb(),
+    )
+
+
+@router.callback_query(F.data == "adm:debug:pull_panel:confirm")
+async def cb_admin_debug_pull_panel_run(cb: CallbackQuery):
+    if not is_debug_admin(cb.from_user.id):
+        return
+    await safe_cb_answer(cb, "Читаем ★ Primary…")
+    await send_or_edit(
+        cb,
+        "⏳ <b>Подтягиваем данные с ★ Primary…</b>\n\n"
+        "Это может занять минуту при большом числе подписок.",
+    )
+    try:
+        from services.primary_gate import require_primary_for_payment
+        from services.subscription_sync import pull_all_subscriptions_from_primary
+
+        if not await require_primary_for_payment():
+            await send_or_edit(
+                cb,
+                "❌ <b>★ Primary недоступна</b>\n\n"
+                "Сверка отменена. Проверьте ноду и повторите.",
+                await _debug_kb(),
+            )
+            return
+        stats = await pull_all_subscriptions_from_primary()
+    except Exception as e:
+        logger.exception("Pull from panel (debug) failed: {}", e)
+        await send_or_edit(
+            cb,
+            f"❌ Ошибка сверки: <code>{type(e).__name__}: {str(e)[:200]}</code>",
+            await _debug_kb(),
+        )
+        return
+
+    await send_or_edit(
+        cb,
+        admin_debug_pull_panel_result_text(stats),
+        await _debug_kb(),
+    )
 
 
 @router.callback_query(F.data == "adm:debug:promos_reset")

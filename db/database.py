@@ -1065,33 +1065,39 @@ async def update_subscription_from_panel(
     sub_id: Optional[str] = None,
     is_active: bool = True,
     traffic_limit_gb: Optional[int] = None,
+    clear_expiry_reminder: bool = False,
 ):
+    reminder_sql = (
+        ", expiry_reminder_sent_at = NULL" if clear_expiry_reminder else ""
+    )
     async with get_db() as db:
         if sub_id and traffic_limit_gb is not None:
             await db.execute(
-                """UPDATE subscriptions
+                f"""UPDATE subscriptions
                    SET end_date = ?, sub_id = ?, client_uuid = ?, is_active = ?,
-                       traffic_limit_gb = ?
+                       traffic_limit_gb = ?{reminder_sql}
                    WHERE id = ?""",
                 (end_date, sub_id, sub_id, int(is_active), traffic_limit_gb, subscription_id),
             )
         elif sub_id:
             await db.execute(
-                """UPDATE subscriptions
-                   SET end_date = ?, sub_id = ?, client_uuid = ?, is_active = ?
+                f"""UPDATE subscriptions
+                   SET end_date = ?, sub_id = ?, client_uuid = ?, is_active = ?{reminder_sql}
                    WHERE id = ?""",
                 (end_date, sub_id, sub_id, int(is_active), subscription_id),
             )
         elif traffic_limit_gb is not None:
             await db.execute(
-                """UPDATE subscriptions
-                   SET end_date = ?, is_active = ?, traffic_limit_gb = ?
+                f"""UPDATE subscriptions
+                   SET end_date = ?, is_active = ?, traffic_limit_gb = ?{reminder_sql}
                    WHERE id = ?""",
                 (end_date, int(is_active), traffic_limit_gb, subscription_id),
             )
         else:
             await db.execute(
-                "UPDATE subscriptions SET end_date = ?, is_active = ? WHERE id = ?",
+                f"""UPDATE subscriptions
+                   SET end_date = ?, is_active = ?{reminder_sql}
+                   WHERE id = ?""",
                 (end_date, int(is_active), subscription_id),
             )
         await db.commit()

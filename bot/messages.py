@@ -928,7 +928,44 @@ def admin_debug_menu_text(
         f"🧾 Заказов в истории: <b>{orders_count}</b>\n"
         f"🎫 Тикетов: <b>{tickets_count}</b> · сообщений: <b>{ticket_messages_count}</b>\n"
         f"👥 Пользователей в БД: <b>{users_count}</b>\n\n"
+        "📥 <b>Подтянуть с панели</b> — ★ Primary → БД "
+        "(сроки после ручных правок в 3x-ui).\n\n"
         "Выберите действие:"
+    )
+
+
+def admin_debug_pull_panel_confirm_text(*, active_subs: int) -> str:
+    return (
+        "📥 <b>Подтянуть данные с ★ Primary</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        f"Активных подписок в БД: <b>{active_subs}</b>\n\n"
+        "Бот прочитает клиентов на <b>основной</b> панели и запишет в БД:\n"
+        "• <code>end_date</code> (срок)\n"
+        "• <code>sub_id</code>, трафик\n"
+        "• <code>is_active</code> (если на панели выкл / истёк — off в БД)\n\n"
+        "⚠️ <b>Приоритет у панели</b> — даты в БД будут как в 3x-ui "
+        "(в т.ч. укорочение). На панель <b>ничего не пишется</b>.\n\n"
+        "Не путать с «Синхронизировать ноды» (там БД → панель)."
+    )
+
+
+def admin_debug_pull_panel_result_text(stats: dict) -> str:
+    samples = stats.get("samples") or []
+    sample_block = ""
+    if samples:
+        sample_block = "\n\n<b>Примеры:</b>\n" + "\n".join(
+            f"• <code>{s}</code>" for s in samples[:8]
+        )
+    return (
+        "📥 <b>Сверка с ★ Primary завершена</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        f"Всего в прогоне: <b>{stats.get('total', 0)}</b>\n"
+        f"Обновлено: <b>{stats.get('updated', 0)}</b>\n"
+        f"Без изменений: <b>{stats.get('unchanged', 0)}</b>\n"
+        f"Деактивировано: <b>{stats.get('deactivated', 0)}</b>"
+        f" (нет/выкл/истекло на панели: <b>{stats.get('missing', 0)}</b>)\n"
+        f"Ошибок: <b>{stats.get('failed', 0)}</b>"
+        f"{sample_block}"
     )
 
 
