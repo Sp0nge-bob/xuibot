@@ -257,6 +257,7 @@ async def cb_ticket_view(cb: CallbackQuery, state: FSMContext):
             ticket_id,
             is_open=ticket["status"] == tickets_db.STATUS_OPEN,
             is_refund=ticket.get("category") == tickets_db.CATEGORY_REFUND,
+            subscription_id=ticket.get("subscription_id"),
         ),
     )
 
@@ -285,6 +286,7 @@ async def cb_ticket_session_end(cb: CallbackQuery, state: FSMContext):
                 ticket_id,
                 is_open=ticket["status"] == tickets_db.STATUS_OPEN,
                 is_refund=ticket.get("category") == tickets_db.CATEGORY_REFUND,
+                subscription_id=ticket.get("subscription_id"),
             ),
         )
 
@@ -316,7 +318,7 @@ async def cb_refund(cb: CallbackQuery):
         await send_or_edit(
             cb,
             refund_confirm_text(order),
-            refund_confirm_kb(sub_id, order["id"]),
+            refund_confirm_kb(sub_id, order["id"], back_to_pick=False),
         )
         return
     await send_or_edit(cb, refund_pick_text(), refund_pick_kb(sub_id, orders))
@@ -347,7 +349,7 @@ async def cb_refund_pick(cb: CallbackQuery):
     await send_or_edit(
         cb,
         refund_confirm_text(order),
-        refund_confirm_kb(sub_id, order_id),
+        refund_confirm_kb(sub_id, order_id, back_to_pick=True),
     )
 
 
@@ -486,13 +488,16 @@ async def show_subscription_detail(
     limit_ip = await resolve_limit_ip_for_email(sub.get("client_email") or "")
     sub_link = await build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
     text = subscription_manage_text(sub, sub_link, limit_ip=limit_ip)
+    # Если подписок несколько — «Назад» к списку; если одна — в главное меню
+    active_subs = await get_active_subscriptions_for_ui(tg_id)
+    back_cb = "manage_sub" if len(active_subs) > 1 else "main_menu"
     kb = subscription_manage_kb(
         sub_id,
         refund_tickets=refund_by_sub.get(sub_id, []),
         can_request_refund=can_refund,
         can_extend=not extend_blocked,
         is_trial=is_trial_email(sub.get("client_email")),
-        back_callback="manage_sub",
+        back_callback=back_cb,
     )
     if isinstance(target, CallbackQuery):
         await send_or_edit(target, text, kb)

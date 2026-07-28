@@ -386,6 +386,7 @@ def ticket_view_kb(
     *,
     is_open: bool = True,
     is_refund: bool = False,
+    subscription_id: int | None = None,
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     if is_open:
@@ -393,8 +394,15 @@ def ticket_view_kb(
             text="💬 Начать переписку",
             callback_data=f"ticket_session:{ticket_id}",
         )])
-    back_data = "manage_sub" if is_refund else "support"
-    back_text = BTN_SUBSCRIPTION if is_refund else BTN_BACK
+    if is_refund and subscription_id:
+        back_data = f"manage_sub:{int(subscription_id)}"
+        back_text = BTN_SUBSCRIPTION
+    elif is_refund:
+        back_data = "manage_sub"
+        back_text = BTN_SUBSCRIPTION
+    else:
+        back_data = "support"
+        back_text = BTN_BACK
     rows.append(nav_row(back_data, back_text=back_text))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -427,18 +435,28 @@ def refund_pick_kb(sub_id: int, orders: list[dict]) -> InlineKeyboardMarkup:
         )]
         for order in orders
     ]
-    rows.append(nav_row("manage_sub"))
+    # Назад → карточка этой подписки (не bare manage_sub)
+    rows.append(nav_row(f"manage_sub:{sub_id}"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def refund_confirm_kb(sub_id: int, order_id: int) -> InlineKeyboardMarkup:
+def refund_confirm_kb(
+    sub_id: int,
+    order_id: int,
+    *,
+    back_to_pick: bool = False,
+) -> InlineKeyboardMarkup:
+    """
+    back_to_pick=True — несколько оплат: «Назад» к выбору заказа.
+    False — один заказ / прямой вход: «Назад» к карточке подписки.
+    """
+    back = f"refund:{sub_id}" if back_to_pick else f"manage_sub:{sub_id}"
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="✅ Да, запросить возврат",
             callback_data=f"refund_confirm:{sub_id}:{order_id}",
         )],
-        nav_row(f"refund:{sub_id}"),
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="manage_sub")],
+        nav_row(back),
     ])
 
 
