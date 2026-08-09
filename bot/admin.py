@@ -943,6 +943,28 @@ async def cb_admin_promo_detail(cb: CallbackQuery, state: FSMContext):
     await send_or_edit(cb, admin_promo_detail_text(promo), _promo_detail_kb(promo))
 
 
+@router.callback_query(F.data.regexp(r"^adm:promo:edit_menu:\d+$"))
+async def cb_admin_promo_edit_menu(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    await state.set_state(None)
+    promo_id = int(cb.data.rsplit(":", 1)[1])
+    promo = await promo_db.get_promo_by_id(promo_id)
+    if not promo:
+        await safe_cb_answer(cb, "Промокод не найден", show_alert=True)
+        return
+    from .admin_keyboards import admin_promo_edit_menu_kb
+    await safe_cb_answer(cb)
+    await send_or_edit(
+        cb,
+        admin_promo_detail_text(promo) + "\n\n✏️ <b>Что изменить?</b>",
+        admin_promo_edit_menu_kb(
+            promo_id,
+            is_grant=promo_db.is_grant_promo(promo),
+        ),
+    )
+
+
 @router.callback_query(F.data.regexp(r"^adm:promo:edit:code:\d+$"))
 async def cb_admin_promo_edit_code(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):

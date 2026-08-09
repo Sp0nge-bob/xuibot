@@ -1035,7 +1035,29 @@ def admin_promo_detail_kb(
     is_active: bool,
     is_grant: bool = False,
 ) -> InlineKeyboardMarkup:
+    del is_grant  # тип учитывается в подменю редактирования
     toggle = "⏸ Выкл" if is_active else "✅ Вкл"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="✏️ Редактирование",
+            callback_data=f"adm:promo:edit_menu:{promo_id}",
+        )],
+        [
+            InlineKeyboardButton(text=toggle, callback_data=f"adm:promo:toggle:{promo_id}"),
+            InlineKeyboardButton(text="🗑 Удалить", callback_data=f"adm:promo:del:{promo_id}"),
+        ],
+        [
+            InlineKeyboardButton(text="« Промокоды", callback_data="adm:promos"),
+            InlineKeyboardButton(text="« Админ", callback_data="adm:menu"),
+        ],
+    ])
+
+
+def admin_promo_edit_menu_kb(
+    promo_id: int,
+    *,
+    is_grant: bool = False,
+) -> InlineKeyboardMarkup:
     value_btn = (
         InlineKeyboardButton(
             text="🎁 Тариф grant",
@@ -1048,10 +1070,6 @@ def admin_promo_detail_kb(
         )
     )
     return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text=toggle, callback_data=f"adm:promo:toggle:{promo_id}"),
-            InlineKeyboardButton(text="🗑 Удалить", callback_data=f"adm:promo:del:{promo_id}"),
-        ],
         [
             InlineKeyboardButton(text="✏️ Код", callback_data=f"adm:promo:edit:code:{promo_id}"),
             value_btn,
@@ -1070,10 +1088,10 @@ def admin_promo_detail_kb(
             text="📅 Срок действия",
             callback_data=f"adm:promo:edit:valid:{promo_id}",
         )],
-        [
-            InlineKeyboardButton(text="« Промокоды", callback_data="adm:promos"),
-            InlineKeyboardButton(text="« Админ", callback_data="adm:menu"),
-        ],
+        [InlineKeyboardButton(
+            text="« К промокоду",
+            callback_data=f"adm:promo:{promo_id}",
+        )],
     ])
 
 
