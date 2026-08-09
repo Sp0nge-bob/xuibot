@@ -1549,7 +1549,7 @@ async def msg_promo_code(message: Message, state: FSMContext):
 
     await user_answer(
         message,
-        "⏳ Обрабатываем промокод…\n<i>Grant-коды могут занять несколько секунд (панель 3x-ui).</i>",
+        "⏳ Обрабатываем промокод…\n<i>Активация может занять несколько секунд.</i>",
     )
     try:
         result = await redeem_promo_code(message.from_user.id, code)
@@ -1610,7 +1610,7 @@ async def _run_grant_promo_cb(
     subscription_id: int | None = None,
     loading_text: str = "⏳ Выдаём подписку по промокоду…",
 ) -> None:
-    """Сразу отвечаем на callback, потом долгая работа с панелью."""
+    """Сразу отвечаем на callback, потом долгая выдача grant-промо."""
     from services.grant_promo import fulfill_grant_promo
 
     await safe_cb_answer(cb, "Выдаём…")
