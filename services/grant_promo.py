@@ -49,15 +49,19 @@ async def fulfill_grant_promo(
     *,
     mode: GrantPromoMode,
     subscription_id: int | None = None,
+    promo: dict | None = None,
+    skip_revalidate: bool = False,
 ) -> FulfillmentResult:
     """Применить grant-промокод после выбора пользователя (или сразу, если платной подписки нет)."""
-    promo = await promo_db.get_promo_by_id(promo_id)
+    if promo is None:
+        promo = await promo_db.get_promo_by_id(promo_id)
     if not promo:
         raise ValueError("Промокод не найден")
 
-    _, err = await validate_grant_promo(promo["code"], tg_id=tg_id)
-    if err:
-        raise ValueError(err)
+    if not skip_revalidate:
+        _, err = await validate_grant_promo(promo["code"], tg_id=tg_id)
+        if err:
+            raise ValueError(err)
 
     plan_id = promo_db.grant_plan_id(promo)
     plan = get_plan(plan_id or "")
@@ -115,6 +119,8 @@ async def fulfill_grant_promo(
         promo["id"],
         tg_id,
         subscription_id=bonus_sub_id,
+        promo=promo,
+        skip_limit_check=skip_revalidate,
     )
     logger.info(
         "Grant promo {} redeemed by tg_id={} mode={} sub={}",

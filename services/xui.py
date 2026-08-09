@@ -1123,31 +1123,46 @@ async def purge_client_on_secondaries(email: str) -> list[str]:
     from db.xui_nodes import get_secondary_nodes
 
     _assert_bot_client_email(email)
+    nodes = [
+        n
+        for n in _dedupe_nodes_by_host(await get_secondary_nodes(healthy_only=False))
+        if n.get("is_enabled", True)
+    ]
+    if not nodes:
+        return []
+
     purged_nodes: list[str] = []
-    nodes = _dedupe_nodes_by_host(await get_secondary_nodes(healthy_only=False))
+    lock = asyncio.Lock()
+    sem = asyncio.Semaphore(settings.XUI_PANEL_CONCURRENCY)
 
-    for node in nodes:
-        if not node.get("is_enabled", True):
-            continue
+    async def _one(node: dict) -> None:
         name = node.get("name") or str(node.get("id"))
-        try:
-            api = await get_api_for_node(node)
-            if not await _is_client_present_on_panel(api, email):
-                continue
-            await remove_bot_client_on_panel(api, email)
-            purged_nodes.append(name)
-            logger.info("Призрак {} удалён с вторичной {}", email, name)
-        except Exception as e:
-            logger.error("Не удалось удалить призрак {} с {}: {}", email, name, e)
+        async with sem:
+            try:
+                api = await get_api_for_node(node)
+                # Только unified get — полный scan settings/groups слишком медленный
+                if not await _unified_get_client_info(api, email):
+                    return
+                await remove_bot_client_on_panel(api, email)
+                async with lock:
+                    purged_nodes.append(str(name))
+                logger.info("Призрак {} удалён с вторичной {}", email, name)
+            except Exception as e:
+                logger.error("Не удалось удалить призрак {} с {}: {}", email, name, e)
 
-    panel_cache.invalidate()
+    await asyncio.gather(*[_one(n) for n in nodes])
+    if purged_nodes:
+        panel_cache.invalidate()
     return purged_nodes
 
 
 async def ensure_client_absent_on_primary(email: str) -> list[int]:
     """Лёгкая очистка только на основной ноде перед clients/add."""
     api = await get_api()
-    return await _ensure_email_absent_on_panel(api, email)
+    # Быстрый путь: нет в unified — не сканируем settings/groups
+    if not await _unified_get_client_info(api, email):
+        return []
+    return await _purge_client_from_panel(api, email)
 
 
 async def reactivate_client_on_primary(
@@ -1235,14 +1250,8 @@ async def provision_client(
             sub_link = await build_sub_link(resolved_sub_id)
             return email, resolved_sub_id, sub_link
 
-    ghost_nodes = await purge_client_on_secondaries(email)
-    if ghost_nodes:
-        logger.info(
-            "Перед созданием {}: удалены призраки на вторичных {}",
-            email, ", ".join(ghost_nodes),
-        )
-    await ensure_client_absent_on_primary(email)
-
+    # Новый email на Primary: не ждём обход всех вторичных (раньше — основной «тупняк»
+    # grant-промо). Призраки подчистим в фоне после успешного add.
     resolved_sub_id = sub_id or secrets.token_urlsafe(12)[:16]
 
     async def _add() -> None:
@@ -1265,9 +1274,29 @@ async def provision_client(
             "Дубликат {} на основной — локальная очистка и повторный add",
             email,
         )
-        await _delete_client_by_email(api, email)
-        await asyncio.sleep(0.5)
+        await ensure_client_absent_on_primary(email)
+        await asyncio.sleep(0.3)
         await _add()
+
+    async def _bg_secondary_ghost_purge() -> None:
+        try:
+            ghost_nodes = await purge_client_on_secondaries(email)
+            if ghost_nodes:
+                logger.info(
+                    "Фон: призраки {} сняты с вторичных {}",
+                    email,
+                    ", ".join(ghost_nodes),
+                )
+        except Exception as e:
+            logger.warning("Фон: purge secondaries {} failed: {}", email, e)
+
+    try:
+        asyncio.create_task(
+            _bg_secondary_ghost_purge(),
+            name=f"purge_sec_{email[:24]}",
+        )
+    except Exception:
+        pass
 
     sub_link = await build_sub_link(resolved_sub_id)
     return email, resolved_sub_id, sub_link

@@ -1547,11 +1547,14 @@ async def msg_promo_code(message: Message, state: FSMContext):
         )
         return
 
-    await user_answer(message,"⏳ Проверяем промокод…")
+    await user_answer(
+        message,
+        "⏳ Обрабатываем промокод…\n<i>Grant-коды могут занять несколько секунд (панель 3x-ui).</i>",
+    )
     try:
         result = await redeem_promo_code(message.from_user.id, code)
     except ValueError as e:
-        await user_answer(message,f"❌ {e}", reply_markup=promo_kb)
+        await user_answer(message, f"❌ {e}", reply_markup=promo_kb)
         return
     except Exception as e:
         logger.exception("Promo redeem error: {}", e)
@@ -1581,7 +1584,11 @@ async def msg_promo_code(message: Message, state: FSMContext):
         return
 
     if result.message:
-        await user_answer(message,result.message, reply_markup=promo_kb if from_purchase else back_to_main_kb())
+        await user_answer(
+            message,
+            result.message,
+            reply_markup=promo_kb if from_purchase else back_to_main_kb(),
+        )
 
 
 async def _deliver_grant_fulfillment(cb: CallbackQuery, fulfillment) -> None:
@@ -1593,6 +1600,47 @@ async def _deliver_grant_fulfillment(cb: CallbackQuery, fulfillment) -> None:
         link_message=fulfillment.link_message,
         reply_markup=fulfillment_success_kb(),
     )
+
+
+async def _run_grant_promo_cb(
+    cb: CallbackQuery,
+    *,
+    promo_id: int,
+    mode: str,
+    subscription_id: int | None = None,
+    loading_text: str = "⏳ Выдаём подписку по промокоду…",
+) -> None:
+    """Сразу отвечаем на callback, потом долгая работа с панелью."""
+    from services.grant_promo import fulfill_grant_promo
+
+    await safe_cb_answer(cb, "Выдаём…")
+    try:
+        await send_or_edit(cb, loading_text)
+    except Exception:
+        pass
+    try:
+        fulfillment = await fulfill_grant_promo(
+            cb.from_user.id,
+            promo_id,
+            mode=mode,  # type: ignore[arg-type]
+            subscription_id=subscription_id,
+        )
+    except ValueError as e:
+        await send_or_edit(
+            cb,
+            f"❌ {e}",
+            grant_promo_choice_kb(promo_id) if mode != "new" else back_to_main_kb(),
+        )
+        return
+    except Exception as e:
+        logger.exception("Grant promo {} failed: {}", mode, e)
+        await send_or_edit(
+            cb,
+            "❌ Не удалось применить промокод. Попробуйте позже.",
+            back_to_main_kb(),
+        )
+        return
+    await _deliver_grant_fulfillment(cb, fulfillment)
 
 
 async def _show_grant_promo_choice(cb: CallbackQuery, promo_id: int) -> None:
@@ -1628,7 +1676,7 @@ async def cb_grant_promo_back(cb: CallbackQuery):
 
 @router.callback_query(F.data.regexp(r"^grant_promo:extend:\d+$"))
 async def cb_grant_promo_extend(cb: CallbackQuery):
-    from services.grant_promo import fulfill_grant_promo, grant_promo_extend_picker_text
+    from services.grant_promo import grant_promo_extend_picker_text
 
     promo_id = int(cb.data.rsplit(":", 1)[1])
     paid_subs = await db.get_active_paid_subscriptions(cb.from_user.id)
@@ -1643,73 +1691,42 @@ async def cb_grant_promo_extend(cb: CallbackQuery):
             grant_promo_extend_picker_kb(promo_id, paid_subs),
         )
         return
-    try:
-        fulfillment = await fulfill_grant_promo(
-            cb.from_user.id,
-            promo_id,
-            mode="extend",
-            subscription_id=paid_subs[0]["id"],
-        )
-    except ValueError as e:
-        await safe_cb_answer(cb, str(e), show_alert=True)
-        return
-    except Exception as e:
-        logger.exception("Grant promo extend: {}", e)
-        await safe_cb_answer(cb, "Не удалось применить промокод", show_alert=True)
-        return
-    await safe_cb_answer(cb)
-    await _deliver_grant_fulfillment(cb, fulfillment)
+    await _run_grant_promo_cb(
+        cb,
+        promo_id=promo_id,
+        mode="extend",
+        subscription_id=paid_subs[0]["id"],
+        loading_text="⏳ Продлеваем подписку по промокоду…",
+    )
 
 
 @router.callback_query(F.data.regexp(r"^grant_promo:extend_sub:\d+:\d+$"))
 async def cb_grant_promo_extend_sub(cb: CallbackQuery):
-    from services.grant_promo import fulfill_grant_promo
-
-    _, promo_id_str, sub_id_str = cb.data.split(":", 2)
-    promo_id = int(promo_id_str)
-    sub_id = int(sub_id_str)
+    parts = (cb.data or "").split(":")
+    promo_id = int(parts[2])
+    sub_id = int(parts[3])
     sub = await db.get_subscription_by_id(sub_id)
     if not sub or sub["tg_id"] != cb.from_user.id or not sub.get("is_active"):
         await safe_cb_answer(cb, "Подписка не найдена", show_alert=True)
         return
-    try:
-        fulfillment = await fulfill_grant_promo(
-            cb.from_user.id,
-            promo_id,
-            mode="extend",
-            subscription_id=sub_id,
-        )
-    except ValueError as e:
-        await safe_cb_answer(cb, str(e), show_alert=True)
-        return
-    except Exception as e:
-        logger.exception("Grant promo extend_sub: {}", e)
-        await safe_cb_answer(cb, "Не удалось применить промокод", show_alert=True)
-        return
-    await safe_cb_answer(cb)
-    await _deliver_grant_fulfillment(cb, fulfillment)
+    await _run_grant_promo_cb(
+        cb,
+        promo_id=promo_id,
+        mode="extend",
+        subscription_id=sub_id,
+        loading_text="⏳ Продлеваем подписку по промокоду…",
+    )
 
 
 @router.callback_query(F.data.regexp(r"^grant_promo:new:\d+$"))
 async def cb_grant_promo_new(cb: CallbackQuery):
-    from services.grant_promo import fulfill_grant_promo
-
     promo_id = int(cb.data.rsplit(":", 1)[1])
-    try:
-        fulfillment = await fulfill_grant_promo(
-            cb.from_user.id,
-            promo_id,
-            mode="new",
-        )
-    except ValueError as e:
-        await safe_cb_answer(cb, str(e), show_alert=True)
-        return
-    except Exception as e:
-        logger.exception("Grant promo new: {}", e)
-        await safe_cb_answer(cb, "Не удалось применить промокод", show_alert=True)
-        return
-    await safe_cb_answer(cb)
-    await _deliver_grant_fulfillment(cb, fulfillment)
+    await _run_grant_promo_cb(
+        cb,
+        promo_id=promo_id,
+        mode="new",
+        loading_text="⏳ Выдаём новую подписку по промокоду…",
+    )
 
 
 @router.callback_query(F.data.startswith("sub_link:"))

@@ -245,21 +245,25 @@ async def record_grant_promo_use(
     tg_id: int,
     *,
     subscription_id: Optional[int] = None,
+    promo: Optional[Dict[str, Any]] = None,
+    skip_limit_check: bool = False,
 ) -> None:
     """Учёт grant-промокода. per_user_limit=0 — безлимит (как в _validate_promo_common)."""
-    promo = await get_promo_by_id(promo_id)
+    if promo is None:
+        promo = await get_promo_by_id(promo_id)
     if not promo or not promo.get("is_active"):
         raise ValueError("Промокод недоступен (лимит исчерпан)")
 
-    max_uses = promo.get("max_uses")
-    if max_uses is not None and (promo.get("used_count") or 0) >= max_uses:
-        raise ValueError("Промокод недоступен (лимит исчерпан)")
+    if not skip_limit_check:
+        max_uses = promo.get("max_uses")
+        if max_uses is not None and (promo.get("used_count") or 0) >= max_uses:
+            raise ValueError("Промокод недоступен (лимит исчерпан)")
 
-    per_user = int(promo.get("per_user_limit") or 0)
-    if per_user > 0:
-        user_uses = await count_user_promo_uses(promo_id, tg_id)
-        if user_uses >= per_user:
-            raise ValueError("Лимит промокода для вас исчерпан")
+        per_user = int(promo.get("per_user_limit") or 0)
+        if per_user > 0:
+            user_uses = await count_user_promo_uses(promo_id, tg_id)
+            if user_uses >= per_user:
+                raise ValueError("Лимит промокода для вас исчерпан")
 
     async with get_db() as db:
         cur = await db.execute(

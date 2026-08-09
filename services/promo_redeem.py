@@ -74,7 +74,13 @@ async def redeem_promo_code(tg_id: int, code: str) -> PromoRedeemResult:
                 promo_id=int(promo["id"]),
             )
 
-        fulfillment = await fulfill_grant_promo(tg_id, int(promo["id"]), mode="new")
+        fulfillment = await fulfill_grant_promo(
+            tg_id,
+            int(promo["id"]),
+            mode="new",
+            promo=promo,
+            skip_revalidate=True,
+        )
         return PromoRedeemResult(kind="grant", fulfillment=fulfillment)
 
     err = await _validate_promo_common(promo, tg_id=tg_id)
