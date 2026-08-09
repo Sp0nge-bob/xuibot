@@ -45,3 +45,9 @@ class AdminPricingStates(StatesGroup):
     waiting_promo_max_uses = State()
     waiting_promo_per_user = State()
     waiting_promo_valid_days = State()
+    # Редактирование существующего промо
+    waiting_promo_edit_code = State()
+    waiting_promo_edit_discount = State()
+    waiting_promo_edit_max_uses = State()
+    waiting_promo_edit_per_user = State()
+    waiting_promo_edit_valid_days = State()

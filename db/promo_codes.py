@@ -172,6 +172,107 @@ async def set_promo_active(promo_id: int, is_active: bool) -> bool:
         return cursor.rowcount > 0
 
 
+async def update_promo_code(
+    promo_id: int,
+    *,
+    code: Optional[str] = None,
+    discount_type: Optional[str] = None,
+    discount_value: Optional[int] = None,
+    max_uses: Optional[int] = None,
+    clear_max_uses: bool = False,
+    per_user_limit: Optional[int] = None,
+    valid_until: Optional[str] = None,
+    clear_valid_until: bool = False,
+    plan_ids: Optional[str] = None,
+    valid_days: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Обновить поля существующего промокода.
+    used_count / promo_type не меняются (тип фиксируется при создании).
+    """
+    promo = await get_promo_by_id(promo_id)
+    if not promo:
+        raise ValueError("Промокод не найден")
+
+    updates: dict[str, Any] = {}
+
+    if code is not None:
+        code = _normalize_code(code)
+        if not code:
+            raise ValueError("Код пустой")
+        existing = await get_promo_by_code(code)
+        if existing and int(existing["id"]) != int(promo_id):
+            raise ValueError(f"Промокод {code} уже существует")
+        updates["code"] = code
+
+    is_grant = is_grant_promo(promo)
+
+    if is_grant:
+        if plan_ids is not None:
+            pid = (plan_ids or "").strip().split(",")[0].strip()
+            if not pid:
+                raise ValueError("Укажите тариф для grant-промокода")
+            updates["plan_ids"] = pid
+            updates["discount_type"] = "grant"
+            updates["discount_value"] = 0
+    else:
+        if discount_type is not None or discount_value is not None:
+            dt = discount_type if discount_type is not None else promo.get("discount_type")
+            dv = discount_value if discount_value is not None else int(promo.get("discount_value") or 0)
+            if dt not in ("percent", "fixed"):
+                raise ValueError("Тип скидки: percent или fixed")
+            if int(dv) <= 0:
+                raise ValueError("Размер скидки должен быть > 0")
+            if dt == "percent" and int(dv) > 100:
+                raise ValueError("Процент скидки не может быть > 100")
+            updates["discount_type"] = dt
+            updates["discount_value"] = int(dv)
+        if plan_ids is not None:
+            # для discount: CSV или пусто = все тарифы
+            updates["plan_ids"] = (plan_ids or "").strip()
+
+    if clear_max_uses:
+        updates["max_uses"] = None
+    elif max_uses is not None:
+        if int(max_uses) < 0:
+            raise ValueError("max_uses не может быть отрицательным")
+        updates["max_uses"] = int(max_uses) if int(max_uses) > 0 else None
+
+    if per_user_limit is not None:
+        if int(per_user_limit) < 0:
+            raise ValueError("Лимит на пользователя не может быть отрицательным")
+        updates["per_user_limit"] = int(per_user_limit)
+
+    if valid_days is not None:
+        if int(valid_days) <= 0:
+            updates["valid_until"] = None
+        else:
+            updates["valid_until"] = (
+                datetime.utcnow() + timedelta(days=int(valid_days))
+            ).isoformat()
+    elif clear_valid_until:
+        updates["valid_until"] = None
+    elif valid_until is not None:
+        updates["valid_until"] = valid_until
+
+    if not updates:
+        return promo
+
+    cols = ", ".join(f"{k} = ?" for k in updates)
+    vals = list(updates.values()) + [promo_id]
+    async with get_db() as db:
+        await db.execute(
+            f"UPDATE promo_codes SET {cols} WHERE id = ?",
+            vals,
+        )
+        await db.commit()
+
+    updated = await get_promo_by_id(promo_id)
+    if not updated:
+        raise RuntimeError("Не удалось обновить промокод")
+    return updated
+
+
 async def delete_promo_code(promo_id: int) -> bool:
     async with get_db() as db:
         await db.execute("DELETE FROM promo_uses WHERE promo_id = ?", (promo_id,))

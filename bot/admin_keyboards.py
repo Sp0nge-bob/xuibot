@@ -1008,14 +1008,68 @@ def admin_promo_grant_plans_kb(plans: list) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def admin_promo_detail_kb(promo_id: int, *, is_active: bool) -> InlineKeyboardMarkup:
+def admin_promo_edit_grant_plans_kb(promo_id: int, plans: list) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(
+            text=f"📦 {p['name']} ({p['days']} дн.)",
+            callback_data=f"adm:promo:edit:grant_plan:{promo_id}:{p['id']}",
+        )]
+        for p in plans
+    ]
+    rows.append([InlineKeyboardButton(
+        text="« К промокоду",
+        callback_data=f"adm:promo:{promo_id}",
+    )])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_promo_edit_cancel_kb(promo_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="« Отмена", callback_data=f"adm:promo:{promo_id}")],
+    ])
+
+
+def admin_promo_detail_kb(
+    promo_id: int,
+    *,
+    is_active: bool,
+    is_grant: bool = False,
+) -> InlineKeyboardMarkup:
     toggle = "⏸ Выкл" if is_active else "✅ Вкл"
-    toggle_data = f"adm:promo:toggle:{promo_id}"
+    value_btn = (
+        InlineKeyboardButton(
+            text="🎁 Тариф grant",
+            callback_data=f"adm:promo:edit:grant:{promo_id}",
+        )
+        if is_grant
+        else InlineKeyboardButton(
+            text="💰 Скидка",
+            callback_data=f"adm:promo:edit:discount:{promo_id}",
+        )
+    )
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text=toggle, callback_data=toggle_data),
+            InlineKeyboardButton(text=toggle, callback_data=f"adm:promo:toggle:{promo_id}"),
             InlineKeyboardButton(text="🗑 Удалить", callback_data=f"adm:promo:del:{promo_id}"),
         ],
+        [
+            InlineKeyboardButton(text="✏️ Код", callback_data=f"adm:promo:edit:code:{promo_id}"),
+            value_btn,
+        ],
+        [
+            InlineKeyboardButton(
+                text="🔢 Лимит всего",
+                callback_data=f"adm:promo:edit:max:{promo_id}",
+            ),
+            InlineKeyboardButton(
+                text="👤 На юзера",
+                callback_data=f"adm:promo:edit:per_user:{promo_id}",
+            ),
+        ],
+        [InlineKeyboardButton(
+            text="📅 Срок действия",
+            callback_data=f"adm:promo:edit:valid:{promo_id}",
+        )],
         [
             InlineKeyboardButton(text="« Промокоды", callback_data="adm:promos"),
             InlineKeyboardButton(text="« Админ", callback_data="adm:menu"),

@@ -902,24 +902,374 @@ async def msg_promo_valid_days_step(message: Message, state: FSMContext):
     await state.clear()
     await message.answer(
         admin_promo_detail_text(promo) + "\n\n✅ Промокод создан!",
-        reply_markup=admin_promo_detail_kb(promo["id"], is_active=True),
+        reply_markup=admin_promo_detail_kb(
+            promo["id"],
+            is_active=True,
+            is_grant=promo_db.is_grant_promo(promo),
+        ),
     )
 
 
+def _promo_detail_kb(promo: dict):
+    return admin_promo_detail_kb(
+        int(promo["id"]),
+        is_active=bool(promo.get("is_active")),
+        is_grant=promo_db.is_grant_promo(promo),
+    )
+
+
+async def _show_promo_detail(cb: CallbackQuery, promo_id: int, *, notice: str = "") -> None:
+    promo = await promo_db.get_promo_by_id(promo_id)
+    if not promo:
+        await safe_cb_answer(cb, "Промокод не найден", show_alert=True)
+        return
+    text = admin_promo_detail_text(promo)
+    if notice:
+        text = f"{text}\n\n{notice}"
+    await send_or_edit(cb, text, _promo_detail_kb(promo))
+
+
 @router.callback_query(F.data.regexp(r"^adm:promo:\d+$"))
-async def cb_admin_promo_detail(cb: CallbackQuery):
+async def cb_admin_promo_detail(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
         return
+    await state.set_state(None)
     promo_id = int(cb.data.split(":")[2])
     promo = await promo_db.get_promo_by_id(promo_id)
     if not promo:
         await safe_cb_answer(cb, "Промокод не найден", show_alert=True)
         return
     await safe_cb_answer(cb)
+    await send_or_edit(cb, admin_promo_detail_text(promo), _promo_detail_kb(promo))
+
+
+@router.callback_query(F.data.regexp(r"^adm:promo:edit:code:\d+$"))
+async def cb_admin_promo_edit_code(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    promo_id = int(cb.data.rsplit(":", 1)[1])
+    promo = await promo_db.get_promo_by_id(promo_id)
+    if not promo:
+        await safe_cb_answer(cb, "Не найден", show_alert=True)
+        return
+    await state.set_state(AdminPricingStates.waiting_promo_edit_code)
+    await state.update_data(edit_promo_id=promo_id)
+    await safe_cb_answer(cb)
+    from .admin_keyboards import admin_promo_edit_cancel_kb
     await send_or_edit(
         cb,
-        admin_promo_detail_text(promo),
-        admin_promo_detail_kb(promo_id, is_active=bool(promo.get("is_active"))),
+        f"✏️ <b>Новый код</b> для <code>{promo['code']}</code>\n\n"
+        "3–32 символа: латиница, цифры, _ -\n"
+        f"Текущий: <code>{promo['code']}</code>",
+        admin_promo_edit_cancel_kb(promo_id),
+    )
+
+
+@router.message(AdminPricingStates.waiting_promo_edit_code)
+async def msg_promo_edit_code(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    promo_id = data.get("edit_promo_id")
+    if not promo_id:
+        await state.clear()
+        await message.answer("Сессия истекла. /admin → Промокоды")
+        return
+    code = (message.text or "").strip().upper()
+    if not re.fullmatch(r"[A-Z0-9_-]{3,32}", code):
+        await message.answer("❌ Код: 3–32 символа, латиница, цифры, _ -")
+        return
+    try:
+        promo = await promo_db.update_promo_code(int(promo_id), code=code)
+    except ValueError as e:
+        await message.answer(f"❌ {e}")
+        return
+    await state.clear()
+    await message.answer(
+        admin_promo_detail_text(promo) + "\n\n✅ Код обновлён",
+        reply_markup=_promo_detail_kb(promo),
+    )
+
+
+@router.callback_query(F.data.regexp(r"^adm:promo:edit:discount:\d+$"))
+async def cb_admin_promo_edit_discount(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    promo_id = int(cb.data.rsplit(":", 1)[1])
+    promo = await promo_db.get_promo_by_id(promo_id)
+    if not promo or promo_db.is_grant_promo(promo):
+        await safe_cb_answer(cb, "Недоступно для grant", show_alert=True)
+        return
+    await state.set_state(AdminPricingStates.waiting_promo_edit_discount)
+    await state.update_data(edit_promo_id=promo_id)
+    await safe_cb_answer(cb)
+    from .admin_keyboards import admin_promo_edit_cancel_kb
+    await send_or_edit(
+        cb,
+        f"💰 <b>Скидка</b> для <code>{promo['code']}</code>\n\n"
+        "• <code>20%</code> — процент\n"
+        "• <code>100</code> — 100 ₽\n\n"
+        f"Сейчас: {_promo_admin_disc(promo)}",
+        admin_promo_edit_cancel_kb(promo_id),
+    )
+
+
+def _promo_admin_disc(p: dict) -> str:
+    if promo_db.is_grant_promo(p):
+        return "grant"
+    if p.get("discount_type") == "percent":
+        return f"{p.get('discount_value')}%"
+    return f"{p.get('discount_value')} ₽"
+
+
+@router.message(AdminPricingStates.waiting_promo_edit_discount)
+async def msg_promo_edit_discount(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    promo_id = data.get("edit_promo_id")
+    if not promo_id:
+        await state.clear()
+        return
+    raw = (message.text or "").strip().replace(" ", "")
+    discount_type = None
+    discount_value = None
+    if raw.endswith("%"):
+        try:
+            discount_value = int(raw[:-1])
+            discount_type = "percent"
+        except ValueError:
+            pass
+    elif raw.isdigit():
+        discount_value = int(raw)
+        discount_type = "fixed"
+    if not discount_type or not discount_value or discount_value <= 0:
+        await message.answer("❌ Формат: 20% или 100")
+        return
+    if discount_type == "percent" and discount_value > 100:
+        await message.answer("❌ Процент не больше 100")
+        return
+    try:
+        promo = await promo_db.update_promo_code(
+            int(promo_id),
+            discount_type=discount_type,
+            discount_value=discount_value,
+        )
+    except ValueError as e:
+        await message.answer(f"❌ {e}")
+        return
+    await state.clear()
+    await message.answer(
+        admin_promo_detail_text(promo) + "\n\n✅ Скидка обновлена",
+        reply_markup=_promo_detail_kb(promo),
+    )
+
+
+@router.callback_query(F.data.regexp(r"^adm:promo:edit:grant:\d+$"))
+async def cb_admin_promo_edit_grant(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    promo_id = int(cb.data.rsplit(":", 1)[1])
+    promo = await promo_db.get_promo_by_id(promo_id)
+    if not promo or not promo_db.is_grant_promo(promo):
+        await safe_cb_answer(cb, "Только для grant", show_alert=True)
+        return
+    await state.set_state(None)
+    plans = await list_plans()
+    await safe_cb_answer(cb)
+    from .admin_keyboards import admin_promo_edit_grant_plans_kb
+    await send_or_edit(
+        cb,
+        f"🎁 <b>Тариф grant</b> для <code>{promo['code']}</code>\n"
+        "Выберите новый тариф:",
+        admin_promo_edit_grant_plans_kb(promo_id, plans),
+    )
+
+
+@router.callback_query(F.data.regexp(r"^adm:promo:edit:grant_plan:\d+:.+$"))
+async def cb_admin_promo_edit_grant_plan(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    # adm:promo:edit:grant_plan:{promo_id}:{plan_id}
+    parts = (cb.data or "").split(":")
+    promo_id = int(parts[4])
+    plan_id = parts[5]
+    if not get_plan(plan_id):
+        await safe_cb_answer(cb, "Тариф не найден", show_alert=True)
+        return
+    try:
+        promo = await promo_db.update_promo_code(promo_id, plan_ids=plan_id)
+    except ValueError as e:
+        await safe_cb_answer(cb, str(e), show_alert=True)
+        return
+    await state.set_state(None)
+    await safe_cb_answer(cb, "Тариф обновлён")
+    await send_or_edit(
+        cb,
+        admin_promo_detail_text(promo) + "\n\n✅ Тариф обновлён",
+        _promo_detail_kb(promo),
+    )
+
+
+@router.callback_query(F.data.regexp(r"^adm:promo:edit:max:\d+$"))
+async def cb_admin_promo_edit_max(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    promo_id = int(cb.data.rsplit(":", 1)[1])
+    promo = await promo_db.get_promo_by_id(promo_id)
+    if not promo:
+        await safe_cb_answer(cb, "Не найден", show_alert=True)
+        return
+    await state.set_state(AdminPricingStates.waiting_promo_edit_max_uses)
+    await state.update_data(edit_promo_id=promo_id)
+    cur = promo.get("max_uses")
+    cur_s = "∞" if not cur else str(cur)
+    await safe_cb_answer(cb)
+    from .admin_keyboards import admin_promo_edit_cancel_kb
+    await send_or_edit(
+        cb,
+        f"🔢 <b>Общий лимит</b> · <code>{promo['code']}</code>\n\n"
+        f"Сейчас: <b>{cur_s}</b> (использовано: {promo.get('used_count') or 0})\n\n"
+        "• <code>0</code> — безлимит\n"
+        "• <code>50</code> — не больше 50 раз всего",
+        admin_promo_edit_cancel_kb(promo_id),
+    )
+
+
+@router.message(AdminPricingStates.waiting_promo_edit_max_uses)
+async def msg_promo_edit_max_uses(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    promo_id = data.get("edit_promo_id")
+    if not promo_id:
+        await state.clear()
+        return
+    raw = (message.text or "").strip()
+    if not raw.isdigit():
+        await message.answer("❌ Число, например 0 или 100")
+        return
+    n = int(raw)
+    try:
+        if n == 0:
+            promo = await promo_db.update_promo_code(int(promo_id), clear_max_uses=True)
+        else:
+            promo = await promo_db.update_promo_code(int(promo_id), max_uses=n)
+    except ValueError as e:
+        await message.answer(f"❌ {e}")
+        return
+    await state.clear()
+    await message.answer(
+        admin_promo_detail_text(promo) + "\n\n✅ Лимит обновлён",
+        reply_markup=_promo_detail_kb(promo),
+    )
+
+
+@router.callback_query(F.data.regexp(r"^adm:promo:edit:per_user:\d+$"))
+async def cb_admin_promo_edit_per_user(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    promo_id = int(cb.data.rsplit(":", 1)[1])
+    promo = await promo_db.get_promo_by_id(promo_id)
+    if not promo:
+        await safe_cb_answer(cb, "Не найден", show_alert=True)
+        return
+    await state.set_state(AdminPricingStates.waiting_promo_edit_per_user)
+    await state.update_data(edit_promo_id=promo_id)
+    per = promo.get("per_user_limit")
+    per_s = "∞" if not per else str(per)
+    await safe_cb_answer(cb)
+    from .admin_keyboards import admin_promo_edit_cancel_kb
+    await send_or_edit(
+        cb,
+        f"👤 <b>Лимит на пользователя</b> · <code>{promo['code']}</code>\n\n"
+        f"Сейчас: <b>{per_s}</b>\n\n"
+        "• <code>1</code> — один раз\n"
+        "• <code>3</code> — до 3 раз\n"
+        "• <code>0</code> — безлимит",
+        admin_promo_edit_cancel_kb(promo_id),
+    )
+
+
+@router.message(AdminPricingStates.waiting_promo_edit_per_user)
+async def msg_promo_edit_per_user(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    promo_id = data.get("edit_promo_id")
+    if not promo_id:
+        await state.clear()
+        return
+    raw = (message.text or "").strip()
+    if not raw.isdigit():
+        await message.answer("❌ Число, например 1 или 0")
+        return
+    try:
+        promo = await promo_db.update_promo_code(
+            int(promo_id),
+            per_user_limit=int(raw),
+        )
+    except ValueError as e:
+        await message.answer(f"❌ {e}")
+        return
+    await state.clear()
+    await message.answer(
+        admin_promo_detail_text(promo) + "\n\n✅ Лимит на пользователя обновлён",
+        reply_markup=_promo_detail_kb(promo),
+    )
+
+
+@router.callback_query(F.data.regexp(r"^adm:promo:edit:valid:\d+$"))
+async def cb_admin_promo_edit_valid(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    promo_id = int(cb.data.rsplit(":", 1)[1])
+    promo = await promo_db.get_promo_by_id(promo_id)
+    if not promo:
+        await safe_cb_answer(cb, "Не найден", show_alert=True)
+        return
+    await state.set_state(AdminPricingStates.waiting_promo_edit_valid_days)
+    await state.update_data(edit_promo_id=promo_id)
+    valid = promo.get("valid_until")
+    valid_s = valid[:10] if valid else "без срока"
+    await safe_cb_answer(cb)
+    from .admin_keyboards import admin_promo_edit_cancel_kb
+    await send_or_edit(
+        cb,
+        f"📅 <b>Срок действия</b> · <code>{promo['code']}</code>\n\n"
+        f"Сейчас: <b>{valid_s}</b>\n\n"
+        "Отправьте число <b>дней от сегодня</b>:\n"
+        "• <code>0</code> — убрать срок (бессрочно)\n"
+        "• <code>30</code> — ещё 30 дней с сейчас",
+        admin_promo_edit_cancel_kb(promo_id),
+    )
+
+
+@router.message(AdminPricingStates.waiting_promo_edit_valid_days)
+async def msg_promo_edit_valid_days(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    promo_id = data.get("edit_promo_id")
+    if not promo_id:
+        await state.clear()
+        return
+    raw = (message.text or "").strip()
+    if not raw.isdigit():
+        await message.answer("❌ Число дней, например 0 или 30")
+        return
+    try:
+        promo = await promo_db.update_promo_code(
+            int(promo_id),
+            valid_days=int(raw),
+        )
+    except ValueError as e:
+        await message.answer(f"❌ {e}")
+        return
+    await state.clear()
+    await message.answer(
+        admin_promo_detail_text(promo) + "\n\n✅ Срок обновлён",
+        reply_markup=_promo_detail_kb(promo),
     )
 
 
@@ -939,7 +1289,7 @@ async def cb_admin_promo_toggle(cb: CallbackQuery):
     await send_or_edit(
         cb,
         admin_promo_detail_text(promo),
-        admin_promo_detail_kb(promo_id, is_active=new_state),
+        _promo_detail_kb(promo),
     )
 
 
