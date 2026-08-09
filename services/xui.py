@@ -1216,9 +1216,13 @@ async def provision_client(
     skip_preclean: bool = False,
 ) -> Tuple[str, str, Optional[str]]:
     """
-    Выдача / повторная покупка:
-    - клиент есть на основной → включить с новым сроком (ссылка/sub_id сохраняются);
-    - нет на основной → удалить призраков на вторичных, clients/add на основной.
+    Выдача / повторная покупка — только ★ Primary:
+    - клиент есть → включить с новым сроком (sub_id/ссылка сохраняются);
+    - нет → clients/add на основной.
+
+    Вторичные ноды НЕ трогаем: панель 3x-ui сама разносит клиента с Primary.
+    Старый purge secondaries после add был рудиментом и вредным: панель уже
+    синхронизировала клиента, а бот удалял его с US/PL/RU как «призрак».
     """
     api = await get_api()
     email = client_email or f"tg{tg_id}"
@@ -1250,8 +1254,6 @@ async def provision_client(
             sub_link = await build_sub_link(resolved_sub_id)
             return email, resolved_sub_id, sub_link
 
-    # Новый email на Primary: не ждём обход всех вторичных (раньше — основной «тупняк»
-    # grant-промо). Призраки подчистим в фоне после успешного add.
     resolved_sub_id = sub_id or secrets.token_urlsafe(12)[:16]
 
     async def _add() -> None:
@@ -1271,32 +1273,12 @@ async def provision_client(
         if "duplicate email" not in str(e).lower():
             raise
         logger.warning(
-            "Дубликат {} на основной — локальная очистка и повторный add",
+            "Дубликат {} на основной — очистка Primary и повторный add",
             email,
         )
         await ensure_client_absent_on_primary(email)
         await asyncio.sleep(0.3)
         await _add()
-
-    async def _bg_secondary_ghost_purge() -> None:
-        try:
-            ghost_nodes = await purge_client_on_secondaries(email)
-            if ghost_nodes:
-                logger.info(
-                    "Фон: призраки {} сняты с вторичных {}",
-                    email,
-                    ", ".join(ghost_nodes),
-                )
-        except Exception as e:
-            logger.warning("Фон: purge secondaries {} failed: {}", email, e)
-
-    try:
-        asyncio.create_task(
-            _bg_secondary_ghost_purge(),
-            name=f"purge_sec_{email[:24]}",
-        )
-    except Exception:
-        pass
 
     sub_link = await build_sub_link(resolved_sub_id)
     return email, resolved_sub_id, sub_link
