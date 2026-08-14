@@ -4,6 +4,8 @@ Telegram-бот для продажи VPN-подписок: оплата чер�
 
 **Возможности:** тарифы, 5 способов оплаты, промокоды, пробный период, реферальная программа, FAQ, тикеты и возвраты, мульти-ноды, Happ-шифрование ссылок, hub-админка с диагностикой и lockdown.
 
+**Python:** 3.11–3.14 (`requires-python >=3.11,<3.15`).
+
 > **Секреты:** `.env` не должен попадать в git. См. [SECURITY.md](SECURITY.md).
 
 ---
@@ -12,7 +14,7 @@ Telegram-бот для продажи VPN-подписок: оплата чер�
 
 ```bash
 cd /opt/vpn-bot
-python3.11 -m venv .venv && source .venv/bin/activate
+python3.11 -m venv .venv && source .venv/bin/activate   # или python3.12…3.14
 pip install -U pip && pip install -e .
 cp .env.example .env && nano .env
 ```

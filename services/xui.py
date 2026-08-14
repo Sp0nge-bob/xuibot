@@ -403,7 +403,13 @@ async def _unified_update_client(api: AsyncApi, client: Client, **overrides: Any
     url = api.client._url(f"panel/api/clients/update/{client.email}")
     await _throttle()
     await api.client._post(url, {"Accept": "application/json"}, data)
-    await _assign_client_group(api, client.email)
+    # group уже в payload update; bulkAdd только если клиент ещё не в нужной группе
+    current_group = str(overrides.get("current_group") or getattr(client, "group", None) or "").strip()
+    desired_group = str(data.get("group") or "").strip()
+    if desired_group and current_group == desired_group:
+        logger.debug("groups/bulkAdd skip {} already in {}", client.email, desired_group)
+    else:
+        await _assign_client_group(api, client.email)
     panel_cache.invalidate()
     logger.debug("clients/update {} expiry={}", client.email, data.get("expiryTime"))
 
@@ -418,7 +424,7 @@ async def _set_client_expiry_on_panel(
     info = await _unified_get_client_info(api, email)
     if not info:
         raise ValueError(f"Клиент {email} не найден для обновления expiry")
-    client, _, _ = info
+    client, _, current_group = info
     resolved_limit = limit_ip if limit_ip is not None else await resolve_limit_ip_for_email(email)
     await _unified_update_client(
         api,
@@ -427,6 +433,7 @@ async def _set_client_expiry_on_panel(
         subId=sub_id or client.sub_id or "",
         enable=True,
         limitIp=resolved_limit,
+        current_group=current_group,
     )
     logger.success("clients/update {} expiry={}", email, expiry_time)
 

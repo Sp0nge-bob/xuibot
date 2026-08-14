@@ -3,7 +3,7 @@ name = "vpn-platega-bot"
 version = "0.1.0"
 description = "Полноценный Telegram-бот для продажи VPN подписок с оплатой через Platega и выдачей ключей через 3x-ui"
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11,<3.15"
 dependencies = [
     "aiogram>=3.7.0,<4.0.0",
     "py3xui>=0.7.0",

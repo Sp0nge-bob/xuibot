@@ -3,7 +3,7 @@
 
 find_system_python() {
     local c
-    for c in python3.13 python3.12 python3.11 python3; do
+    for c in python3.14 python3.13 python3.12 python3.11 python3; do
         if command -v "$c" >/dev/null 2>&1; then
             echo "$c"
             return 0
@@ -21,6 +21,7 @@ ensure_os_python_packages() {
     apt-get update -qq
     apt-get install -y \
         python3-venv python3-pip python3-full \
+        python3.14-venv python3.14-full 2>/dev/null \
         python3.11-venv python3.11-full 2>/dev/null \
         || apt-get install -y python3-venv python3-pip python3-full
 }

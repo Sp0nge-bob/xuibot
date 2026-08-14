@@ -1640,6 +1640,11 @@ async def _run_grant_promo_cb(
             back_to_main_kb(),
         )
         return
+    # Сразу убираем «Выдаём…», затем deliver (текст → QR → ссылка)
+    try:
+        await send_or_edit(cb, "✅ Промокод применён!\nОтправляю данные подписки…")
+    except Exception:
+        pass
     await _deliver_grant_fulfillment(cb, fulfillment)
 
 

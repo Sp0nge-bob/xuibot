@@ -4,11 +4,15 @@
 
 # Установка
 
-**Требования:** Python 3.11–3.13, доступ к главной панели 3x-ui, HTTPS-домен для webhook.
+**Требования:** **Python 3.11–3.14** (`requires-python` в `pyproject.toml`: `>=3.11,<3.15`), доступ к главной панели 3x-ui, HTTPS-домен для webhook.
+
+Поддерживаются CPython 3.11, 3.12, 3.13 и **3.14**. Скрипт деплоя (`deploy/lib/python.sh`) предпочитает более новую установленную версию (`python3.14` → … → `python3.11`).
 
 ```bash
 cd /opt/vpn-bot
+# любая 3.11–3.14, например:
 python3.11 -m venv .venv
+# python3.14 -m venv .venv
 source .venv/bin/activate
 pip install -U pip
 pip install -e .

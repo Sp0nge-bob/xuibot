@@ -280,8 +280,17 @@ def load_happ_setup_photos() -> List[FSInputFile]:
 
 
 def make_qr_photo(qr_text: str, filename: str) -> BufferedInputFile:
-    qr_img = qrcode.make(qr_text)
+    """Компактный QR: меньше PNG → быстрее upload в Telegram."""
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=4,
+        border=2,
+    )
+    qr.add_data(qr_text)
+    qr.make(fit=True)
+    qr_img = qr.make_image(fill_color="black", back_color="white")
     buf = io.BytesIO()
-    qr_img.save(buf, format="PNG")
+    qr_img.save(buf, format="PNG", optimize=True)
     buf.seek(0)
     return BufferedInputFile(buf.read(), filename=filename)

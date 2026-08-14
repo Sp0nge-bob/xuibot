@@ -17,14 +17,14 @@ _TELEGRAM_UNIT = "vpn-bot-telegram.service"
 _WEB_UNIT = "vpn-bot-web.service"
 _POLLING_LOCK = _PROJECT_ROOT / "data" / ".polling.lock"
 
-# Коды «успеха» при рестарте изнутри telegram-процесса (systemd шлёт SIGTERM)
-_RESTART_SUCCESS_RC = {
-    0,
-    -signal.SIGTERM,
-    -signal.SIGKILL,
-    128 + signal.SIGTERM,
-    128 + signal.SIGKILL,
-}
+# Коды «успеха» при рестарте изнутри telegram-процесса (systemd шлёт SIGTERM).
+# SIGKILL/SIGTERM как отрицательные rc — только POSIX (на Windows атрибутов нет).
+_RESTART_SUCCESS_RC = {0}
+for _sig_name in ("SIGTERM", "SIGKILL"):
+    _sig = getattr(signal, _sig_name, None)
+    if _sig is not None:
+        _RESTART_SUCCESS_RC.add(-int(_sig))
+        _RESTART_SUCCESS_RC.add(128 + int(_sig))
 
 
 def _restart_script_path() -> Path | None:

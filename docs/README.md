@@ -11,7 +11,7 @@ Telegram-бот для продажи VPN-подписок: оплата чер�
 | Раздел | Описание |
 |--------|----------|
 | [Архитектура](architecture.md) | Два процесса, Redis, lockdown, планировщик |
-| [Установка](installation.md) | Python, venv, `vpn-bot-ctl.sh` (пункты 1–7) |
+| [Установка](installation.md) | Python **3.11–3.14**, venv, `vpn-bot-ctl.sh` (пункты 1–7) |
 | [Конфигурация](configuration.md) | Переменные `.env`, Redis, рефералы |
 | [Деплой](deployment.md) | Чеклист прода, обновление, nginx |
 | [Системные требования](requirements.md) | VPS: CPU, RAM, диск |
