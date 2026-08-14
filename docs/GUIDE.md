@@ -6,7 +6,7 @@
 |--------|--------|
 | Оглавление | [README.md](README.md) |
 | Архитектура | [architecture.md](architecture.md) |
-| Установка | [installation.md](installation.md) |
+| Установка (Python 3.11–3.14) | [installation.md](installation.md) |
 | Конфигурация | [configuration.md](configuration.md) |
 | Деплой | [deployment.md](deployment.md) |
 | 3x-ui | [xui.md](xui.md) |

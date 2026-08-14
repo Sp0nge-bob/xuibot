@@ -6,8 +6,11 @@
 
 Перед выбором сервера: [Системные требования VPS](requirements.md).
 
+**Python на VPS:** 3.11–3.14. `deploy/lib/python.sh` / пункт **1** ctl создаёт venv из самой новой доступной (`python3.14` … `python3.11`).
+
 ## Чеклист
 
+- [ ] Python 3.11–3.14 в venv (`.venv/bin/python -V`)
 - [ ] `TEST_MODE=false` (или не переопределён в админке)
 - [ ] `ALLOW_DEBUG_ADMIN=false`
 - [ ] `START_BOT_IN_WEBAPP=false`

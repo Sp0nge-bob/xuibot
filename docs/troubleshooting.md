@@ -47,6 +47,11 @@
 - `curl -k` на host панели с VPS
 - При Primary down или массовом fail (≥2 нод) бот сам гоняет **автодиагностику** (DNS/TCP/HTTP/API) и шлёт отчёт в ЛС `BOT_ADMINS` (один раз на инцидент; `PANEL_OUTAGE_DIAG_*` в `.env`)
 
+## Python / venv
+
+- Поддержка: **3.11–3.14**. Проверка: `.venv/bin/python -V` и `python scripts/dev/smoke_python314.py`.
+- После смены major Python на VPS: пункт **1** `vpn-bot-ctl.sh` (пересоздаст venv) или вручную `rm -rf .venv && python3.14 -m venv .venv && pip install -e .`.
+
 ## Ошибка 3x-ui / таймаут
 
 - Осторожно с `XUI_PANEL_CONCURRENCY`

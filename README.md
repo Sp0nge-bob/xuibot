@@ -50,7 +50,7 @@ python run_all.py          # webhook + Telegram
 | Раздел | Описание |
 |--------|----------|
 | [Архитектура](docs/architecture.md) | Два процесса, lockdown, планировщик |
-| [Установка](docs/installation.md) | Python, venv, `vpn-bot-ctl.sh` |
+| [Установка](docs/installation.md) | Python **3.11–3.14**, venv, `vpn-bot-ctl.sh` |
 | [Конфигурация](docs/configuration.md) | Переменные `.env`, Redis, рефералы |
 | [Деплой](docs/deployment.md) | Чеклист прода, nginx, обновление |
 | [Системные требования](docs/requirements.md) | VPS по нагрузке |

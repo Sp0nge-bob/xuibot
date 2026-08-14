@@ -4,6 +4,8 @@
 
 # Архитектура
 
+**Runtime:** CPython **3.11–3.14** (`pyproject.toml`: `requires-python >=3.11,<3.15`). См. [Установка](installation.md), [Разработка](development.md).
+
 В продакшене бот работает **двумя процессами**:
 
 ```mermaid
@@ -23,6 +25,8 @@ flowchart LR
 | Webhook | `python app.py` | Callback Platega, rate limit, идемпотентность, очередь выдачи ключей |
 | Бот | `python run_bot.py` | Меню, оплата, админка, планировщик (истечение, sync нод, бэкап, напоминания) |
 | Redis | `redis-server` | FSM aiogram при `REDIS_URL` — state/data диалогов вне RAM |
+
+После выдачи/продления клиенту: **текст → QR → ссылка** (`bot/fulfillment_delivery.py`), чтобы не ждать upload фото.
 
 Без `REDIS_URL` FSM в памяти (`MemoryStorage`). В проде рекомендуется Redis — [Конфигурация](configuration.md).
 
