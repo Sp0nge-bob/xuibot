@@ -20,19 +20,39 @@ else
     C_RESET="" C_BOLD="" C_DIM="" C_CYAN="" C_GREEN="" C_YELLOW="" C_RED=""
 fi
 
+# UTF-8 frames when locale allows; else ASCII (no mojibake)
+case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
+    *UTF-8*|*utf8*|*UTF8*)
+        _TL='╭' _TR='╮' _BL='╰' _BR='╯' _H='─' _V='│' ;;
+    *)
+        if locale charmap 2>/dev/null | grep -qi 'utf-8'; then
+            _TL='╭' _TR='╮' _BL='╰' _BR='╯' _H='─' _V='│'
+        else
+            _TL='+' _TR='+' _BL='+' _BR='+' _H='-' _V='|'
+        fi
+        ;;
+esac
+
 _bs_log()  { printf '%s==>%s %s\n' "$C_CYAN" "$C_RESET" "$*"; }
-_bs_ok()   { printf '%s✓%s  %s\n' "$C_GREEN" "$C_RESET" "$*"; }
-_bs_err()  { printf '%s✗%s  %s\n' "$C_RED" "$C_RESET" "$*" >&2; }
+_bs_ok()   { printf '%sOK%s  %s\n' "$C_GREEN" "$C_RESET" "$*"; }
+_bs_err()  { printf '%sERR%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; }
 
 if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
     _bs_err "Запустите от root: curl … | sudo bash -s -- $APP_DIR"
     exit 1
 fi
 
-printf '\n%s╭──────────────────────────────────────────────╮%s\n' "$C_CYAN" "$C_RESET"
-printf '%s│%s  %sVPN Bot · bootstrap%s%-23s%s│%s\n' \
-    "$C_CYAN" "$C_RESET" "$C_BOLD" "$C_RESET" "" "$C_CYAN" "$C_RESET"
-printf '%s╰──────────────────────────────────────────────╯%s\n\n' "$C_CYAN" "$C_RESET"
+printf '\n%s%s' "$C_CYAN" "$_TL"
+printf '%s' "$_H$_H"
+printf '%s VPN Bot %s' "$C_RESET$C_BOLD" "$C_RESET$C_CYAN"
+i=0; while [[ $i -lt 28 ]]; do printf '%s' "$_H"; i=$((i + 1)); done
+printf '%s%s\n' "$_TR" "$C_RESET"
+printf '%s%s%s  %sbootstrap · без git%s' "$C_CYAN" "$_V" "$C_RESET" "$C_DIM" "$C_RESET"
+pad=24; while [[ $pad -gt 0 ]]; do printf ' '; pad=$((pad - 1)); done
+printf '%s%s%s\n' "$C_CYAN" "$_V" "$C_RESET"
+printf '%s%s' "$C_CYAN" "$_BL"
+i=0; while [[ $i -lt 44 ]]; do printf '%s' "$_H"; i=$((i + 1)); done
+printf '%s%s\n\n' "$_BR" "$C_RESET"
 
 if command -v apt-get >/dev/null 2>&1; then
     export DEBIAN_FRONTEND=noninteractive

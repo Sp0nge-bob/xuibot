@@ -73,6 +73,8 @@ sudo bash deploy/vpn-bot-ctl.sh update --edge       # последний ком�
 
 Локальный `.git` **не нужен**. Сохраняются `.env`, `data/`, `.venv/`.
 
+Меню ctl — стиль Charm/gum (цвета ANSI). Отключить: `NO_COLOR=1`. На locale без UTF-8 рамки автоматически ASCII (`+--+`), без кракозябр.
+
 **Если изменился `pyproject.toml` / новые зависимости:** после `update` при необходимости пункт **1**.
 
 **Redis:** пункт 1 на Debian/Ubuntu ставит `redis-server` и добавляет `REDIS_URL=redis://127.0.0.1:6379/0`, если строки нет в `.env`.
