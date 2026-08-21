@@ -143,9 +143,8 @@ show_unit_block() {
     local title="$2"
 
     echo
-    printf '%s\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    printf '  %s\n' "$title"
-    printf '%s\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    printf '\n%s┌─ %s%s\n' "${C_CYAN:-}" "$title" "${C_RESET:-}"
+    printf '%s└──────────────────────────────────────%s\n' "${C_DIM:-}" "${C_RESET:-}"
 
     if ! unit_is_installed "$unit"; then
         ok "не установлен — $SYSTEMD_DIR/$unit отсутствует"

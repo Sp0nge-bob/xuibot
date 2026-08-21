@@ -12,12 +12,16 @@ APP_DIR="${APP_DIR:-}"
 SERVICE_USER="${SERVICE_USER:-vpnbot}"
 STATE_FILE="$DEPLOY_DIR/state.env"
 
-log() { printf '==> %s\n' "$*"; }
-warn() { printf '!! %s\n' "$*" >&2; }
-ok() { printf '✓ %s\n' "$*"; }
+# shellcheck source=ui.sh
+source "$DEPLOY_DIR/lib/ui.sh"
+
+log()  { printf '%s==>%s %s\n' "${C_BLUE:-}" "${C_RESET:-}" "$*"; }
+warn() { printf '%s!!%s  %s\n' "${C_YELLOW:-}" "${C_RESET:-}" "$*" >&2; }
+ok()   { printf '%s✓%s  %s\n' "${C_GREEN:-}" "${C_RESET:-}" "$*"; }
+err()  { printf '%s✗%s  %s\n' "${C_RED:-}" "${C_RESET:-}" "$*" >&2; }
 
 die() {
-    warn "$*"
+    err "$*"
     exit 1
 }
 
