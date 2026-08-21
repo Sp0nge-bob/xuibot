@@ -27,14 +27,12 @@
 
 ## Обновление
 
-### Только код (типично после `git pull`)
-
-Нужен git-репозиторий в `APP_DIR` (есть `.git`). Иначе: «Не git-репозиторий» — см. [Troubleshooting](troubleshooting.md#нет-git-пункт-2-ctl).
+### Только код (пункт 2 / `update`)
 
 ```bash
 cd /opt/vpn-bot   # или ваш APP_DIR
 sudo bash deploy/vpn-bot-ctl.sh
-# → 2   (git pull + restart)
+# → 2   (код + restart)
 ```
 
 Или:
@@ -42,6 +40,12 @@ sudo bash deploy/vpn-bot-ctl.sh
 ```bash
 sudo bash deploy/vpn-bot-ctl.sh update
 ```
+
+- Есть `.git` → `git pull --ff-only`
+- Нет `.git` → архив последнего коммита с GitHub (`.env` / `data/` / `.venv` не трогаются)
+- Принудительно архив: `UPDATE_METHOD=archive`
+
+Подробности при сбоях: [Troubleshooting](troubleshooting.md#обновление-без-git--архив-github).
 
 ### Полное обновление (venv, redis, unit-файлы)
 

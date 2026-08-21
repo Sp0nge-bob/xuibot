@@ -36,7 +36,7 @@ draw_menu() {
     printf '%s\n' '║       VPN Bot — управление systemd       ║'
     printf '%s\n' '╠══════════════════════════════════════════╣'
     printf '%s\n' '║  1) Установить / обновить (+ Redis)      ║'
-    printf '%s\n' '║  2) Обновить бота (git pull + рестарт)   ║'
+    printf '%s\n' '║  2) Обновить бота (код + рестарт)        ║'
     printf '%s\n' '║  3) Перезапустить службы (быстро)        ║'
     printf '%s\n' '║  4) Проверить состояние служб            ║'
     printf '%s\n' '║  5) Логи в реальном времени              ║'
@@ -72,7 +72,7 @@ interactive_menu() {
                 ;;
             2)
                 echo
-                log "git pull и перезапуск служб…"
+                log "Обновление кода и перезапуск служб…"
                 run_action cmd_update_bot
                 pause_menu
                 ;;
@@ -152,7 +152,7 @@ VPN Bot — systemd
 
   sudo bash deploy/vpn-bot-ctl.sh          # меню
   sudo bash deploy/vpn-bot-ctl.sh install  # установить / обновить (+ redis-server)
-  sudo bash deploy/vpn-bot-ctl.sh update   # git pull + перезапуск служб
+  sudo bash deploy/vpn-bot-ctl.sh update   # код (git или архив GitHub) + рестарт
   sudo bash deploy/vpn-bot-ctl.sh restart  # быстрый перезапуск служб
   sudo bash deploy/vpn-bot-ctl.sh status
   sudo bash deploy/vpn-bot-ctl.sh logs     # tail -f data/logs/bot.log

@@ -1,52 +1,18 @@
 # shellcheck shell=bash
 # Идемпотентная установка / обновление (пункт 1 меню)
 
-# Дефолт upstream (форки: GIT_REMOTE=… перед ctl или в deploy/state.env)
+# Upstream для обновления кода (форки: GIT_REMOTE=… или deploy/state.env)
 DEFAULT_GIT_REMOTE="${DEFAULT_GIT_REMOTE:-https://github.com/Sp0nge-bob/xuibot.git}"
-
-print_no_git_help() {
-    warn "Каталог $APP_DIR не является git-репозиторием (нет $APP_DIR/.git)."
-    warn "Пункт 2 делает «git pull + рестарт» — без .git обновить код нельзя."
-    echo
-    printf '%s\n' "Что обычно случилось: бот скопировали архивом/rsync без папки .git."
-    echo
-    printf '%s\n' "Вариант A (рекомендуется) — привязать этот каталог к GitHub:"
-    printf '%s\n' "  sudo GIT_REMOTE=https://github.com/Sp0nge-bob/xuibot.git bash deploy/vpn-bot-ctl.sh update"
-    printf '%s\n' "  (скрипт предложит git init + fetch; .env и data/ не трогает — они в .gitignore)"
-    echo
-    printf '%s\n' "Вариант B — клон с нуля с сохранением данных:"
-    printf '%s\n' "  sudo systemctl stop vpn-bot-telegram vpn-bot-web"
-    printf '%s\n' "  sudo mv $APP_DIR ${APP_DIR}.bak"
-    printf '%s\n' "  sudo git clone $DEFAULT_GIT_REMOTE $APP_DIR"
-    printf '%s\n' "  sudo cp ${APP_DIR}.bak/.env $APP_DIR/ 2>/dev/null || true"
-    printf '%s\n' "  sudo cp -a ${APP_DIR}.bak/data $APP_DIR/ 2>/dev/null || true"
-    printf '%s\n' "  cd $APP_DIR && sudo bash deploy/vpn-bot-ctl.sh   # пункт 1"
-    echo
-}
-
-git_discard_deploy_script_drift() {
-    # install_restart_sudoers делает chmod 755 — иначе git pull падает на «local changes»
-    local rel
-    for rel in deploy/restart-services.sh deploy/vpn-bot-ctl.sh; do
-        [[ -f "$APP_DIR/$rel" ]] || continue
-        if git -C "$APP_DIR" diff --quiet -- "$rel" 2>/dev/null; then
-            continue
-        fi
-        warn "Сбрасываем локальные изменения $rel (обычно chmod от установки)"
-        git -C "$APP_DIR" restore --source=HEAD --staged --worktree -- "$rel" 2>/dev/null \
-            || git -C "$APP_DIR" checkout -- "$rel" 2>/dev/null \
-            || true
-    done
-}
+DEFAULT_GIT_BRANCH="${DEFAULT_GIT_BRANCH:-main}"
+# Файл с SHA последнего применённого архива (без .git)
+DEPLOY_REVISION_FILE=".deploy_revision"
 
 resolve_git_remote() {
-    # GIT_REMOTE из окружения → state.env → origin → дефолт
     if [[ -n "${GIT_REMOTE:-}" ]]; then
         echo "$GIT_REMOTE"
         return
     fi
     if [[ -f "$STATE_FILE" ]]; then
-        # shellcheck disable=SC1090
         local _gr=""
         _gr="$(grep -E '^GIT_REMOTE=' "$STATE_FILE" 2>/dev/null | head -1 | cut -d= -f2- || true)"
         if [[ -n "$_gr" ]]; then
@@ -65,88 +31,194 @@ resolve_git_remote() {
     echo "$DEFAULT_GIT_REMOTE"
 }
 
+resolve_git_branch() {
+    if [[ -n "${GIT_BRANCH:-}" ]]; then
+        echo "$GIT_BRANCH"
+        return
+    fi
+    if [[ -f "$STATE_FILE" ]]; then
+        local _gb=""
+        _gb="$(grep -E '^GIT_BRANCH=' "$STATE_FILE" 2>/dev/null | head -1 | cut -d= -f2- || true)"
+        if [[ -n "$_gb" ]]; then
+            echo "$_gb"
+            return
+        fi
+    fi
+    echo "$DEFAULT_GIT_BRANCH"
+}
+
 save_git_remote_to_state() {
     local remote="$1"
     [[ -n "$remote" ]] || return 0
     mkdir -p "$DEPLOY_DIR"
     if [[ -f "$STATE_FILE" ]] && grep -qE '^GIT_REMOTE=' "$STATE_FILE" 2>/dev/null; then
-        sed -i.bak "s|^GIT_REMOTE=.*|GIT_REMOTE=$remote|" "$STATE_FILE" 2>/dev/null \
-            || sed -i '' "s|^GIT_REMOTE=.*|GIT_REMOTE=$remote|" "$STATE_FILE" 2>/dev/null || true
-        rm -f "${STATE_FILE}.bak" 2>/dev/null || true
+        sed -i "s|^GIT_REMOTE=.*|GIT_REMOTE=$remote|" "$STATE_FILE" 2>/dev/null || true
     elif [[ -f "$STATE_FILE" ]]; then
         printf '\nGIT_REMOTE=%s\n' "$remote" >>"$STATE_FILE"
     fi
 }
 
-bootstrap_git_repo() {
-    # Превращает каталог без .git в clone origin (tracked файлы с GitHub;
-    # .env / data / .venv обычно в .gitignore — сохраняются).
-    local remote="${1:-}"
-    local branch="${GIT_BRANCH:-main}"
-    local confirm=""
-
-    command -v git >/dev/null 2>&1 || die "git не установлен: apt-get install -y git"
-
-    if [[ -z "$remote" ]]; then
-        remote="$(resolve_git_remote)"
-    fi
-
-    warn "Будет выполнено: git init + fetch + checkout -B $branch origin/$branch"
-    warn "Отслеживаемые файлы перезапишутся с GitHub. Не трогаем: .env, data/, .venv (если в .gitignore)."
-    printf 'Remote: %s\n' "$remote"
-
-    if [[ -t 0 || -r /dev/tty ]]; then
-        read -r -p "Привязать $APP_DIR к git и скачать код? [y/N]: " confirm </dev/tty
-        if [[ ! "$confirm" =~ ^([yY]|yes|д|да)$ ]]; then
-            warn "Отменено"
-            return 1
-        fi
-    elif [[ "${GIT_BOOTSTRAP:-}" != "1" && "${GIT_BOOTSTRAP:-}" != "yes" ]]; then
-        warn "Неинтерактивно: задайте GIT_BOOTSTRAP=1 и GIT_REMOTE=… для авто-привязки"
-        return 1
-    fi
-
-    (
-        set -e
-        cd "$APP_DIR"
-        if [[ ! -d .git ]]; then
-            git init -b "$branch" 2>/dev/null || { git init; git checkout -B "$branch"; }
-        fi
-        if git remote get-url origin >/dev/null 2>&1; then
-            git remote set-url origin "$remote"
-        else
-            git remote add origin "$remote"
-        fi
-        git fetch --depth=1 origin "$branch"
-        # -f: выровнять дерево под origin (локальные правки tracked-файлов будут сброшены)
-        git checkout -B "$branch" "origin/$branch" --force
-        git branch --set-upstream-to="origin/$branch" "$branch" 2>/dev/null || true
-    ) || {
-        warn "Не удалось привязать git. Проверьте URL, сеть и доступ к репозиторию."
-        return 1
-    }
-
-    save_git_remote_to_state "$remote"
-    fix_repo_ownership_for_git
-    ok "Репозиторий привязан: $(git -C "$APP_DIR" rev-parse --short HEAD) ← $remote"
-    return 0
-}
-
-ensure_git_repo_for_update() {
-    if [[ -d "$APP_DIR/.git" ]]; then
+# https://github.com/Owner/Repo.git → Owner/Repo
+github_slug_from_remote() {
+    local remote="$1"
+    remote="${remote%.git}"
+    remote="${remote%/}"
+    if [[ "$remote" =~ github\.com[:/]+([^/]+)/([^/]+)$ ]]; then
+        echo "${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
         return 0
     fi
-    print_no_git_help
-    if bootstrap_git_repo "$(resolve_git_remote)"; then
+    if [[ "$remote" =~ ^([^/]+)/([^/]+)$ ]]; then
+        echo "$remote"
         return 0
     fi
     return 1
 }
 
-git_pull_repo() {
-    if [[ ! -d "$APP_DIR/.git" ]]; then
-        ensure_git_repo_for_update || return 1
+_http_get() {
+    local url="$1" out="$2"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --connect-timeout 20 --max-time 180 -o "$out" "$url"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q -O "$out" "$url"
+    else
+        die "Нужен curl или wget для скачивания обновления"
     fi
+}
+
+# SHA последнего коммита ветки через GitHub API (без локального git)
+github_branch_sha() {
+    local slug="$1" branch="$2"
+    local api_url tmp sha
+    api_url="https://api.github.com/repos/${slug}/commits/${branch}"
+    tmp="$(mktemp)"
+    if ! _http_get "$api_url" "$tmp"; then
+        rm -f "$tmp"
+        return 1
+    fi
+    sha="$(
+        python3 - "$tmp" <<'PY' 2>/dev/null
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as f:
+    data = json.load(f)
+print((data.get("sha") or "")[:40])
+PY
+    )"
+    rm -f "$tmp"
+    [[ -n "$sha" && ${#sha} -ge 7 ]] || return 1
+    echo "$sha"
+}
+
+git_discard_deploy_script_drift() {
+    # install_restart_sudoers делает chmod 755 — иначе git pull падает на «local changes»
+    local rel
+    for rel in deploy/restart-services.sh deploy/vpn-bot-ctl.sh; do
+        [[ -f "$APP_DIR/$rel" ]] || continue
+        if git -C "$APP_DIR" diff --quiet -- "$rel" 2>/dev/null; then
+            continue
+        fi
+        warn "Сбрасываем локальные изменения $rel (обычно chmod от установки)"
+        git -C "$APP_DIR" restore --source=HEAD --staged --worktree -- "$rel" 2>/dev/null \
+            || git -C "$APP_DIR" checkout -- "$rel" 2>/dev/null \
+            || true
+    done
+}
+
+# Обновление кода из tarball GitHub (последний коммит ветки) — .git не нужен.
+# Сохраняет: .env, data/, .venv/, deploy/state.env, .deploy_revision (перезапишется).
+update_from_github_archive() {
+    local remote branch slug sha short current archive_url tmp tarball extract_root
+    remote="$(resolve_git_remote)"
+    branch="$(resolve_git_branch)"
+
+    if ! slug="$(github_slug_from_remote "$remote")"; then
+        warn "Не удалось разобрать GitHub remote: $remote"
+        warn "Задайте GIT_REMOTE=https://github.com/OWNER/REPO.git"
+        return 1
+    fi
+
+    log "Обновление из GitHub (архив, без локального .git)"
+    log "Репозиторий: $slug  ветка: $branch"
+
+    if ! sha="$(github_branch_sha "$slug" "$branch")"; then
+        warn "Не удалось получить SHA с api.github.com (сеть / лимит / приватный репо)"
+        return 1
+    fi
+    short="${sha:0:7}"
+    current=""
+    [[ -f "$APP_DIR/$DEPLOY_REVISION_FILE" ]] && current="$(tr -d '[:space:]' <"$APP_DIR/$DEPLOY_REVISION_FILE" || true)"
+
+    if [[ -n "$current" && "$current" == "$sha" ]]; then
+        ok "Код уже актуален ($short)"
+        save_git_remote_to_state "$remote"
+        return 0
+    fi
+
+    archive_url="https://github.com/${slug}/archive/${sha}.tar.gz"
+    tmp="$(mktemp -d)"
+    tarball="$tmp/src.tar.gz"
+    log "Скачиваем $archive_url"
+    if ! _http_get "$archive_url" "$tarball"; then
+        rm -rf "$tmp"
+        warn "Скачивание архива не удалось"
+        return 1
+    fi
+
+    mkdir -p "$tmp/extract"
+    if ! tar -xzf "$tarball" -C "$tmp/extract"; then
+        rm -rf "$tmp"
+        warn "Не удалось распаковать архив"
+        return 1
+    fi
+    extract_root="$(find "$tmp/extract" -mindepth 1 -maxdepth 1 -type d | head -1)"
+    if [[ -z "$extract_root" || ! -f "$extract_root/app.py" ]]; then
+        rm -rf "$tmp"
+        warn "В архиве нет app.py — неожиданный формат"
+        return 1
+    fi
+
+    log "Накладываем код на $APP_DIR (сохраняем .env, data/, .venv/)"
+    if command -v rsync >/dev/null 2>&1; then
+        rsync -a \
+            --delete \
+            --exclude '.env' \
+            --exclude '.env.local' \
+            --exclude '.env.production' \
+            --exclude 'data/' \
+            --exclude '.venv/' \
+            --exclude 'deploy/state.env' \
+            --exclude '.git/' \
+            --exclude "$DEPLOY_REVISION_FILE" \
+            "$extract_root"/ "$APP_DIR"/
+    else
+        warn "rsync не найден — копируем через tar (без удаления устаревших файлов)"
+        # shellcheck disable=SC2164
+        (
+            cd "$extract_root"
+            tar -cf - \
+                --exclude='./.env' \
+                --exclude='./data' \
+                --exclude='./.venv' \
+                --exclude='./.git' \
+                --exclude="./deploy/state.env" \
+                . | tar -xf - -C "$APP_DIR"
+        ) || {
+            rm -rf "$tmp"
+            return 1
+        }
+    fi
+
+    printf '%s\n' "$sha" >"$APP_DIR/$DEPLOY_REVISION_FILE"
+    save_git_remote_to_state "$remote"
+    rm -rf "$tmp"
+    if [[ -n "$current" ]]; then
+        ok "Код обновлён: ${current:0:7} → $short (архив GitHub)"
+    else
+        ok "Код установлен: $short (архив GitHub)"
+    fi
+    return 0
+}
+
+git_pull_repo() {
     fix_repo_ownership_for_git
     git_discard_deploy_script_drift
     log "git pull в $APP_DIR"
@@ -155,6 +227,7 @@ git_pull_repo() {
     if ! git -C "$APP_DIR" pull --ff-only; then
         warn "git pull не удался — проверьте сеть, доступ к origin и локальные изменения"
         warn "Подсказка: git -C $APP_DIR status ; git -C $APP_DIR remote -v"
+        warn "Запасной путь: UPDATE_METHOD=archive sudo bash deploy/vpn-bot-ctl.sh update"
         return 1
     fi
     after="$(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || echo '?')"
@@ -163,13 +236,45 @@ git_pull_repo() {
     else
         ok "Код обновлён: $before → $after"
     fi
+    # зафиксировать SHA и для гибридных установок
+    git -C "$APP_DIR" rev-parse HEAD >"$APP_DIR/$DEPLOY_REVISION_FILE" 2>/dev/null || true
     return 0
+}
+
+# Выбор способа обновления кода:
+# - UPDATE_METHOD=archive → всегда архив GitHub
+# - UPDATE_METHOD=git → только git pull (нужен .git)
+# - auto (по умолчанию): есть .git → pull, иначе → архив
+update_bot_code() {
+    local method="${UPDATE_METHOD:-auto}"
+    case "$method" in
+        archive|tar|github)
+            update_from_github_archive
+            ;;
+        git|pull)
+            [[ -d "$APP_DIR/.git" ]] || die "UPDATE_METHOD=git, но нет $APP_DIR/.git"
+            git_pull_repo
+            ;;
+        auto|"")
+            if [[ -d "$APP_DIR/.git" ]]; then
+                git_pull_repo || {
+                    warn "git pull не удался — пробуем архив с GitHub"
+                    update_from_github_archive
+                }
+            else
+                update_from_github_archive
+            fi
+            ;;
+        *)
+            die "Неизвестный UPDATE_METHOD=$method (auto|git|archive)"
+            ;;
+    esac
 }
 
 cmd_update_bot() {
     require_root
     load_config
-    log "Обновление бота: git pull + перезапуск служб"
+    log "Обновление бота: код (git или архив GitHub) + перезапуск служб"
     log "Каталог: $APP_DIR"
 
     if ! unit_is_installed "$TELEGRAM_UNIT" || ! unit_is_installed "$WEB_UNIT"; then
@@ -177,17 +282,18 @@ cmd_update_bot() {
         return 1
     fi
 
-    if ! git_pull_repo; then
+    if ! update_bot_code; then
         return 1
     fi
 
-    # После обновления кода с новым pyproject — подтянуть зависимости (быстро, если уже ок)
+    # После обновления кода с новым pyproject — подтянуть зависимости
     if ! python_deps_ok; then
-        warn "Зависимости Python устарели после pull — ставим заново"
+        warn "Зависимости Python устарели после обновления — ставим заново"
         ensure_venv
         ensure_python_deps || warn "pip install не удался — выполните пункт 1"
     fi
 
+    fix_permissions
     restart_services
 }
 
