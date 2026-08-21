@@ -46,32 +46,34 @@ sudo bash deploy/vpn-bot-ctl.sh
 
 | Пункт | Действие |
 |-------|----------|
-| **1** | Установить / обновить полностью: venv, pip, redis-server, `REDIS_URL`, права, unit-файлы, запуск |
-| **2** | **Обновить бота:** свежий код + рестарт (есть `.git` → `git pull`, иначе архив последнего коммита с GitHub) |
-| **3** | Быстрый перезапуск служб |
-| **4** | Статус служб + Redis |
-| **5** | Логи `tail -f` |
-| **6** | Остановить службы |
-| **7** | Удалить unit-файлы |
+| **1** | Установить / починить: venv, pip, redis-server, `REDIS_URL`, права, unit-файлы |
+| **2** | **Stable:** обновить до последнего **GitHub Release** + рестарт |
+| **3** | **Edge:** обновить до последнего коммита `main` + рестарт |
+| **4** | Быстрый перезапуск служб |
+| **5** | Статус служб + Redis |
+| **6** | Логи `tail -f` |
+| **7** | Остановить службы |
+| **8** | Удалить unit-файлы |
 
-**Первая установка:** пункт **1** после заполнения `.env`.
-
-**Обычное обновление кода:** пункт **2** или:
-
-```bash
-sudo bash deploy/vpn-bot-ctl.sh update
-```
-
-Пункт **2** не требует локального `.git`: без репозитория скачивается **архив последнего коммита** с GitHub (сохраняются `.env`, `data/`, `.venv/`). С `.git` — обычный `git pull` (при сбое — fallback на архив).
+**Первая установка** (без git на сервере):
 
 ```bash
-sudo bash deploy/vpn-bot-ctl.sh update
-# форк / другая ветка:
-# sudo GIT_REMOTE=https://github.com/ORG/REPO.git GIT_BRANCH=main bash deploy/vpn-bot-ctl.sh update
-# только архив: sudo UPDATE_METHOD=archive bash deploy/vpn-bot-ctl.sh update
+curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/bootstrap.sh \
+  | sudo bash -s -- /opt/vpn-bot
+# заполните /opt/vpn-bot/.env
+sudo bash /opt/vpn-bot/deploy/vpn-bot-ctl.sh   # пункт 1
 ```
 
-**Если изменился `pyproject.toml` / новые зависимости:** пункт **1**.
+**Обычное обновление (прод):** пункт **2** или:
+
+```bash
+sudo bash deploy/vpn-bot-ctl.sh update              # последний Release
+sudo bash deploy/vpn-bot-ctl.sh update --edge       # последний коммит
+```
+
+Локальный `.git` **не нужен**. Сохраняются `.env`, `data/`, `.venv/`.
+
+**Если изменился `pyproject.toml` / новые зависимости:** после `update` при необходимости пункт **1**.
 
 **Redis:** пункт 1 на Debian/Ubuntu ставит `redis-server` и добавляет `REDIS_URL=redis://127.0.0.1:6379/0`, если строки нет в `.env`.
 

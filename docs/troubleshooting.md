@@ -52,27 +52,31 @@
 - Поддержка: **3.11–3.14**. Проверка: `.venv/bin/python -V` и `python scripts/dev/smoke_python314.py`.
 - После смены major Python на VPS: пункт **1** `vpn-bot-ctl.sh` (пересоздаст venv) или вручную `rm -rf .venv && python3.14 -m venv .venv && pip install -e .`.
 
-## Обновление без git / архив GitHub
+## Обновление: релиз vs коммит
 
-Пункт **2** (`vpn-bot-ctl.sh update`) больше **не требует** локальный `.git`:
+| Команда | Что качается |
+|---------|----------------|
+| `update` / пункт **2** | Последний **GitHub Release** (stable) |
+| `update --edge` / пункт **3** | Последний коммит `main` (edge) |
 
-1. Есть `.git` → `git pull`
-2. Нет `.git` → скачивается tarball **последнего коммита** ветки `main` с GitHub и накладывается на каталог
-3. Сохраняются: `.env`, `data/`, `.venv/`, `deploy/state.env`
-4. SHA пишется в `.deploy_revision` (повторный update с тем же SHA — no-op)
+Локальный `.git` не нужен. Сохраняются `.env`, `data/`, `.venv/`. Метаданные: `.deploy_meta`.
 
 ```bash
-cd /opt/vpn-bot
 sudo bash deploy/vpn-bot-ctl.sh update
-# или сразу архив:
-sudo UPDATE_METHOD=archive bash deploy/vpn-bot-ctl.sh update
+sudo bash deploy/vpn-bot-ctl.sh update --edge
 ```
 
-Нужны `curl` (или `wget`), `python3`, желательно `rsync`. Сеть до `api.github.com` и `github.com`.
+Нужны `curl`, `python3`, желательно `rsync`; доступ к `api.github.com` / `github.com`.
 
-Форк: `GIT_REMOTE=https://github.com/ORG/REPO.git GIT_BRANCH=main`.
+**«Релизов ещё нет»** — используйте пункт **3** или дождитесь `vX.Y.Z`.
 
-Если ctl ещё **старый** (ошибка «Не git-репозиторий») — один раз обновите `deploy/` вручную или скачайте свежий release/zip поверх кода, затем снова пункт **2**.
+**Старый ctl** («Не git-репозиторий»):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/bootstrap.sh \
+  | sudo bash -s -- /opt/vpn-bot
+sudo bash /opt/vpn-bot/deploy/vpn-bot-ctl.sh update
+```
 
 ## Ошибка 3x-ui / таймаут
 

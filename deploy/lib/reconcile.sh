@@ -1,11 +1,12 @@
 # shellcheck shell=bash
-# Идемпотентная установка / обновление (пункт 1 меню)
+# Идемпотентная установка / обновление (пункт 1 меню) + обновление кода (релиз / коммит)
 
-# Upstream для обновления кода (форки: GIT_REMOTE=… или deploy/state.env)
 DEFAULT_GIT_REMOTE="${DEFAULT_GIT_REMOTE:-https://github.com/Sp0nge-bob/xuibot.git}"
 DEFAULT_GIT_BRANCH="${DEFAULT_GIT_BRANCH:-main}"
-# Файл с SHA последнего применённого архива (без .git)
 DEPLOY_REVISION_FILE=".deploy_revision"
+DEPLOY_META_FILE=".deploy_meta"
+
+# ── remote / slug ──────────────────────────────────────────────
 
 resolve_git_remote() {
     if [[ -n "${GIT_REMOTE:-}" ]]; then
@@ -58,7 +59,6 @@ save_git_remote_to_state() {
     fi
 }
 
-# https://github.com/Owner/Repo.git → Owner/Repo
 github_slug_from_remote() {
     local remote="$1"
     remote="${remote%.git}"
@@ -74,86 +74,114 @@ github_slug_from_remote() {
     return 1
 }
 
+# ── HTTP / JSON helpers ────────────────────────────────────────
+
 _http_get() {
     local url="$1" out="$2"
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL --connect-timeout 20 --max-time 180 -o "$out" "$url"
+        curl -fsSL --connect-timeout 20 --max-time 180 \
+            -H "Accept: application/vnd.github+json" \
+            -H "User-Agent: vpn-platega-bot-ctl" \
+            -o "$out" "$url"
     elif command -v wget >/dev/null 2>&1; then
-        wget -q -O "$out" "$url"
+        wget -q -O "$out" --header="Accept: application/vnd.github+json" "$url"
     else
         die "Нужен curl или wget для скачивания обновления"
     fi
 }
 
-# SHA последнего коммита ветки через GitHub API (без локального git)
-github_branch_sha() {
-    local slug="$1" branch="$2"
-    local api_url tmp sha
-    api_url="https://api.github.com/repos/${slug}/commits/${branch}"
-    tmp="$(mktemp)"
-    if ! _http_get "$api_url" "$tmp"; then
-        rm -f "$tmp"
-        return 1
-    fi
-    sha="$(
-        python3 - "$tmp" <<'PY' 2>/dev/null
+_json_get() {
+    # usage: _json_get file.py key → prints value via python
+    local file="$1"
+    shift
+    python3 - "$file" "$@" <<'PY'
 import json, sys
-with open(sys.argv[1], encoding="utf-8") as f:
+path = sys.argv[1]
+keys = sys.argv[2:]
+with open(path, encoding="utf-8") as f:
     data = json.load(f)
-print((data.get("sha") or "")[:40])
+cur = data
+for k in keys:
+    if isinstance(cur, dict):
+        cur = cur.get(k)
+    else:
+        cur = None
+        break
+if cur is None:
+    sys.exit(1)
+print(cur)
 PY
-    )"
-    rm -f "$tmp"
-    [[ -n "$sha" && ${#sha} -ge 7 ]] || return 1
-    echo "$sha"
 }
 
-git_discard_deploy_script_drift() {
-    # install_restart_sudoers делает chmod 755 — иначе git pull падает на «local changes»
-    local rel
-    for rel in deploy/restart-services.sh deploy/vpn-bot-ctl.sh; do
-        [[ -f "$APP_DIR/$rel" ]] || continue
-        if git -C "$APP_DIR" diff --quiet -- "$rel" 2>/dev/null; then
-            continue
+# ── deploy meta ────────────────────────────────────────────────
+
+read_deploy_meta_field() {
+    local key="$1" file="$APP_DIR/$DEPLOY_META_FILE"
+    [[ -f "$file" ]] || return 1
+    grep -E "^${key}=" "$file" 2>/dev/null | head -1 | cut -d= -f2-
+}
+
+write_deploy_meta() {
+    local channel="$1" version="$2" sha="$3" remote="$4"
+    local now
+    now="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    cat >"$APP_DIR/$DEPLOY_META_FILE" <<EOF
+CHANNEL=$channel
+VERSION=$version
+SHA=$sha
+REMOTE=$remote
+UPDATED_AT=$now
+EOF
+    printf '%s\n' "$sha" >"$APP_DIR/$DEPLOY_REVISION_FILE"
+    save_git_remote_to_state "$remote"
+}
+
+format_installed_version() {
+    local channel version sha short
+    if [[ -f "$APP_DIR/$DEPLOY_META_FILE" ]]; then
+        channel="$(read_deploy_meta_field CHANNEL || true)"
+        version="$(read_deploy_meta_field VERSION || true)"
+        sha="$(read_deploy_meta_field SHA || true)"
+        if [[ -n "$version" ]]; then
+            if [[ "$channel" == "release" ]]; then
+                echo "$version (stable)"
+            else
+                echo "${version} (edge)"
+            fi
+            return
         fi
-        warn "Сбрасываем локальные изменения $rel (обычно chmod от установки)"
-        git -C "$APP_DIR" restore --source=HEAD --staged --worktree -- "$rel" 2>/dev/null \
-            || git -C "$APP_DIR" checkout -- "$rel" 2>/dev/null \
-            || true
-    done
+    fi
+    if [[ -f "$APP_DIR/$DEPLOY_REVISION_FILE" ]]; then
+        sha="$(tr -d '[:space:]' <"$APP_DIR/$DEPLOY_REVISION_FILE")"
+        short="${sha:0:7}"
+        echo "${short:-?} (commit)"
+        return
+    fi
+    if [[ -f "$APP_DIR/VERSION" ]]; then
+        echo "$(tr -d '[:space:]' <"$APP_DIR/VERSION") (файловая)"
+        return
+    fi
+    echo "неизвестно"
 }
 
-# Обновление кода из tarball GitHub (последний коммит ветки) — .git не нужен.
-# Сохраняет: .env, data/, .venv/, deploy/state.env, .deploy_revision (перезапишется).
-update_from_github_archive() {
-    local remote branch slug sha short current archive_url tmp tarball extract_root
-    remote="$(resolve_git_remote)"
-    branch="$(resolve_git_branch)"
+# ── overlay archive onto APP_DIR ───────────────────────────────
 
-    if ! slug="$(github_slug_from_remote "$remote")"; then
-        warn "Не удалось разобрать GitHub remote: $remote"
-        warn "Задайте GIT_REMOTE=https://github.com/OWNER/REPO.git"
-        return 1
-    fi
-
-    log "Обновление из GitHub (архив, без локального .git)"
-    log "Репозиторий: $slug  ветка: $branch"
-
-    if ! sha="$(github_branch_sha "$slug" "$branch")"; then
-        warn "Не удалось получить SHA с api.github.com (сеть / лимит / приватный репо)"
-        return 1
-    fi
+apply_code_tarball() {
+    # args: archive_url channel version sha remote
+    local archive_url="$1" channel="$2" version="$3" sha="$4" remote="$5"
+    local short current_sha tmp tarball extract_root
     short="${sha:0:7}"
-    current=""
-    [[ -f "$APP_DIR/$DEPLOY_REVISION_FILE" ]] && current="$(tr -d '[:space:]' <"$APP_DIR/$DEPLOY_REVISION_FILE" || true)"
 
-    if [[ -n "$current" && "$current" == "$sha" ]]; then
-        ok "Код уже актуален ($short)"
-        save_git_remote_to_state "$remote"
+    current_sha="$(read_deploy_meta_field SHA 2>/dev/null || true)"
+    if [[ -z "$current_sha" && -f "$APP_DIR/$DEPLOY_REVISION_FILE" ]]; then
+        current_sha="$(tr -d '[:space:]' <"$APP_DIR/$DEPLOY_REVISION_FILE" || true)"
+    fi
+    if [[ -n "$current_sha" && "$current_sha" == "$sha" ]]; then
+        ok "Код уже актуален: $version ($short)"
+        write_deploy_meta "$channel" "$version" "$sha" "$remote"
         return 0
     fi
 
-    archive_url="https://github.com/${slug}/archive/${sha}.tar.gz"
     tmp="$(mktemp -d)"
     tarball="$tmp/src.tar.gz"
     log "Скачиваем $archive_url"
@@ -188,12 +216,12 @@ update_from_github_archive() {
             --exclude 'deploy/state.env' \
             --exclude '.git/' \
             --exclude "$DEPLOY_REVISION_FILE" \
+            --exclude "$DEPLOY_META_FILE" \
             "$extract_root"/ "$APP_DIR"/
     else
         warn "rsync не найден — копируем через tar (без удаления устаревших файлов)"
-        # shellcheck disable=SC2164
         (
-            cd "$extract_root"
+            cd "$extract_root" || exit 1
             tar -cf - \
                 --exclude='./.env' \
                 --exclude='./data' \
@@ -207,94 +235,177 @@ update_from_github_archive() {
         }
     fi
 
-    printf '%s\n' "$sha" >"$APP_DIR/$DEPLOY_REVISION_FILE"
-    save_git_remote_to_state "$remote"
+    write_deploy_meta "$channel" "$version" "$sha" "$remote"
     rm -rf "$tmp"
-    if [[ -n "$current" ]]; then
-        ok "Код обновлён: ${current:0:7} → $short (архив GitHub)"
+    if [[ -n "$current_sha" ]]; then
+        ok "Код обновлён: ${current_sha:0:7} → $short ($version, $channel)"
     else
-        ok "Код установлен: $short (архив GitHub)"
+        ok "Код установлен: $version ($short, $channel)"
     fi
     return 0
 }
 
-git_pull_repo() {
-    fix_repo_ownership_for_git
-    git_discard_deploy_script_drift
-    log "git pull в $APP_DIR"
-    local before after
-    before="$(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || echo '?')"
-    if ! git -C "$APP_DIR" pull --ff-only; then
-        warn "git pull не удался — проверьте сеть, доступ к origin и локальные изменения"
-        warn "Подсказка: git -C $APP_DIR status ; git -C $APP_DIR remote -v"
-        warn "Запасной путь: UPDATE_METHOD=archive sudo bash deploy/vpn-bot-ctl.sh update"
+github_branch_sha() {
+    local slug="$1" branch="$2"
+    local api_url tmp sha
+    api_url="https://api.github.com/repos/${slug}/commits/${branch}"
+    tmp="$(mktemp)"
+    if ! _http_get "$api_url" "$tmp"; then
+        rm -f "$tmp"
         return 1
     fi
-    after="$(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || echo '?')"
-    if [[ "$before" == "$after" ]]; then
-        ok "Код уже актуален ($after)"
-    else
-        ok "Код обновлён: $before → $after"
-    fi
-    # зафиксировать SHA и для гибридных установок
-    git -C "$APP_DIR" rev-parse HEAD >"$APP_DIR/$DEPLOY_REVISION_FILE" 2>/dev/null || true
-    return 0
+    sha="$(_json_get "$tmp" sha 2>/dev/null || true)"
+    rm -f "$tmp"
+    sha="${sha:0:40}"
+    [[ -n "$sha" && ${#sha} -ge 7 ]] || return 1
+    echo "$sha"
 }
 
-# Выбор способа обновления кода:
-# - UPDATE_METHOD=archive → всегда архив GitHub
-# - UPDATE_METHOD=git → только git pull (нужен .git)
-# - auto (по умолчанию): есть .git → pull, иначе → архив
-update_bot_code() {
-    local method="${UPDATE_METHOD:-auto}"
-    case "$method" in
-        archive|tar|github)
-            update_from_github_archive
-            ;;
-        git|pull)
-            [[ -d "$APP_DIR/.git" ]] || die "UPDATE_METHOD=git, но нет $APP_DIR/.git"
-            git_pull_repo
-            ;;
-        auto|"")
-            if [[ -d "$APP_DIR/.git" ]]; then
-                git_pull_repo || {
-                    warn "git pull не удался — пробуем архив с GitHub"
-                    update_from_github_archive
-                }
-            else
-                update_from_github_archive
+# ── public update modes ────────────────────────────────────────
+
+update_from_latest_release() {
+    local remote slug tmp tag tarball_url sha api_url
+    remote="$(resolve_git_remote)"
+    if ! slug="$(github_slug_from_remote "$remote")"; then
+        warn "Не разобрать GitHub remote: $remote"
+        return 1
+    fi
+
+    log "Канал: stable (последний GitHub Release)"
+    log "Репозиторий: $slug"
+    api_url="https://api.github.com/repos/${slug}/releases/latest"
+    tmp="$(mktemp)"
+    if ! _http_get "$api_url" "$tmp"; then
+        rm -f "$tmp"
+        warn "Не удалось получить latest release (сеть / нет релизов / приватный репо)."
+        warn "Используйте пункт 3 — обновление до последнего коммита (edge)."
+        return 1
+    fi
+    # GitHub returns {"message":"Not Found"} when no releases
+    if grep -q '"Not Found"' "$tmp" 2>/dev/null || grep -q '"message": "Not Found"' "$tmp" 2>/dev/null; then
+        rm -f "$tmp"
+        warn "В репозитории ещё нет GitHub Releases."
+        warn "Прод-обновление: дождитесь релиза или пункт 3 (последний коммит)."
+        return 1
+    fi
+
+    tag="$(_json_get "$tmp" tag_name 2>/dev/null || true)"
+    tarball_url="$(_json_get "$tmp" tarball_url 2>/dev/null || true)"
+    # target_commitish may be branch name; prefer uploading assetless tag archive + resolve sha
+    rm -f "$tmp"
+
+    if [[ -z "$tag" ]]; then
+        warn "В ответе API нет tag_name — релизов нет или формат изменился."
+        warn "Используйте пункт 3 (edge / последний коммит)."
+        return 1
+    fi
+
+    if [[ -z "$tarball_url" ]]; then
+        tarball_url="https://github.com/${slug}/archive/refs/tags/${tag}.tar.gz"
+    fi
+
+    # Resolve tag → commit SHA
+    tmp="$(mktemp)"
+    if _http_get "https://api.github.com/repos/${slug}/git/refs/tags/${tag}" "$tmp" 2>/dev/null; then
+        sha="$(_json_get "$tmp" object sha 2>/dev/null || true)"
+        # annotated tags: object.type=tag → need another hop; try commit sha from object
+        local otype
+        otype="$(python3 -c "import json; d=json.load(open('$tmp')); print(d.get('object',{}).get('type',''))" 2>/dev/null || true)"
+        if [[ "$otype" == "tag" && -n "$sha" ]]; then
+            local tmp2
+            tmp2="$(mktemp)"
+            if _http_get "https://api.github.com/repos/${slug}/git/tags/${sha}" "$tmp2" 2>/dev/null; then
+                sha="$(_json_get "$tmp2" object sha 2>/dev/null || true)"
             fi
+            rm -f "$tmp2"
+        fi
+    fi
+    rm -f "$tmp"
+    if [[ -z "$sha" || ${#sha} -lt 7 ]]; then
+        # fallback: use tag archive URL; sha unknown — store tag as version, sha=tag
+        sha="$tag"
+    fi
+
+    # Prefer codeload archive by tag (stable URL)
+    local archive_url="https://github.com/${slug}/archive/refs/tags/${tag}.tar.gz"
+    apply_code_tarball "$archive_url" "release" "$tag" "$sha" "$remote"
+}
+
+update_from_latest_commit() {
+    local remote branch slug sha short archive_url
+    remote="$(resolve_git_remote)"
+    branch="$(resolve_git_branch)"
+    if ! slug="$(github_slug_from_remote "$remote")"; then
+        warn "Не разобрать GitHub remote: $remote"
+        return 1
+    fi
+
+    log "Канал: edge (последний коммит $branch)"
+    log "Репозиторий: $slug"
+    if ! sha="$(github_branch_sha "$slug" "$branch")"; then
+        warn "Не удалось получить SHA с api.github.com"
+        return 1
+    fi
+    short="${sha:0:7}"
+    archive_url="https://github.com/${slug}/archive/${sha}.tar.gz"
+    apply_code_tarball "$archive_url" "commit" "$short" "$sha" "$remote"
+}
+
+# UPDATE_CHANNEL=release|edge  (default release for `update`)
+update_bot_code() {
+    local channel="${UPDATE_CHANNEL:-release}"
+    case "$channel" in
+        release|stable)
+            update_from_latest_release
+            ;;
+        edge|commit|main|dev)
+            update_from_latest_commit
             ;;
         *)
-            die "Неизвестный UPDATE_METHOD=$method (auto|git|archive)"
+            die "Неизвестный UPDATE_CHANNEL=$channel (release|edge)"
             ;;
     esac
 }
 
-cmd_update_bot() {
-    require_root
-    load_config
-    log "Обновление бота: код (git или архив GitHub) + перезапуск служб"
-    log "Каталог: $APP_DIR"
-
-    if ! unit_is_installed "$TELEGRAM_UNIT" || ! unit_is_installed "$WEB_UNIT"; then
-        warn "Службы не установлены — сначала пункт 1 (установить / обновить)"
-        return 1
-    fi
-
-    if ! update_bot_code; then
-        return 1
-    fi
-
-    # После обновления кода с новым pyproject — подтянуть зависимости
+_cmd_update_finish() {
     if ! python_deps_ok; then
         warn "Зависимости Python устарели после обновления — ставим заново"
         ensure_venv
         ensure_python_deps || warn "pip install не удался — выполните пункт 1"
     fi
-
     fix_permissions
     restart_services
+}
+
+cmd_update_bot_release() {
+    require_root
+    load_config
+    log "Обновление до последнего релиза (stable)"
+    log "Каталог: $APP_DIR"
+    if ! unit_is_installed "$TELEGRAM_UNIT" || ! unit_is_installed "$WEB_UNIT"; then
+        warn "Службы не установлены — сначала пункт 1"
+        return 1
+    fi
+    UPDATE_CHANNEL=release update_bot_code || return 1
+    _cmd_update_finish
+}
+
+cmd_update_bot_edge() {
+    require_root
+    load_config
+    log "Обновление до последнего коммита (edge)"
+    log "Каталог: $APP_DIR"
+    if ! unit_is_installed "$TELEGRAM_UNIT" || ! unit_is_installed "$WEB_UNIT"; then
+        warn "Службы не установлены — сначала пункт 1"
+        return 1
+    fi
+    UPDATE_CHANNEL=edge update_bot_code || return 1
+    _cmd_update_finish
+}
+
+# backward-compatible: default = release
+cmd_update_bot() {
+    cmd_update_bot_release
 }
 
 cmd_reconcile() {

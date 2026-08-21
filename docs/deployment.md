@@ -27,41 +27,36 @@
 
 ## Обновление
 
-### Только код (пункт 2 / `update`)
+### Обновление кода
+
+| Цель | Меню | CLI |
+|------|------|-----|
+| **Stable** (рекомендуется) | **2** | `sudo bash deploy/vpn-bot-ctl.sh update` |
+| **Edge** (свежий main) | **3** | `sudo bash deploy/vpn-bot-ctl.sh update --edge` |
+
+Архив с GitHub; `.env` / `data/` / `.venv` не трогаются. Версия пишется в `.deploy_meta`.
+
+Нет релизов → пункт **2** сообщит об этом; используйте пункт **3** или дождитесь Release.
+
+Bootstrap / починка ctl:
 
 ```bash
-cd /opt/vpn-bot   # или ваш APP_DIR
-sudo bash deploy/vpn-bot-ctl.sh
-# → 2   (код + restart)
+curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/bootstrap.sh \
+  | sudo bash -s -- /opt/vpn-bot
 ```
 
-Или:
+### Полное обновление окружения (venv, redis, unit-файлы)
 
 ```bash
-sudo bash deploy/vpn-bot-ctl.sh update
-```
-
-- Есть `.git` → `git pull --ff-only`
-- Нет `.git` → архив последнего коммита с GitHub (`.env` / `data/` / `.venv` не трогаются)
-- Принудительно архив: `UPDATE_METHOD=archive`
-
-Подробности при сбоях: [Troubleshooting](troubleshooting.md#обновление-без-git--архив-github).
-
-### Полное обновление (venv, redis, unit-файлы)
-
-```bash
-git pull
 sudo bash deploy/vpn-bot-ctl.sh
 # → 1
 ```
-
-Используйте после смены зависимостей в `pyproject.toml` или при «починке» окружения.
 
 ### Только перезапуск
 
 ```bash
 sudo bash deploy/vpn-bot-ctl.sh
-# → 3
+# → 4
 ```
 
 ## nginx (фрагмент)

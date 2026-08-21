@@ -4,13 +4,23 @@ Telegram-бот для продажи VPN-подписок: оплата чер�
 
 **Возможности:** тарифы, 5 способов оплаты, промокоды, пробный период, реферальная программа, FAQ, тикеты и возвраты, мульти-ноды, Happ-шифрование ссылок, hub-админка с диагностикой и lockdown.
 
-**Python:** 3.11–3.14 (`requires-python >=3.11,<3.15`).
+**Версия:** [v1.0.0](https://github.com/Sp0nge-bob/xuibot/releases) · **Python:** 3.11–3.14
 
 > **Секреты:** `.env` не должен попадать в git. См. [SECURITY.md](SECURITY.md).
 
 ---
 
 ## Быстрый старт (продакшен)
+
+```bash
+# без git на сервере — одна команда:
+curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/bootstrap.sh \
+  | sudo bash -s -- /opt/vpn-bot
+sudo nano /opt/vpn-bot/.env    # из .env.example
+sudo bash /opt/vpn-bot/deploy/vpn-bot-ctl.sh   # пункт 1 → установка
+```
+
+Или вручную:
 
 ```bash
 cd /opt/vpn-bot
@@ -39,7 +49,14 @@ python run_all.py          # webhook + Telegram
 
 Проверка: `curl https://your-domain.com/health` → `{"status":"ok"}`
 
-**Обновление на VPS:** `sudo bash deploy/vpn-bot-ctl.sh update` (git pull + restart).
+**Обновление на VPS:**
+
+```bash
+sudo bash deploy/vpn-bot-ctl.sh update           # последний Release (stable)
+sudo bash deploy/vpn-bot-ctl.sh update --edge    # последний коммит main
+```
+
+Релизные заметки: [docs/RELEASE_v1.0.0.md](docs/RELEASE_v1.0.0.md).
 
 ---
 
