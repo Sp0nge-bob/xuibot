@@ -56,7 +56,7 @@ draw_menu() {
     ui_section "Службы"
     ui_menu_item "4" "Перезапустить" "быстрый restart"
     ui_menu_item "5" "Статус" "telegram · web · Redis"
-    ui_menu_item "6" "Логи" "tail -f"
+    ui_menu_item "6" "Логи" "live · q — назад"
 
     ui_section "Опасная зона"
     ui_menu_item "7" "Остановить"
@@ -119,8 +119,14 @@ interactive_menu() {
                 pause_menu
                 ;;
             6)
-                ui_header "Логи (остановите tail через Ctrl+C)"
-                run_action follow_all_logs
+                ui_header "Логи — q вернуться в меню"
+                # без run_action «Готово» поверх live-view: вызываем напрямую
+                echo
+                if follow_all_logs; then
+                    :
+                else
+                    err "Не удалось открыть логи"
+                fi
                 pause_menu
                 ;;
             7)
