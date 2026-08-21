@@ -85,6 +85,8 @@ def _parse_orders_msg_cb(data: str) -> tuple[str, int, int]:
 async def _enrich_order(order: dict) -> dict:
     if not order:
         return order
+    from services.order_referrer import enrich_order_with_referrer
+
     enriched = dict(order)
     if order.get("tg_id"):
         user = await db.get_user(int(order["tg_id"]))
@@ -102,6 +104,7 @@ async def _enrich_order(order: dict) -> dict:
             subscription_active=bool(sub.get("is_active")),
             subscription_end_date=sub.get("end_date"),
         )
+    enriched = await enrich_order_with_referrer(enriched) or enriched
     return enriched
 
 

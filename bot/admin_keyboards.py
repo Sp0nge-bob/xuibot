@@ -791,6 +791,10 @@ def admin_user_detail_kb(
             text="🧾 Чеки на эту подписку",
             callback_data=f"adm:sub:orders:{subscription_id}:0",
         )],
+        [InlineKeyboardButton(
+            text="⏰ Продлить",
+            callback_data=f"adm:sub:extend:{subscription_id}",
+        )],
     ]
     rows.append([
         InlineKeyboardButton(
@@ -807,6 +811,31 @@ def admin_user_detail_kb(
         InlineKeyboardButton(text="« Админ", callback_data="adm:menu"),
     ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_extend_days_kb(subscription_id: int) -> InlineKeyboardMarkup:
+    """Быстрые сроки + своё число дней."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="+7 дн.", callback_data=f"adm:sub:extend_do:{subscription_id}:7"),
+                InlineKeyboardButton(text="+30 дн.", callback_data=f"adm:sub:extend_do:{subscription_id}:30"),
+            ],
+            [
+                InlineKeyboardButton(text="+90 дн.", callback_data=f"adm:sub:extend_do:{subscription_id}:90"),
+                InlineKeyboardButton(text="✏️ Своё…", callback_data=f"adm:sub:extend_custom:{subscription_id}"),
+            ],
+            [InlineKeyboardButton(text="« Назад", callback_data=f"adm:user:{subscription_id}")],
+        ]
+    )
+
+
+def admin_extend_cancel_kb(subscription_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="« Отмена", callback_data=f"adm:sub:extend:{subscription_id}")],
+        ]
+    )
 
 
 def admin_sub_orders_kb(

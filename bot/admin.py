@@ -18,6 +18,9 @@ from db import trial_grants as trial_db
 from config.trial import is_trial_email
 from .messages import (
     admin_debug_order_detail_text,
+    admin_extend_custom_prompt_text,
+    admin_extend_done_text,
+    admin_extend_pick_text,
     admin_plans_text,
     admin_promos_text,
     admin_promo_detail_text,
@@ -28,6 +31,8 @@ from .messages import (
     admin_user_sub_detail_text,
 )
 from services.trial import admin_reset_all_trial_subscriptions, admin_reset_trial
+from services.admin_extend import admin_extend_notify_text, admin_extend_subscription
+from services.order_referrer import enrich_order_with_referrer
 from .states import AdminPricingStates, AdminStates
 from services.subscription_admin import admin_delete_subscription
 from services.process_stats import fetch_bot_load_block
@@ -55,6 +60,8 @@ from .admin_keyboards import (
     admin_users_search_kb,
     admin_user_subs_kb,
     admin_user_detail_kb,
+    admin_extend_cancel_kb,
+    admin_extend_days_kb,
     admin_sub_orders_kb,
     admin_sub_order_detail_kb,
     admin_delete_confirm_kb,
@@ -313,6 +320,7 @@ async def _show_admin_user_sub_detail(
     kind = subscription_kind_label(sub.get("client_email"))
     paid_orders = await db.get_paid_orders_for_subscription(sub_id, limit=50)
     last_order = paid_orders[0] if paid_orders else None
+    last_order = await enrich_order_with_referrer(last_order)
     grant_use = await promo_db.find_grant_use_heuristic_for_subscription(
         tg_id=int(sub["tg_id"]),
         subscription_id=sub_id,
@@ -558,11 +566,140 @@ async def cb_admin_sub_order_detail(cb: CallbackQuery, state: FSMContext):
             "subscription_active": bool(sub.get("is_active")),
             "subscription_end_date": sub.get("end_date"),
         }
+    order = await enrich_order_with_referrer(order) or order
     await safe_cb_answer(cb)
     await send_or_edit(
         cb,
         admin_debug_order_detail_text(order),
         admin_sub_order_detail_kb(sub_id, page=page),
+    )
+
+
+async def _admin_do_extend_and_notify(
+    cb_or_msg: CallbackQuery | Message,
+    *,
+    sub_id: int,
+    days: int,
+    admin_tg_id: int,
+) -> None:
+    from bot import bot as app_bot
+
+    try:
+        result = await admin_extend_subscription(
+            sub_id, days, admin_tg_id=admin_tg_id,
+        )
+    except ValueError as e:
+        if isinstance(cb_or_msg, CallbackQuery):
+            await safe_cb_answer(cb_or_msg, str(e), show_alert=True)
+        else:
+            await cb_or_msg.answer(f"❌ {e}")
+        return
+    except Exception as e:
+        logger.exception("Admin extend failed: {}", e)
+        if isinstance(cb_or_msg, CallbackQuery):
+            await safe_cb_answer(cb_or_msg, "Ошибка продления", show_alert=True)
+        else:
+            await cb_or_msg.answer("❌ Не удалось продлить подписку.")
+        return
+
+    sub = result["subscription"]
+    new_end = result["new_end_iso"]
+    notified = False
+    try:
+        await app_bot.send_message(
+            int(sub["tg_id"]),
+            admin_extend_notify_text(days=days, new_end_date=new_end),
+        )
+        notified = True
+    except Exception as e:
+        logger.warning("Admin extend notify tg_id={}: {}", sub.get("tg_id"), e)
+
+    text = admin_extend_done_text(days=days, new_end=new_end, notified=notified)
+    kb = admin_user_detail_kb(
+        sub_id,
+        int(sub["tg_id"]),
+        from_search=False,
+        from_picker=False,
+    )
+    if isinstance(cb_or_msg, CallbackQuery):
+        await safe_cb_answer(cb_or_msg, f"+{days} дн.")
+        await send_or_edit(cb_or_msg, text, kb)
+    else:
+        await cb_or_msg.answer(text, reply_markup=kb)
+
+
+@router.callback_query(F.data.regexp(r"^adm:sub:extend:\d+$"))
+async def cb_admin_extend_pick(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    sub_id = int(cb.data.rsplit(":", 1)[1])
+    await state.set_state(None)
+    sub = await db.get_subscription_by_id(sub_id)
+    if not sub or not sub.get("is_active"):
+        await safe_cb_answer(cb, "Подписка не найдена", show_alert=True)
+        return
+    await safe_cb_answer(cb)
+    await send_or_edit(
+        cb,
+        admin_extend_pick_text(
+            sub_id=sub_id,
+            end_date=str(sub.get("end_date") or ""),
+            client_email=str(sub.get("client_email") or ""),
+        ),
+        admin_extend_days_kb(sub_id),
+    )
+
+
+@router.callback_query(F.data.regexp(r"^adm:sub:extend_do:\d+:\d+$"))
+async def cb_admin_extend_do(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    parts = cb.data.split(":")
+    sub_id = int(parts[3])
+    days = int(parts[4])
+    await state.clear()
+    await _admin_do_extend_and_notify(
+        cb, sub_id=sub_id, days=days, admin_tg_id=cb.from_user.id,
+    )
+
+
+@router.callback_query(F.data.regexp(r"^adm:sub:extend_custom:\d+$"))
+async def cb_admin_extend_custom(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    sub_id = int(cb.data.rsplit(":", 1)[1])
+    sub = await db.get_subscription_by_id(sub_id)
+    if not sub or not sub.get("is_active"):
+        await safe_cb_answer(cb, "Подписка не найдена", show_alert=True)
+        return
+    await state.set_state(AdminStates.waiting_admin_extend_days)
+    await state.update_data(admin_extend_sub_id=sub_id)
+    await safe_cb_answer(cb)
+    await send_or_edit(
+        cb,
+        admin_extend_custom_prompt_text(),
+        admin_extend_cancel_kb(sub_id),
+    )
+
+
+@router.message(AdminStates.waiting_admin_extend_days)
+async def msg_admin_extend_days(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    sub_id = data.get("admin_extend_sub_id")
+    if not sub_id:
+        await state.clear()
+        await message.answer("Сессия сброшена. Откройте подписку снова.")
+        return
+    raw = (message.text or "").strip()
+    if not raw.isdigit():
+        await message.answer("Введите целое число дней, например <code>14</code>.")
+        return
+    days = int(raw)
+    await state.clear()
+    await _admin_do_extend_and_notify(
+        message, sub_id=int(sub_id), days=days, admin_tg_id=message.from_user.id,
     )
 
 

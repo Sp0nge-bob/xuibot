@@ -1346,6 +1346,26 @@ def _admin_payment_method_line(order: Dict[str, Any]) -> str:
     return html.escape(method_key)
 
 
+def _admin_referrer_suffix(order: Dict[str, Any]) -> str:
+    """Подпись «от кого» для реферальной скидки."""
+    rid = order.get("referrer_tg_id")
+    if rid is None:
+        return ""
+    try:
+        rid_i = int(rid)
+    except (TypeError, ValueError):
+        return ""
+    un = (order.get("referrer_username") or "").strip().lstrip("@")
+    fn = (order.get("referrer_first_name") or "").strip()
+    if un:
+        who = f"@{html.escape(un)}"
+    elif fn:
+        who = html.escape(fn)
+    else:
+        who = "пользователь"
+    return f" · от {who} (<code>{rid_i}</code>)"
+
+
 def _admin_discount_lines(order: Dict[str, Any]) -> list[str]:
     promo = (order.get("promo_code") or "").strip()
     discount = int(order.get("discount_amount") or 0)
@@ -1358,10 +1378,43 @@ def _admin_discount_lines(order: Dict[str, Any]) -> list[str]:
         disc = f" (−{discount} ₽)" if discount > 0 else ""
         lines.append(f"🎟 Промокод: <code>{html.escape(promo)}</code>{disc}")
     elif discount > 0:
-        lines.append(f"👥 Реферальная скидка: <b>−{discount} ₽</b>")
+        lines.append(
+            f"👥 Реферальная скидка: <b>−{discount} ₽</b>"
+            f"{_admin_referrer_suffix(order)}"
+        )
     else:
         lines.append("🏷 Скидка: <i>нет</i>")
     return lines
+
+
+def admin_extend_pick_text(*, sub_id: int, end_date: str, client_email: str) -> str:
+    end_s = (end_date or "")[:10] or "—"
+    return (
+        "⏰ <b>Продление подписки</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        f"Подписка: <code>#{sub_id}</code>\n"
+        f"Клиент: <code>{html.escape(str(client_email or '—'))}</code>\n"
+        f"Сейчас до: <b>{end_s}</b>\n\n"
+        "Выберите срок или введите своё число дней."
+    )
+
+
+def admin_extend_custom_prompt_text() -> str:
+    return (
+        "✏️ <b>Своё продление</b>\n\n"
+        "Отправьте число дней одним сообщением (например <code>14</code>).\n"
+        "Максимум: <b>3650</b>."
+    )
+
+
+def admin_extend_done_text(*, days: int, new_end: str, notified: bool) -> str:
+    end_s = (new_end or "")[:10] or "—"
+    notify = "клиент уведомлён" if notified else "уведомление не доставлено"
+    return (
+        f"✅ Подписка продлена на <b>{days} дн.</b>\n"
+        f"Новый срок: до <b>{end_s}</b>\n"
+        f"<i>{notify}</i>"
+    )
 
 
 def _format_admin_dt(raw: str | None) -> str:
@@ -1556,12 +1609,7 @@ def admin_debug_order_detail_text(order: Dict[str, Any]) -> str:
         lines.append(f"💵 Без скидки: <b>{int(order['original_amount'])} ₽</b>")
     if method_line:
         lines.append(method_line.rstrip())
-    promo = (order.get("promo_code") or "").strip()
-    discount = int(order.get("discount_amount") or 0)
-    if promo:
-        lines.append(f"🎟 Промокод: <code>{html.escape(promo)}</code>")
-    elif discount > 0:
-        lines.append(f"👥 Реферальная скидка: <b>−{discount} ₽</b>")
+    lines.extend(_admin_discount_lines(order))
     lines += [
         "",
         f"🆔 TX Platega: <code>{order.get('platega_tx_id') or '—'}</code>",
@@ -1607,12 +1655,7 @@ def _order_payment_lines(order: Dict[str, Any]) -> list[str]:
         f"🆔 ID транзакции Platega: <code>{order.get('platega_tx_id') or '—'}</code>",
         f"🕐 Оплачен: <b>{paid or '—'}</b>",
     ]
-    promo = (order.get("promo_code") or "").strip()
-    discount = int(order.get("discount_amount") or 0)
-    if promo:
-        lines.append(f"🎟 Промокод: <code>{promo}</code>")
-    elif discount > 0:
-        lines.append(f"👥 Реферальная скидка: <b>−{discount} ₽</b>")
+    lines.extend(_admin_discount_lines(order))
     return lines
 
 

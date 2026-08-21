@@ -36,6 +36,7 @@ class AdminStates(StatesGroup):
     waiting_log_lines_count = State()
     waiting_lockdown_whitelist = State()
     in_order_user_message = State()
+    waiting_admin_extend_days = State()
 
 
 class AdminPricingStates(StatesGroup):
