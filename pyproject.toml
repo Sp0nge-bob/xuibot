@@ -1,6 +1,6 @@
 [project]
 name = "vpn-platega-bot"
-version = "1.0.0"
+version = "1.0.1"
 description = "Полноценный Telegram-бот для продажи VPN подписок с оплатой через Platega и выдачей ключей через 3x-ui"
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
