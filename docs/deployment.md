@@ -29,6 +29,8 @@
 
 ### Только код (типично после `git pull`)
 
+Нужен git-репозиторий в `APP_DIR` (есть `.git`). Иначе: «Не git-репозиторий» — см. [Troubleshooting](troubleshooting.md#нет-git-пункт-2-ctl).
+
 ```bash
 cd /opt/vpn-bot   # или ваш APP_DIR
 sudo bash deploy/vpn-bot-ctl.sh

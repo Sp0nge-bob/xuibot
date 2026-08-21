@@ -47,7 +47,7 @@ sudo bash deploy/vpn-bot-ctl.sh
 | Пункт | Действие |
 |-------|----------|
 | **1** | Установить / обновить полностью: venv, pip, redis-server, `REDIS_URL`, права, unit-файлы, запуск |
-| **2** | **Обновить бота:** `git pull --ff-only` + перезапуск служб (без переустановки venv) |
+| **2** | **Обновить бота:** `git pull --ff-only` + перезапуск (нужен `.git`; иначе предложит привязать remote) |
 | **3** | Быстрый перезапуск служб |
 | **4** | Статус служб + Redis |
 | **5** | Логи `tail -f` |
@@ -60,6 +60,13 @@ sudo bash deploy/vpn-bot-ctl.sh
 
 ```bash
 sudo bash deploy/vpn-bot-ctl.sh update
+```
+
+Каталог должен быть **git clone** (есть `/opt/vpn-bot/.git`). Если бот ставили архивом без `.git`, пункт 2 предложит привязать remote (`.env` и `data/` сохраняются). Неинтерактивно:
+
+```bash
+sudo GIT_BOOTSTRAP=1 GIT_REMOTE=https://github.com/Sp0nge-bob/xuibot.git \
+  bash deploy/vpn-bot-ctl.sh update
 ```
 
 **Если изменился `pyproject.toml` / новые зависимости:** пункт **1**.

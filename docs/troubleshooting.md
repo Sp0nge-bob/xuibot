@@ -52,6 +52,31 @@
 - Поддержка: **3.11–3.14**. Проверка: `.venv/bin/python -V` и `python scripts/dev/smoke_python314.py`.
 - После смены major Python на VPS: пункт **1** `vpn-bot-ctl.sh` (пересоздаст venv) или вручную `rm -rf .venv && python3.14 -m venv .venv && pip install -e .`.
 
+## Нет git (пункт 2 ctl)
+
+Ошибка: `Не git-репозиторий …/.git` — каталог поставлен **без** `.git` (zip/rsync), а пункт **2** делает `git pull`.
+
+**Быстро (интерактивно):** снова пункт **2** → согласиться привязать remote (по умолчанию `https://github.com/Sp0nge-bob/xuibot.git`). Сохраняются `.env` и `data/`.
+
+**Неинтерактивно:**
+
+```bash
+cd /opt/vpn-bot
+sudo GIT_BOOTSTRAP=1 GIT_REMOTE=https://github.com/Sp0nge-bob/xuibot.git \
+  bash deploy/vpn-bot-ctl.sh update
+```
+
+**Клон с нуля** (если привязка не нужна):
+
+```bash
+sudo systemctl stop vpn-bot-telegram vpn-bot-web
+sudo mv /opt/vpn-bot /opt/vpn-bot.bak
+sudo git clone https://github.com/Sp0nge-bob/xuibot.git /opt/vpn-bot
+sudo cp /opt/vpn-bot.bak/.env /opt/vpn-bot/
+sudo cp -a /opt/vpn-bot.bak/data /opt/vpn-bot/
+cd /opt/vpn-bot && sudo bash deploy/vpn-bot-ctl.sh   # пункт 1
+```
+
 ## Ошибка 3x-ui / таймаут
 
 - Осторожно с `XUI_PANEL_CONCURRENCY`

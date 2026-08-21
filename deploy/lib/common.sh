@@ -74,12 +74,24 @@ load_config() {
 
 save_state() {
     mkdir -p "$DEPLOY_DIR"
+    local git_remote=""
+    if [[ -f "$STATE_FILE" ]]; then
+        git_remote="$(grep -E '^GIT_REMOTE=' "$STATE_FILE" 2>/dev/null | head -1 | cut -d= -f2- || true)"
+    fi
+    if [[ -n "${GIT_REMOTE:-}" ]]; then
+        git_remote="$GIT_REMOTE"
+    elif [[ -z "$git_remote" && -d "${APP_DIR:-}/.git" ]]; then
+        git_remote="$(git -C "$APP_DIR" remote get-url origin 2>/dev/null || true)"
+    fi
     cat >"$STATE_FILE" <<EOF
 # Автогенерация deploy/vpn-bot-ctl.sh — не редактируйте вручную
 APP_DIR=$APP_DIR
 SERVICE_USER=$SERVICE_USER
 INSTALLED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF
+    if [[ -n "$git_remote" ]]; then
+        printf 'GIT_REMOTE=%s\n' "$git_remote" >>"$STATE_FILE"
+    fi
     chmod 644 "$STATE_FILE"
     ok "Состояние сохранено: $STATE_FILE"
 }
