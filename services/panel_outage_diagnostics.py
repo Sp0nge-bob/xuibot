@@ -321,6 +321,20 @@ def _node_verdict(rep: _NodeReport) -> str:
     return "частичный сбой"
 
 
+def _node_fully_ok(r: _NodeReport) -> bool:
+    """Нода считается здоровой: DNS+TCP+API (lib или оба raw endpoint)."""
+    if not (r.dns_ok and r.tcp_ok):
+        return False
+    if r.api_lib is not None:
+        return bool(r.api_lib.ok)
+    return bool(
+        r.api_inbounds
+        and r.api_inbounds.ok
+        and r.api_clients
+        and r.api_clients.ok
+    )
+
+
 def _global_verdict(reports: list[_NodeReport]) -> str:
     if not reports:
         return "нет данных"
@@ -361,6 +375,14 @@ def _global_verdict(reports: list[_NodeReport]) -> str:
             for p in (r.http_base, r.api_inbounds, r.api_clients)
         )
     )
+    ok_n = sum(1 for r in reports if _node_fully_ok(r))
+
+    # Всё зелёное — не «частичный сбой»
+    if ok_n == n and n > 0:
+        return (
+            f"🟢 Всё в порядке — {ok_n}/{n} нод: DNS/TCP/API OK "
+            "(ручная проверка или ложное срабатывание health)"
+        )
 
     # 1) Primary host dead — главный кейс (неоплата / suspend)
     if primary and primary.dns_ok and not primary.tcp_ok:
@@ -409,6 +431,8 @@ def _global_verdict(reports: list[_NodeReport]) -> str:
         or (primary.api_inbounds and not primary.api_inbounds.ok)
     ):
         return "🟠 ★ Primary API недоступна — пользователи в lockdown"
+    if ok_n >= 1 and ok_n < n:
+        return f"🟡 Частичный сбой — OK {ok_n}/{n}, см. разбор по нодам"
     return "🟡 Частичный сбой — см. разбор по нодам"
 
 
@@ -471,6 +495,11 @@ def _format_http(label: str, p: Optional[_HttpProbe], *, show_url: bool = False)
 
 
 def _action_hints(reports: list[_NodeReport], global_v: str) -> list[str]:
+    if global_v.startswith("🟢"):
+        return [
+            "• Действий не требуется — панели отвечают",
+            "• Можно закрыть отчёт",
+        ]
     hints: list[str] = []
     primary = next((r for r in reports if r.is_primary), None)
     if primary and primary.dns_ok and not primary.tcp_ok:
