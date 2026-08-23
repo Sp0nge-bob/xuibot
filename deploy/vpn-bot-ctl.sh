@@ -17,6 +17,8 @@ source "$DEPLOY_DIR/lib/permissions.sh"
 source "$DEPLOY_DIR/lib/systemd.sh"
 # shellcheck source=lib/sudoers.sh
 source "$DEPLOY_DIR/lib/sudoers.sh"
+# shellcheck source=lib/cli_command.sh
+source "$DEPLOY_DIR/lib/cli_command.sh"
 # shellcheck source=lib/reconcile.sh
 source "$DEPLOY_DIR/lib/reconcile.sh"
 # shellcheck source=lib/logs.sh
@@ -170,6 +172,7 @@ print_help() {
     cat <<EOF
 ${C_BOLD}${C_CYAN}VPN Bot${C_RESET} — systemd CLI ${C_DIM}(Charm-стиль, NO_COLOR=1 отключает цвета)${C_RESET}
 
+  ${C_GREEN}vpnplategabot${C_RESET}                                 меню (после install)
   ${C_GREEN}sudo bash deploy/vpn-bot-ctl.sh${C_RESET}                 меню
   ${C_GREEN}sudo bash deploy/vpn-bot-ctl.sh install${C_RESET}         окружение (+ Redis)
   ${C_GREEN}sudo bash deploy/vpn-bot-ctl.sh update${C_RESET}          последний Release (stable)

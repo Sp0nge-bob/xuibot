@@ -358,7 +358,7 @@ main() {
     printf '\n'
     ok "Установка завершена"
     printf '\n%sДальше:%s\n' "$C_BOLD" "$C_RESET"
-    printf '  • Меню:     %ssudo bash %s/deploy/vpn-bot-ctl.sh%s\n' "$C_GREEN" "$APP_DIR" "$C_RESET"
+    printf '  • Меню:     %svpnplategabot%s  (или sudo bash %s/deploy/vpn-bot-ctl.sh)\n' "$C_GREEN" "$C_RESET" "$APP_DIR"
     printf '  • Обновление: пункт 2 (stable) или 3 (edge)\n'
     printf '  • Health:   %scurl -s http://127.0.0.1:8080/health%s\n' "$C_DIM" "$C_RESET"
     printf '  • Webhook:  HTTPS + nginx → PUBLIC_WEBHOOK_URL (если не TEST_MODE)\n'

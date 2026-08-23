@@ -21,7 +21,13 @@ curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/insta
 2. Спрашивает `BOT_TOKEN` и **сразу проверяет** его через `https://api.telegram.org/bot…/getMe`
 3. Спрашивает `BOT_ADMINS`, Primary **3x-ui** (`XUI_HOST` + token или логин/пароль)
 4. Platega — опционально; иначе включает `TEST_MODE=true`
-5. Запускает полный install: Redis, venv, systemd, старт служб
+5. Запускает полный install: Redis, venv, systemd, старт служб  
+6. Ставит команду **`vpnplategabot`** → `/usr/local/bin/vpnplategabot` (меню ctl, как `x-ui`)
+
+```bash
+vpnplategabot                 # интерактивное меню
+sudo vpnplategabot update     # stable-релиз
+```
 
 Повторный запуск не затирает `data/` / `.venv/`; про существующий `.env` спросит отдельно.
 

@@ -28,6 +28,13 @@ curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/insta
 
 Мастер скачает **последний Release**, проверит **BOT_TOKEN** через Telegram `getMe`, спросит панель 3x-ui и (опционально) Platega, затем поставит Redis, venv и systemd.
 
+После установки в терминале:
+
+```bash
+vpnplategabot          # меню управления (как x-ui)
+# или: sudo vpnplategabot update
+```
+
 ---
 
 ## Быстрый старт (вручную)

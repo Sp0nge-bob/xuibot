@@ -380,6 +380,7 @@ _cmd_update_finish() {
         ensure_python_deps || warn "pip install не удался — выполните пункт 1"
     fi
     fix_permissions
+    install_vpnplategabot_command || true
     restart_services
 }
 
@@ -442,10 +443,13 @@ cmd_reconcile() {
         return 1
     fi
 
+    install_vpnplategabot_command || true
+
     save_state
     echo
     ok "Установка / обновление завершено"
     log "Проверка: curl -s http://127.0.0.1:8080/health"
+    log "Меню: vpnplategabot   или   sudo vpnplategabot"
     show_status
     return 0
 }
@@ -487,6 +491,7 @@ cmd_purge_bot() {
     systemctl reset-failed "$WEB_UNIT" "$TELEGRAM_UNIT" 2>/dev/null || true
 
     remove_restart_sudoers
+    remove_vpnplategabot_command
 
     if [[ -n "$APP_DIR" && "$APP_DIR" != "/" && -d "$APP_DIR" ]]; then
         # защита от случайного rm -rf /
