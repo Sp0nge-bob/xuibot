@@ -443,3 +443,75 @@ cmd_reconcile() {
     show_status
     return 0
 }
+
+
+cmd_purge_bot() {
+    # Полный снос: units + APP_DIR + SERVICE_USER + sudoers
+    require_root
+    load_config
+
+    local confirm=""
+    printf '\n'
+    warn "ПОЛНЫЙ СНОС бота с сервера"
+    printf '  Каталог:     %s\n' "$APP_DIR"
+    printf '  Пользователь: %s\n' "$SERVICE_USER"
+    printf '  Units:       %s %s\n' "$TELEGRAM_UNIT" "$WEB_UNIT"
+    printf '  sudoers:     /etc/sudoers.d/vpn-bot-restart\n'
+    printf '\n  Будет удалено %sбезвозвратно%s (data/, .env, код).\n' "${C_RED:-}" "${C_RESET:-}"
+    printf '  Redis-server %sне%s трогаем (может использоваться другими сервисами).\n' "${C_BOLD:-}" "${C_RESET:-}"
+    printf '\n  Введите %sDELETE%s для подтверждения: ' "${C_BOLD:-}${C_RED:-}" "${C_RESET:-}"
+    # shellcheck disable=SC2162
+    read -r confirm </dev/tty
+    if [[ "$confirm" != "DELETE" ]]; then
+        warn "Отменено (нужно точно DELETE)"
+        return 1
+    fi
+
+    log "Останавливаем процессы и службы…"
+    systemctl disable --now "$WEB_UNIT" "$TELEGRAM_UNIT" 2>/dev/null || true
+    systemctl stop "$WEB_UNIT" "$TELEGRAM_UNIT" 2>/dev/null || true
+    pkill -f "$APP_DIR/run_bot.py" 2>/dev/null || true
+    pkill -f "$APP_DIR/app.py" 2>/dev/null || true
+    pkill -f "$APP_DIR/.venv" 2>/dev/null || true
+    sleep 1
+
+    log "Удаляем systemd units…"
+    rm -f "$SYSTEMD_DIR/$TELEGRAM_UNIT" "$SYSTEMD_DIR/$WEB_UNIT"
+    systemctl daemon-reload
+    systemctl reset-failed "$WEB_UNIT" "$TELEGRAM_UNIT" 2>/dev/null || true
+
+    remove_restart_sudoers
+
+    if [[ -n "$APP_DIR" && "$APP_DIR" != "/" && -d "$APP_DIR" ]]; then
+        # защита от случайного rm -rf /
+        case "$APP_DIR" in
+            /opt/*|/home/*|/var/*|/srv/*|/root/*)
+                log "Удаляем каталог $APP_DIR …"
+                rm -rf --one-file-system "$APP_DIR"
+                ok "Каталог удалён"
+                ;;
+            *)
+                warn "Каталог $APP_DIR вне типичных путей — не удаляю автоматически"
+                warn "Удалите вручную: rm -rf $APP_DIR"
+                ;;
+        esac
+    fi
+
+    if id "$SERVICE_USER" >/dev/null 2>&1; then
+        log "Удаляем пользователя $SERVICE_USER …"
+        userdel "$SERVICE_USER" 2>/dev/null \
+            || userdel -r "$SERVICE_USER" 2>/dev/null \
+            || warn "Не удалось удалить пользователя $SERVICE_USER"
+        ok "Пользователь $SERVICE_USER удалён (если существовал)"
+    fi
+
+    if [[ -f "$STATE_FILE" ]]; then
+        rm -f "$STATE_FILE"
+        ok "Удалён $STATE_FILE"
+    fi
+
+    echo
+    ok "Полный снос завершён"
+    log "Повторная установка: curl …/deploy/install.sh | sudo bash"
+    return 0
+}

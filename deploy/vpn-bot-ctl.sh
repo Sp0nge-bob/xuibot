@@ -60,7 +60,8 @@ draw_menu() {
 
     ui_section "Опасная зона"
     ui_menu_item "7" "Остановить"
-    ui_menu_item "8" "Удалить службы" "uninstall units"
+    ui_menu_item "8" "Удалить службы" "только systemd units"
+    ui_menu_item "9" "Снести бота полностью" "units · каталог · user"
 
     printf '\n'
     ui_menu_item "0" "Выход"
@@ -84,7 +85,7 @@ interactive_menu() {
 
     while true; do
         draw_menu
-        ui_prompt "0-8"
+        ui_prompt "0-9"
         read -r choice </dev/tty
 
         case "$choice" in
@@ -145,12 +146,20 @@ interactive_menu() {
                 fi
                 pause_menu
                 ;;
+            9)
+                ui_header "Полный снос бота"
+                if cmd_purge_bot; then
+                    printf '\n  %sВыход из меню — каталога уже нет.%s\n\n' "$C_DIM" "$C_RESET"
+                    exit 0
+                fi
+                pause_menu
+                ;;
             0|q|Q)
                 printf '\n  %sПока.%s\n\n' "$C_DIM" "$C_RESET"
                 exit 0
                 ;;
             *)
-                err "Введите число от 0 до 8"
+                err "Введите число от 0 до 9"
                 sleep 1
                 ;;
         esac
@@ -166,6 +175,7 @@ ${C_BOLD}${C_CYAN}VPN Bot${C_RESET} — systemd CLI ${C_DIM}(Charm-стиль, N
   ${C_GREEN}sudo bash deploy/vpn-bot-ctl.sh update${C_RESET}          последний Release (stable)
   ${C_GREEN}sudo bash deploy/vpn-bot-ctl.sh update --edge${C_RESET}   последний коммит main
   ${C_GREEN}sudo bash deploy/vpn-bot-ctl.sh restart|status|logs|stop|uninstall${C_RESET}
+  ${C_GREEN}sudo bash deploy/vpn-bot-ctl.sh purge${C_RESET}           полный снос (нужно ввести DELETE)
 
 Обновление без локального .git. Сохраняются: .env, data/, .venv/
 
@@ -252,6 +262,11 @@ EOF
             require_root
             ui_banner "uninstall" "unit-файлы"
             uninstall_services
+            ;;
+        purge|destroy)
+            require_root
+            ui_banner "purge" "полный снос"
+            cmd_purge_bot
             ;;
         -h|--help)
             print_help

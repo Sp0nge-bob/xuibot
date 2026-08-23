@@ -36,3 +36,14 @@ EOF
     ok "sudoers для /reboot: $dest"
     return 0
 }
+
+
+remove_restart_sudoers() {
+    local dest="/etc/sudoers.d/vpn-bot-restart"
+    if [[ -f "$dest" ]]; then
+        rm -f "$dest"
+        ok "Удалён $dest"
+    else
+        log "sudoers vpn-bot-restart уже нет"
+    fi
+}
