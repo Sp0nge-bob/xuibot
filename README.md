@@ -4,7 +4,7 @@ Telegram-бот для продажи VPN-подписок: оплата чер�
 
 **Возможности:** тарифы, 5 способов оплаты, промокоды, пробный период, реферальная программа, FAQ, тикеты и возвраты, мульти-ноды, Happ-шифрование ссылок, hub-админка с диагностикой и lockdown.
 
-**Версия:** [v1.0.1](https://github.com/Sp0nge-bob/xuibot/releases/tag/v1.0.1) · **Python:** 3.11–3.14
+**Версия:** [v1.1.0](https://github.com/Sp0nge-bob/xuibot/releases/tag/v1.1.0) · **Python:** 3.11–3.14
 
 > **Секреты:** `.env` не должен попадать в git. См. [SECURITY.md](SECURITY.md).
 
@@ -77,7 +77,7 @@ sudo bash deploy/vpn-bot-ctl.sh update           # последний Release (s
 sudo bash deploy/vpn-bot-ctl.sh update --edge    # последний коммит main
 ```
 
-Релизные заметки: [v1.0.1 — CLI](docs/RELEASE_v1.0.1.md) · [v1.0.0](docs/RELEASE_v1.0.0.md).
+Релизные заметки: [v1.1.0](docs/RELEASE_v1.1.0.md) · [v1.0.1](docs/RELEASE_v1.0.1.md) · [v1.0.0](docs/RELEASE_v1.0.0.md).
 
 ---
 
