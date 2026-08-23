@@ -5,7 +5,6 @@
 #   curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/install.sh \
 #     | sudo bash
 #
-#   # или с путём:
 #   curl -fsSL …/deploy/install.sh | sudo bash -s -- /opt/vpn-bot
 #
 # Канал кода: последний GitHub Release (stable).
@@ -31,7 +30,7 @@ fi
 case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
     *UTF-8*|*utf8*|*UTF8*) _TL='╭' _TR='╮' _BL='╰' _BR='╯' _H='─' _V='│' ;;
     *)
-        if locale charmap 2>/dev/null | grep -qi 'utf-8'; then
+        if command -v locale >/dev/null 2>&1 && locale charmap 2>/dev/null | grep -qi 'utf-8'; then
             _TL='╭' _TR='╮' _BL='╰' _BR='╯' _H='─' _V='│'
         else
             _TL='+' _TR='+' _BL='+' _BR='+' _H='-' _V='|'
@@ -62,12 +61,19 @@ banner() {
 # ── TTY (curl | bash) ──────────────────────────────────────────
 ensure_tty() {
     if [[ ! -r "$TTY" ]]; then
-        die "Нет $TTY (нужен интерактивный терминал). Скачайте скрипт и запустите: sudo bash install.sh"
+        die "Нет $TTY (нужен интерактивный терминал). Скачайте скрипт и запустите: sudo bash install.sh [/opt/vpn-bot]"
     fi
 }
 
+_restore_tty_echo() {
+    if [[ -r "$TTY" ]]; then
+        stty echo <"$TTY" 2>/dev/null || true
+        stty icanon <"$TTY" 2>/dev/null || true
+    fi
+}
+trap '_restore_tty_echo' EXIT INT TERM
+
 ask() {
-    # ask "Подсказка" "default" → пишет ответ в REPLY
     local prompt="$1" default="${2:-}"
     if [[ -n "$default" ]]; then
         printf '%s?%s %s %s[%s]%s: ' "$C_CYAN" "$C_RESET" "$prompt" "$C_DIM" "$default" "$C_RESET" >"$TTY"
@@ -82,28 +88,212 @@ ask() {
 }
 
 ask_secret() {
+    # Секретный ввод: символы не видны — обязательно предупреждаем
     local prompt="$1"
-    printf '%s?%s %s: ' "$C_CYAN" "$C_RESET" "$prompt" >"$TTY"
-    # hide input when possible
+    printf '%s?%s %s\n' "$C_CYAN" "$C_RESET" "$prompt" >"$TTY"
+    printf '  %s⚠  ВВОД СКРЫТ%s%s — на экране ничего не появляется (это нормально).%s\n' \
+        "$C_YELLOW$C_BOLD" "$C_RESET" "$C_YELLOW" "$C_RESET" >"$TTY"
+    printf '  %sВставьте токен/пароль из буфера и нажмите Enter.%s\n' \
+        "$C_YELLOW" "$C_RESET" >"$TTY"
+    printf '  %s> %s' "$C_DIM" "$C_RESET" >"$TTY"
+    REPLY=""
     if stty -echo <"$TTY" 2>/dev/null; then
+        # shellcheck disable=SC2162
         IFS= read -r REPLY <"$TTY" || true
         stty echo <"$TTY" 2>/dev/null || true
         printf '\n' >"$TTY"
     else
+        warn "Не удалось скрыть ввод (stty) — токен будет ВИДЕН на экране"
+        # shellcheck disable=SC2162
         IFS= read -r REPLY <"$TTY" || true
+    fi
+    if [[ -n "$REPLY" ]]; then
+        printf '  %s✓ получено %s символов (содержимое скрыто)%s\n' \
+            "$C_DIM" "${#REPLY}" "$C_RESET" >"$TTY"
+    else
+        printf '  %s(пусто — ничего не введено)%s\n' "$C_DIM" "$C_RESET" >"$TTY"
     fi
 }
 
 ask_yn() {
-    local prompt="$1" default="${2:-N}"
+    local prompt="$1" default="${2:-N}" ans
     ask "$prompt" "$default"
-    case "${REPLY,,}" in
+    ans="$(printf '%s' "$REPLY" | tr '[:upper:]' '[:lower:]')"
+    case "$ans" in
         y|yes|д|да) return 0 ;;
         *) return 1 ;;
     esac
 }
 
-# ── .env helpers (python — безопасно для спецсимволов) ─────────
+# ── OS packages (прогресс + универсальные PM) ──────────────────
+# Читает stdout/stderr команды и печатает ключевые строки + heartbeat при тишине.
+_pm_filter() {
+    local line st idle=0
+    while true; do
+        if IFS= read -r -t 3 line; then
+            idle=0
+            case "$line" in
+                Get:*|Hit:*|Ign:*|Fetched\ *|Reading\ *|Building\ *|Unpacking\ *|Setting\ up\ *|Processing\ *|Selecting\ *|Preparing\ *|Created\ *|Synchronizing*|Downloading\ *|Installing\ *|Installed\ *|Verifying\ *|Running\ *|Transaction\ *|Dependencies\ *|Package\ *|Resolving\ *|Last\ metadata*|Complete!*|fetch\ *|OK:*|*\.deb*|*\.rpm*|  Installing*|  Upgrading*|  Verifying*|  Downloading*)
+                    printf '  %s%s%s\n' "$C_DIM" "$line" "$C_RESET"
+                    ;;
+                *Err:*|*E:\ *|*error*|*Error*|*ERROR*|*FAILED*|*Failed*)
+                    printf '  %s%s%s\n' "$C_RED" "$line" "$C_RESET"
+                    ;;
+            esac
+        else
+            st=$?
+            if [[ "$st" -gt 128 ]]; then
+                idle=$((idle + 3))
+                printf '  %s… ещё работаю (%ss) — скачивание/установка пакетов%s\n' \
+                    "$C_DIM" "$idle" "$C_RESET"
+            else
+                break  # EOF
+            fi
+        fi
+    done
+}
+
+# Запуск пакетной команды с видимым прогрессом. Возврат = код команды (не фильтра).
+_pm_run() {
+    local desc="$1"; shift
+    local rc=0
+    log "$desc"
+    set +e
+    if command -v stdbuf >/dev/null 2>&1; then
+        stdbuf -oL -eL "$@" 2>&1 | _pm_filter
+    else
+        "$@" 2>&1 | _pm_filter
+    fi
+    rc=${PIPESTATUS[0]}
+    set -e
+    return "$rc"
+}
+
+_wait_apt_lock() {
+    local i=0
+    while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+       || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 \
+       || fuser /var/lib/dpkg/lock >/dev/null 2>&1; do
+        if [[ "$i" -eq 0 ]]; then
+            warn "apt занят другим процессом — жду освобождения…"
+        fi
+        i=$((i + 1))
+        if [[ "$i" -ge 90 ]]; then
+            warn "apt всё ещё занят (>3 мин) — пробую продолжить"
+            break
+        fi
+        if [[ $((i % 5)) -eq 0 ]]; then
+            printf '  %s… ждём apt lock (%ss)%s\n' "$C_DIM" "$((i * 2))" "$C_RESET"
+        fi
+        sleep 2
+    done
+}
+
+install_os_packages() {
+    local pm="unknown" rc=0
+
+    if command -v apt-get >/dev/null 2>&1; then pm="apt"
+    elif command -v dnf >/dev/null 2>&1; then pm="dnf"
+    elif command -v microdnf >/dev/null 2>&1; then pm="microdnf"
+    elif command -v yum >/dev/null 2>&1; then pm="yum"
+    elif command -v apk >/dev/null 2>&1; then pm="apk"
+    elif command -v zypper >/dev/null 2>&1; then pm="zypper"
+    elif command -v pacman >/dev/null 2>&1; then pm="pacman"
+    fi
+
+    # Самая первая строка шага — сразу видно, что идёт прогресс
+    log "Пакеты ОС [$pm] — установка зависимостей (прогресс ниже)…"
+    printf '  %sнужны: curl, tar, python3 · желательно: rsync, ca-certificates%s\n' \
+        "$C_DIM" "$C_RESET"
+
+    case "$pm" in
+        apt)
+            export DEBIAN_FRONTEND=noninteractive
+            export NEEDRESTART_MODE="${NEEDRESTART_MODE:-a}"
+            export APT_LISTCHANGES_FRONTEND=none
+            _wait_apt_lock
+            rc=0
+            _pm_run "Пакеты ОС (1/2): apt-get update…" apt-get update -y || rc=$?
+            if [[ "$rc" -ne 0 ]]; then
+                warn "apt-get update код $rc — пробуем install всё равно"
+            else
+                ok "apt индексы обновлены"
+            fi
+            _wait_apt_lock
+            rc=0
+            _pm_run "Пакеты ОС (2/2): install curl ca-certificates tar rsync python3 python3-venv…" \
+                apt-get install -y --no-install-recommends \
+                    curl ca-certificates tar rsync python3 python3-venv || rc=$?
+            if [[ "$rc" -ne 0 ]]; then
+                warn "полный набор не встал (код $rc) — ставлю минимум без python3-venv"
+                _pm_run "Пакеты ОС: минимальный install…" \
+                    apt-get install -y --no-install-recommends \
+                        curl ca-certificates tar rsync python3 \
+                    || die "apt-get install не удался"
+            fi
+            ok "Пакеты ОС готовы (apt)"
+            ;;
+        dnf)
+            _pm_run "Пакеты ОС: dnf install…" \
+                dnf install -y curl tar rsync python3 ca-certificates \
+                || die "dnf install не удался"
+            ok "Пакеты ОС готовы (dnf)"
+            ;;
+        microdnf)
+            _pm_run "Пакеты ОС: microdnf install…" \
+                microdnf install -y curl tar rsync python3 ca-certificates \
+                || die "microdnf install не удался"
+            ok "Пакеты ОС готовы (microdnf)"
+            ;;
+        yum)
+            _pm_run "Пакеты ОС: yum install…" \
+                yum install -y curl tar rsync python3 ca-certificates \
+                || die "yum install не удался"
+            ok "Пакеты ОС готовы (yum)"
+            ;;
+        apk)
+            _pm_run "Пакеты ОС: apk update…" apk update || warn "apk update с ошибкой — пробую add"
+            _pm_run "Пакеты ОС: apk add…" \
+                apk add --no-cache curl tar rsync python3 ca-certificates \
+                || die "apk add не удался"
+            ok "Пакеты ОС готовы (apk)"
+            ;;
+        zypper)
+            _pm_run "Пакеты ОС: zypper install…" \
+                zypper --non-interactive install -y curl tar rsync python3 ca-certificates \
+                || die "zypper install не удался"
+            ok "Пакеты ОС готовы (zypper)"
+            ;;
+        pacman)
+            _pm_run "Пакеты ОС: pacman -Sy…" \
+                pacman -Sy --noconfirm --needed curl tar rsync python ca-certificates \
+                || die "pacman install не удался"
+            ok "Пакеты ОС готовы (pacman)"
+            ;;
+        *)
+            warn "Неизвестный пакетный менеджер — проверяю curl/python3/tar вручную"
+            warn "Поддерживаются: apt, dnf, yum, microdnf, apk, zypper, pacman"
+            ;;
+    esac
+
+    command -v curl >/dev/null 2>&1 || die "Нужен curl (установите пакет curl)"
+    if ! command -v python3 >/dev/null 2>&1; then
+        if command -v python >/dev/null 2>&1; then
+            warn "python3 не найден, есть python — создаю shim /usr/local/bin/python3"
+            ln -sf "$(command -v python)" /usr/local/bin/python3 2>/dev/null || true
+        fi
+    fi
+    command -v python3 >/dev/null 2>&1 || die "Нужен python3 (установите пакет python3)"
+    if ! command -v rsync >/dev/null 2>&1; then
+        warn "rsync нет — будет копирование через tar (чуть медленнее)"
+    fi
+    command -v tar >/dev/null 2>&1 || die "Нужен tar"
+    local have="curl · python3 · tar"
+    command -v rsync >/dev/null 2>&1 && have+=" · rsync"
+    ok "Зависимости ОС: $have"
+}
+
+# ── .env helpers ───────────────────────────────────────────────
 env_set() {
     local key="$1" value="$2"
     ENV_FILE="${ENV_FILE:-$APP_DIR/.env}"
@@ -124,27 +314,28 @@ for line in lines:
         out.append(line)
 if not found:
     out.append(f"{key}={value}")
+path.parent.mkdir(parents=True, exist_ok=True)
 path.write_text("\n".join(out) + "\n", encoding="utf-8")
 PY
 }
 
 env_get() {
     local key="$1"
-    [[ -f "$ENV_FILE" ]] || { echo ""; return; }
+    [[ -f "${ENV_FILE:-}" ]] || { echo ""; return; }
     grep -E "^${key}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- || true
 }
 
 # ── Telegram getMe ─────────────────────────────────────────────
 verify_bot_token() {
     local token="$1"
-    local tmp resp
+    local tmp
     tmp="$(mktemp)"
     if ! curl -fsSL --connect-timeout 15 --max-time 30 \
         -o "$tmp" "https://api.telegram.org/bot${token}/getMe"; then
         rm -f "$tmp"
         return 1
     fi
-    resp="$(
+    if ! BOT_USERNAME="$(
         python3 - "$tmp" <<'PY'
 import json, sys
 from pathlib import Path
@@ -152,20 +343,25 @@ data = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 if not data.get("ok"):
     raise SystemExit(1)
 r = data.get("result") or {}
-print(r.get("username") or "")
+u = (r.get("username") or "").strip()
+if not u:
+    raise SystemExit(1)
+print(u)
 print(r.get("id") or "")
 print(r.get("first_name") or "")
 PY
-    )" || { rm -f "$tmp"; return 1; }
+    )"; then
+        rm -f "$tmp"
+        return 1
+    fi
     rm -f "$tmp"
-    BOT_USERNAME="$(printf '%s\n' "$resp" | sed -n '1p')"
-    BOT_ID="$(printf '%s\n' "$resp" | sed -n '2p')"
-    BOT_NAME="$(printf '%s\n' "$resp" | sed -n '3p')"
-    [[ -n "$BOT_USERNAME" ]] || return 1
+    BOT_ID="$(printf '%s\n' "$BOT_USERNAME" | sed -n '2p')"
+    BOT_NAME="$(printf '%s\n' "$BOT_USERNAME" | sed -n '3p')"
+    BOT_USERNAME="$(printf '%s\n' "$BOT_USERNAME" | sed -n '1p')"
     return 0
 }
 
-# ── download code (stable release) ─────────────────────────────
+# ── download code ──────────────────────────────────────────────
 slug_from_remote() {
     local r="$1"
     r="${r%.git}"; r="${r%/}"
@@ -182,28 +378,51 @@ fetch_code() {
     tmp="$(mktemp -d)"
     api="$(mktemp)"
     log "Скачиваю код (stable Release) → $APP_DIR"
-    if curl -fsSL -H "Accept: application/vnd.github+json" -H "User-Agent: vpn-bot-install" \
+    if curl -fsSL --connect-timeout 20 --max-time 60 \
+        -H "Accept: application/vnd.github+json" -H "User-Agent: vpn-bot-install" \
         -o "$api" "https://api.github.com/repos/${SLUG}/releases/latest"; then
         tag="$(python3 -c "import json;d=json.load(open('$api'));print(d.get('tag_name') or '')" 2>/dev/null || true)"
         if [[ -n "$tag" ]]; then
             archive_url="https://github.com/${SLUG}/archive/refs/tags/${tag}.tar.gz"
             log "Канал: stable · $tag"
         fi
+    else
+        warn "GitHub API releases недоступен — fallback на ветку $BRANCH"
     fi
     rm -f "$api"
     if [[ -z "$archive_url" ]]; then
         archive_url="https://github.com/${SLUG}/archive/refs/heads/${BRANCH}.tar.gz"
-        warn "Релизов нет — ставлю ветку $BRANCH"
+        warn "Релизов нет / API fail — ставлю ветку $BRANCH"
     fi
-    curl -fsSL -o "$tmp/src.tar.gz" "$archive_url"
+    log "Загрузка архива (полоса прогресса curl)…"
+    if ! curl -fL --connect-timeout 20 --max-time 300 --progress-bar \
+        -o "$tmp/src.tar.gz" "$archive_url"; then
+        rm -rf "$tmp"
+        die "Не удалось скачать $archive_url"
+    fi
+    printf '\n'  # после progress-bar
     mkdir -p "$tmp/extract"
     tar -xzf "$tmp/src.tar.gz" -C "$tmp/extract"
     src="$(find "$tmp/extract" -mindepth 1 -maxdepth 1 -type d | head -1)"
     [[ -f "$src/app.py" ]] || die "В архиве нет app.py"
     mkdir -p "$APP_DIR"
-    # excludes из нового дерева (docs не копируем на VPS)
-    # shellcheck source=/dev/null
-    source "$src/deploy/lib/slim_excludes.sh"
+    if [[ -f "$src/deploy/lib/slim_excludes.sh" ]]; then
+        # shellcheck source=/dev/null
+        source "$src/deploy/lib/slim_excludes.sh"
+    else
+        slim_rsync_exclude_args() {
+            printf '%s\n' --exclude=docs/ --exclude=report/ --exclude=scripts/dev/ \
+                --exclude=.github/ --exclude='*.md' --exclude=.env --exclude=data/ \
+                --exclude=.venv/ --exclude=deploy/state.env --exclude=.git/
+        }
+        slim_purge_docs_from_app_dir() {
+            local root="${1:-}"
+            [[ -d "$root" ]] || return 0
+            rm -rf "$root/docs" "$root/report" "$root/scripts/dev" 2>/dev/null || true
+            find "$root" -maxdepth 1 -type f -name '*.md' -delete 2>/dev/null || true
+        }
+    fi
+    log "Раскладка файлов (slim: без docs/)…"
     if command -v rsync >/dev/null 2>&1; then
         # shellcheck disable=SC2046
         rsync -a $(slim_rsync_exclude_args) "$src"/ "$APP_DIR"/
@@ -223,9 +442,7 @@ fetch_code() {
 # ── wizard ─────────────────────────────────────────────────────
 run_wizard() {
     ENV_FILE="$APP_DIR/.env"
-    local had_env=0
     if [[ -f "$ENV_FILE" ]]; then
-        had_env=1
         warn "Найден существующий .env"
         if ! ask_yn "Обновить ключевые поля мастером? (N = оставить .env как есть)" "N"; then
             ok "Оставляем текущий .env"
@@ -237,14 +454,13 @@ run_wizard() {
         ok "Создан .env из .env.example"
     fi
 
-    # --- Telegram ---
     printf '\n%s▸ Telegram%s\n' "$C_BOLD" "$C_RESET"
     local token=""
     while true; do
         ask_secret "BOT_TOKEN (от @BotFather)"
         token="$(printf '%s' "$REPLY" | tr -d '[:space:]')"
         if [[ -z "$token" ]]; then
-            warn "Токен пустой"
+            warn "Токен пустой — попробуйте снова"
             continue
         fi
         log "Проверяю токен через api.telegram.org/getMe…"
@@ -252,7 +468,7 @@ run_wizard() {
             ok "Бот доступен: @${BOT_USERNAME} (id ${BOT_ID})"
             break
         fi
-        warn "Токен не прошёл проверку getMe — проверьте и введите снова"
+        warn "Токен не прошёл getMe (сеть или неверный токен) — введите снова"
     done
     env_set "BOT_TOKEN" "$token"
 
@@ -262,39 +478,42 @@ run_wizard() {
     [[ -n "$admins" ]] || die "BOT_ADMINS обязателен"
     env_set "BOT_ADMINS" "$admins"
 
-    ask "BOT_BRAND (название в меню)" "$(env_get BOT_BRAND)"
+    ask "BOT_BRAND (название в меню, Enter = как есть)" "$(env_get BOT_BRAND)"
     [[ -n "$REPLY" ]] && env_set "BOT_BRAND" "$REPLY"
 
-    # --- 3x-ui ---
     printf '\n%s▸ Панель 3x-ui (Primary)%s\n' "$C_BOLD" "$C_RESET"
-    ask "XUI_HOST (HTTPS, secret path, БЕЗ /panel/)" "$(env_get XUI_HOST)"
+    printf '  %sПример: https://panel.example.com/secret-path  (без /panel/ в конце)%s\n' "$C_DIM" "$C_RESET"
+    ask "XUI_HOST" "$(env_get XUI_HOST)"
     local host
     host="$(printf '%s' "$REPLY" | sed 's|/*$||')"
     [[ -n "$host" ]] || die "XUI_HOST обязателен"
+    case "$host" in
+        http://*|https://*) ;;
+        *) host="https://$host" ;;
+    esac
     env_set "XUI_HOST" "$host"
 
-    local use_token=1
     if ask_yn "Использовать API Token панели? (N = логин/пароль)" "Y"; then
-        ask_secret "XUI_TOKEN"
+        ask_secret "XUI_TOKEN (Settings → API Token)"
         [[ -n "$REPLY" ]] || die "XUI_TOKEN пустой"
         env_set "XUI_TOKEN" "$REPLY"
         env_set "XUI_USERNAME" ""
         env_set "XUI_PASSWORD" ""
     else
-        use_token=0
         ask "XUI_USERNAME" "$(env_get XUI_USERNAME)"
+        [[ -n "$REPLY" ]] || die "XUI_USERNAME пустой"
         env_set "XUI_USERNAME" "$REPLY"
         ask_secret "XUI_PASSWORD"
+        [[ -n "$REPLY" ]] || die "XUI_PASSWORD пустой"
         env_set "XUI_PASSWORD" "$REPLY"
         env_set "XUI_TOKEN" ""
     fi
 
-    ask "SUBSCRIPTION_BASE_URL (база ссылки подписки, Enter = пропустить)" "$(env_get SUBSCRIPTION_BASE_URL)"
+    ask "SUBSCRIPTION_BASE_URL (Enter = пропустить)" "$(env_get SUBSCRIPTION_BASE_URL)"
     if [[ -n "$REPLY" ]]; then
         env_set "SUBSCRIPTION_BASE_URL" "$(printf '%s' "$REPLY" | sed 's|/*$||')/"
     fi
 
-    # --- Platega / TEST_MODE ---
     printf '\n%s▸ Оплата%s\n' "$C_BOLD" "$C_RESET"
     if ask_yn "Настроить Platega сейчас? (N = TEST_MODE без реальных платежей)" "N"; then
         ask "PLATEGA_MERCHANT_ID" "$(env_get PLATEGA_MERCHANT_ID)"
@@ -307,7 +526,6 @@ run_wizard() {
         ok "Platega записана, TEST_MODE=false"
     else
         env_set "TEST_MODE" "true"
-        # заглушки, чтобы pydantic не ругался на пустые
         local mid sec
         mid="$(env_get PLATEGA_MERCHANT_ID)"
         sec="$(env_get PLATEGA_SECRET)"
@@ -323,7 +541,6 @@ run_wizard() {
     env_set "START_BOT_IN_WEBAPP" "false"
     env_set "ALLOW_DEBUG_ADMIN" "false"
     ok "Конфигурация сохранена в $ENV_FILE"
-    unset use_token
 }
 
 # ── main ───────────────────────────────────────────────────────
@@ -332,14 +549,7 @@ main() {
     ensure_tty
     banner "install · мастер одной команды"
 
-    if command -v apt-get >/dev/null 2>&1; then
-        export DEBIAN_FRONTEND=noninteractive
-        log "Пакеты ОС (curl tar rsync python3)…"
-        apt-get update -qq
-        apt-get install -y curl ca-certificates tar rsync python3 python3-venv >/dev/null
-    fi
-    command -v curl >/dev/null || die "нужен curl"
-    command -v python3 >/dev/null || die "нужен python3"
+    install_os_packages
 
     log "Каталог установки: $APP_DIR"
     fetch_code
@@ -347,11 +557,11 @@ main() {
 
     printf '\n'
     log "Запускаю полную установку (Redis, venv, systemd)…"
-    # APP_DIR для ctl
     export APP_DIR
     if ! bash "$APP_DIR/deploy/vpn-bot-ctl.sh" install; then
         warn "ctl install завершился с ошибкой — проверьте .env и journalctl"
         warn "Повтор: sudo bash $APP_DIR/deploy/vpn-bot-ctl.sh  → пункт 1"
+        warn "Или: sudo vpnplategabot  (если ярлык уже появился)"
         exit 1
     fi
 
