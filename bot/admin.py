@@ -50,6 +50,7 @@ from .admin_keyboards import (
     admin_menu_kb,
     admin_back_kb,
     admin_stats_kb,
+    admin_finance_kb,
     admin_plans_kb,
     admin_promos_kb,
     admin_promo_detail_kb,
@@ -209,6 +210,28 @@ async def cb_admin_stats_refresh(cb: CallbackQuery):
     if not is_admin(cb.from_user.id):
         return
     await _show_admin_stats(cb, refresh=True)
+
+
+async def _show_admin_finance(cb: CallbackQuery, *, refresh: bool) -> None:
+    from services.finance_report import format_finance_report_text, get_finance_report
+
+    await safe_cb_answer(cb, "Обновляю…" if refresh else None)
+    data = await get_finance_report()
+    await send_or_edit(cb, format_finance_report_text(data), admin_finance_kb())
+
+
+@router.callback_query(F.data == "adm:finance")
+async def cb_admin_finance(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    await _show_admin_finance(cb, refresh=False)
+
+
+@router.callback_query(F.data == "adm:finance:refresh")
+async def cb_admin_finance_refresh(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    await _show_admin_finance(cb, refresh=True)
 
 
 _USERS_LIST_LIMIT = 25

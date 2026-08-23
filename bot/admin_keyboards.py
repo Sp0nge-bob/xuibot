@@ -600,6 +600,16 @@ def admin_stats_kb() -> InlineKeyboardMarkup:
     ])
 
 
+def admin_finance_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Обновить", callback_data="adm:finance:refresh")],
+            [InlineKeyboardButton(text="« Монетизация", callback_data="adm:hub:billing")],
+            [InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")],
+        ]
+    )
+
+
 def diagnostics_kb(
     *,
     view: str = "summary",
