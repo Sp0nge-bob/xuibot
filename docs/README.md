@@ -4,6 +4,17 @@ Telegram-бот для продажи VPN-подписок: оплата чер�
 
 **Возможности:** тарифы, Platega, промокоды, trial, рефералы, FAQ, тикеты, мульти-ноды, Happ, hub-админка, техническая диагностика, lockdown, автобэкап.
 
+## Управление на VPS: `vpnplategabot`
+
+После установки одной командой на сервере доступна системная команда (как `x-ui`):
+
+```bash
+vpnplategabot                 # интерактивное меню ctl
+sudo vpnplategabot update     # stable-релиз
+```
+
+Эквивалент: `sudo bash /opt/vpn-bot/deploy/vpn-bot-ctl.sh`.
+
 ---
 
 ## Быстрая навигация
@@ -34,12 +45,14 @@ Telegram-бот для продажи VPN-подписок: оплата чер�
 curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/install.sh | sudo bash
 ```
 
+После мастера: **`vpnplategabot`**, затем webhook URL из `.env` → **ЛК Platega** + **nginx** (см. [Platega](platega.md), [Деплой](deployment.md)).
+
 Подробности: [Установка](installation.md).
 
-1. [Установка](installation.md) — one-liner или venv вручную
+1. [Установка](installation.md) — one-liner / `vpnplategabot` / venv вручную
 2. [Конфигурация](configuration.md) — токены и URL
-3. [Деплой](deployment.md) — чеклист прода
-4. [3x-ui](xui.md) + [Platega](platega.md) — интеграции
+3. [Деплой](deployment.md) — чеклист прода, nginx
+4. [3x-ui](xui.md) + [Platega](platega.md) — интеграции и Callback URL
 5. [Админка](admin.md) — настройка после старта
 
 Корневой [README.md](../README.md) — краткий quick start.

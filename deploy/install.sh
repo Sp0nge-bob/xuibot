@@ -567,16 +567,51 @@ main() {
 
     printf '\n'
     ok "Установка завершена"
+    ENV_FILE="${ENV_FILE:-$APP_DIR/.env}"
+    local wh test_mode
+    wh="$(env_get PUBLIC_WEBHOOK_URL | tr -d '[:space:]')"
+    test_mode="$(env_get TEST_MODE | tr -d '[:space:]')"
+
     printf '\n%sДальше:%s\n' "$C_BOLD" "$C_RESET"
     printf '  • Меню:     %svpnplategabot%s  (или sudo bash %s/deploy/vpn-bot-ctl.sh)\n' "$C_GREEN" "$C_RESET" "$APP_DIR"
     printf '  • Обновление: пункт 2 (stable) или 3 (edge)\n'
     printf '  • Health:   %scurl -s http://127.0.0.1:8080/health%s\n' "$C_DIM" "$C_RESET"
-    printf '  • Webhook:  HTTPS + nginx → PUBLIC_WEBHOOK_URL (если не TEST_MODE)\n'
-    if [[ "$(env_get TEST_MODE)" == "true" ]]; then
-        printf '  • %sСейчас TEST_MODE=true%s — для прода пропишите Platega и TEST_MODE=false\n' "$C_YELLOW" "$C_RESET"
-    fi
     if [[ -n "${BOT_USERNAME:-}" ]]; then
         printf '  • Бот:      %shttps://t.me/%s%s\n' "$C_CYAN" "$BOT_USERNAME" "$C_RESET"
+    fi
+
+    printf '\n%sWebhook (Platega):%s\n' "$C_BOLD" "$C_RESET"
+    if [[ "$test_mode" == "true" ]]; then
+        printf '  • %sСейчас TEST_MODE=true%s — оплаты симулируются, боевой webhook не обязателен.\n' \
+            "$C_YELLOW" "$C_RESET"
+        printf '  • Для прода: задайте Platega в .env, %sTEST_MODE=false%s и %sPUBLIC_WEBHOOK_URL%s\n' \
+            "$C_BOLD" "$C_RESET" "$C_BOLD" "$C_RESET"
+        printf '    (обычно %shttps://ваш-домен/platega-webhook%s).\n' "$C_DIM" "$C_RESET"
+        printf '  • Этот URL нужно:\n'
+        printf '      1) вписать в %sличном кабинете Platega%s (Callback / Webhook URL);\n' \
+            "$C_YELLOW$C_BOLD" "$C_RESET"
+        printf '      2) %sдобавить в nginx%s: location → proxy_pass http://127.0.0.1:8080;\n' \
+            "$C_YELLOW$C_BOLD" "$C_RESET"
+    else
+        if [[ -n "$wh" ]]; then
+            printf '  • URL из .env:  %s%s%s\n' "$C_CYAN$C_BOLD" "$wh" "$C_RESET"
+        else
+            printf '  • %sPUBLIC_WEBHOOK_URL пуст%s — задайте HTTPS URL в .env\n' \
+                "$C_YELLOW" "$C_RESET"
+            wh="https://ваш-домен/platega-webhook"
+            printf '  • Пример:      %s%s%s\n' "$C_DIM" "$wh" "$C_RESET"
+        fi
+        printf '  • Этот адрес нужен в %sличном кабинете Platega%s (Callback / Webhook URL) —\n' \
+            "$C_YELLOW$C_BOLD" "$C_RESET"
+        printf '    без него Platega не сможет подтверждать оплаты боту.\n'
+        printf '  • %sДобавьте его в nginx%s (HTTPS-сайт) и проксируйте на бота:\n' \
+            "$C_YELLOW$C_BOLD" "$C_RESET"
+        printf '      location /platega-webhook {\n'
+        printf '          proxy_pass http://127.0.0.1:8080;\n'
+        printf '          proxy_set_header Host $host;\n'
+        printf '          proxy_set_header X-Real-IP $remote_addr;\n'
+        printf '      }\n'
+        printf '  • Проверка снаружи: %scurl -sI %s%s\n' "$C_DIM" "${wh:-https://домен/platega-webhook}" "$C_RESET"
     fi
     printf '\n'
 }

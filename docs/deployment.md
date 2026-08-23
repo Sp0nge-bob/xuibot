@@ -61,6 +61,8 @@ sudo bash deploy/vpn-bot-ctl.sh
 
 ## nginx (фрагмент)
 
+Тот же URL, что в `PUBLIC_WEBHOOK_URL` и в **личном кабинете Platega** (Callback / Webhook URL), должен отдаваться через nginx на процесс webhook (`127.0.0.1:8080`). После `install.sh` скрипт печатает этот адрес в блоке «Webhook (Platega)».
+
 ```nginx
 location /platega-webhook {
     proxy_pass http://127.0.0.1:8080;
@@ -71,6 +73,8 @@ location /health {
     proxy_pass http://127.0.0.1:8080;
 }
 ```
+
+Управление: `vpnplategabot` (или `sudo bash deploy/vpn-bot-ctl.sh`).
 
 ## После деплоя
 

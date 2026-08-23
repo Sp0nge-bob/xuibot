@@ -8,6 +8,13 @@ Telegram-бот для продажи VPN-подписок: оплата чер�
 
 > **Секреты:** `.env` не должен попадать в git. См. [SECURITY.md](SECURITY.md).
 
+**Управление на VPS:** после установки — команда **`vpnplategabot`** (меню ctl, как `x-ui`):
+
+```bash
+vpnplategabot
+# sudo vpnplategabot update
+```
+
 ---
 
 ## Установка одной командой
@@ -26,9 +33,9 @@ curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/insta
   | sudo bash -s -- /opt/vpn-bot
 ```
 
-Мастер скачает **последний Release**, проверит **BOT_TOKEN** через Telegram `getMe`, спросит панель 3x-ui и (опционально) Platega, затем поставит Redis, venv и systemd.
+Мастер скачает **последний Release**, проверит **BOT_TOKEN** через Telegram `getMe`, спросит панель 3x-ui и (опционально) Platega, затем поставит Redis, venv и systemd. В конце выведет **webhook URL** — его нужно указать в **ЛК Platega** и проксировать через **nginx** на `:8080`.
 
-После установки в терминале:
+После установки:
 
 ```bash
 vpnplategabot          # меню управления (как x-ui)

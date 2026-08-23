@@ -4,6 +4,22 @@
 
 # Platega и платежи
 
+## Callback URL (личный кабинет + nginx)
+
+Бот слушает путь `WEBHOOK_PATH` (по умолчанию `/platega-webhook`) на порту **8080**.
+Публичный адрес задаётся в `.env` как **`PUBLIC_WEBHOOK_URL`**, например:
+
+```text
+https://your-domain.com/platega-webhook
+```
+
+Мастер `install.sh` в конце установки **печатает этот URL**. Его нужно:
+
+1. **Вписать в личном кабинете Platega** (Callback / Webhook URL) — без этого Platega не пришлёт статус оплаты боту.
+2. **Добавить в nginx** на HTTPS-сайте и проксировать на бота (`proxy_pass http://127.0.0.1:8080`) — фрагмент в [deployment.md](deployment.md#nginx-фрагмент).
+
+Управление службами после установки: **`vpnplategabot`**.
+
 ## Поток оплаты
 
 1. Пользователь выбирает тариф и способ оплаты.

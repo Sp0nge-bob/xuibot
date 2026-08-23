@@ -33,6 +33,15 @@ sudo vpnplategabot update     # stable-релиз
 
 **Slim на VPS:** при install/update **не копируются** `docs/`, `report/`, `scripts/dev/`, корневые `*.md` (документация остаётся на GitHub). Нужны только код, `deploy/`, `assets/`, `templates/`.
 
+### После установки: webhook Platega
+
+Если Platega настроена в мастере (`TEST_MODE=false`), в конце скрипт **печатает `PUBLIC_WEBHOOK_URL`** из `.env`. Этот адрес:
+
+1. Нужен в **личном кабинете Platega** как Callback / Webhook URL — иначе платежи не подтвердятся.
+2. Нужно **добавить в nginx** (HTTPS) и проксировать на `http://127.0.0.1:8080` — см. [Деплой → nginx](deployment.md#nginx-фрагмент) и [Platega](platega.md).
+
+При `TEST_MODE=true` боевой webhook не обязателен; для прода задайте URL позже в `.env`.
+
 ---
 
 ## Требования

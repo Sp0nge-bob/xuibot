@@ -22,9 +22,10 @@ curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/insta
 - спрашивает `BOT_TOKEN` / API-секреты со **явным предупреждением «ввод скрыт»** и сразу проверяет токен через Telegram `getMe`;
 - настраивает Primary 3x-ui; Platega — опционально (иначе `TEST_MODE=true`);
 - ставит Redis, venv, systemd и запускает службы;
-- ставит ярлык **`vpnplategabot`** (как `x-ui`).
+- ставит ярлык **`vpnplategabot`** (как `x-ui`);
+- в конце печатает **`PUBLIC_WEBHOOK_URL`** — его нужно внести в **ЛК Platega** и **добавить в nginx**.
 
-Каталог по умолчанию: `/opt/vpn-bot`.
+Каталог по умолчанию: `/opt/vpn-bot`. Управление: `vpnplategabot`.
 
 ---
 
