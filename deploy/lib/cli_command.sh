@@ -44,3 +44,17 @@ remove_vpnplategabot_command() {
         log "Команда vpnplategabot уже нет"
     fi
 }
+
+
+# Если ярлыка нет (обновились со старого ctl) — поставить при входе в меню
+ensure_vpnplategabot_command() {
+    : "${APP_DIR:?}"
+    if [[ -x "$VPNPLATEGABOT_BIN" ]]; then
+        # уже есть — обновить путь APP_DIR на случай переноса
+        if ! grep -qF "$APP_DIR" "$VPNPLATEGABOT_BIN" 2>/dev/null; then
+            install_vpnplategabot_command || true
+        fi
+        return 0
+    fi
+    install_vpnplategabot_command || true
+}

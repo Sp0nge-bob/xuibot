@@ -83,6 +83,11 @@ run_action() {
 
 interactive_menu() {
     require_root
+    load_config 2>/dev/null || true
+    # Поставить / обновить ярлык vpnplategabot (если пришли со старого update)
+    if declare -F ensure_vpnplategabot_command >/dev/null 2>&1; then
+        ensure_vpnplategabot_command 2>/dev/null || true
+    fi
     local choice
 
     while true; do
