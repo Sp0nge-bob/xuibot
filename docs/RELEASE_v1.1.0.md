@@ -18,9 +18,11 @@ curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/insta
 Мастер (`deploy/install.sh`):
 
 - скачивает **последний GitHub Release**;
-- спрашивает `BOT_TOKEN` и **сразу проверяет** его через Telegram `getMe`;
+- ставит зависимости ОС с **видимым прогрессом** (apt/dnf/yum/apk/… + heartbeat);
+- спрашивает `BOT_TOKEN` / API-секреты со **явным предупреждением «ввод скрыт»** и сразу проверяет токен через Telegram `getMe`;
 - настраивает Primary 3x-ui; Platega — опционально (иначе `TEST_MODE=true`);
-- ставит Redis, venv, systemd и запускает службы.
+- ставит Redis, venv, systemd и запускает службы;
+- ставит ярлык **`vpnplategabot`** (как `x-ui`).
 
 Каталог по умолчанию: `/opt/vpn-bot`.
 
@@ -32,6 +34,8 @@ curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/insta
 | Изменение | Описание |
 |-----------|----------|
 | **install.sh** | Интерактивная установка одной командой |
+| **install.sh UX** | Прогресс пакетов ОС (heartbeat), «ввод скрыт» для токенов, apt/dnf/yum/microdnf/apk/zypper/pacman |
+| **vpnplategabot** | Системная команда меню (ставится при install/update) |
 | **Пункт 9 · полный снос** | Units + каталог + user `vpnbot` + sudoers (подтверждение `DELETE`) |
 | **Slim на VPS** | При install/update **не копируются** `docs/`, `report/`, `scripts/dev/`, корневые `*.md` — документация только на GitHub |
 | Документация | One-liner вынесен в начало README / installation |
