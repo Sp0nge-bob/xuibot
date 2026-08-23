@@ -39,6 +39,7 @@ class _HttpProbe:
     body_kind: str = ""  # json | html | text | empty | error
     error: str = ""
     hint: str = ""
+    url: str = ""  # фактический URL запроса (для отчёта)
 
 
 @dataclass
@@ -57,7 +58,9 @@ class _NodeReport:
     http_base: Optional[_HttpProbe] = None
     api_inbounds: Optional[_HttpProbe] = None
     api_clients: Optional[_HttpProbe] = None
+    api_lib: Optional[_HttpProbe] = None  # тот же путь, что health (py3xui Bearer)
     verdict: str = ""
+    auth_mode: str = ""  # bearer | login | none
 
 
 def _short_host(url: str, max_len: int = 56) -> str:
@@ -177,6 +180,8 @@ async def _http_get(
         ctype = resp.headers.get("content-type", "")
         kind = _classify_body(ctype, text)
         hint = _cf_hint(resp.status_code, kind, text)
+        if resp.status_code == 404 and "/panel/api/" in url:
+            hint = hint or "404 — неверный path/secret или API не смонтирован на этом URL"
         ok = 200 <= resp.status_code < 400 and kind != "html"
         # для base URL 200 HTML — «сайт отвечает», но не API
         if "/panel/api/" not in url and resp.status_code < 500:
@@ -188,6 +193,7 @@ async def _http_get(
             content_type=ctype.split(";")[0].strip()[:60],
             body_kind=kind,
             hint=hint,
+            url=url,
         )
     except Exception as e:
         ms = int((time.monotonic() - started) * 1000)
@@ -196,33 +202,108 @@ async def _http_get(
             elapsed_ms=ms,
             error=f"{type(e).__name__}: {e}"[:160],
             body_kind="error",
+            url=url,
         )
 
 
-def _auth_headers(node: dict[str, Any]) -> dict[str, str]:
-    """Заголовки 3x-ui: token панели, если есть (без логина/пароля в URL)."""
+def _auth_headers(node: dict[str, Any]) -> tuple[dict[str, str], str]:
+    """
+    Как py3xui AsyncBaseApi: Bearer token.
+    Раньше ошибочно слали Cookie 3x-ui=… → часто 404/пустой ответ.
+    """
     headers = {"Accept": "application/json"}
     token = (node.get("token") or "").strip()
     if token:
-        # py3xui / 3x-ui часто принимают session через cookie или header
-        headers["Cookie"] = f"3x-ui={token}"
-    return headers
+        headers["Authorization"] = f"Bearer {token}"
+        return headers, "bearer"
+    user = (node.get("username") or "").strip()
+    if user and (node.get("password") or ""):
+        return headers, "login"  # raw GET без сессии не взлетит — есть api_lib
+    return headers, "none"
+
+
+async def _probe_via_library(node: dict[str, Any]) -> _HttpProbe:
+    """Тот же путь, что health-check: get_api_for_node + read probe."""
+    started = time.monotonic()
+    try:
+        from services.xui import _probe_panel_read_api, get_api_for_node
+
+        api = await get_api_for_node(node, force_new=True)
+        ok = await _probe_panel_read_api(api)
+        ms = int((time.monotonic() - started) * 1000)
+        host = (getattr(api.client, "host", None) or "")[:80]
+        if ok:
+            return _HttpProbe(
+                ok=True,
+                status=200,
+                elapsed_ms=ms,
+                body_kind="json",
+                hint="py3xui read OK (как health)",
+                url=f"{host}/panel/api/…",
+            )
+        return _HttpProbe(
+            ok=False,
+            elapsed_ms=ms,
+            error="inbounds/list и clients/list недоступны",
+            body_kind="error",
+            hint="как в health-check",
+            url=f"{host}/panel/api/…",
+        )
+    except Exception as e:
+        ms = int((time.monotonic() - started) * 1000)
+        return _HttpProbe(
+            ok=False,
+            elapsed_ms=ms,
+            error=f"{type(e).__name__}: {e}"[:160],
+            body_kind="error",
+            hint="ошибка сессии/логина py3xui",
+        )
 
 
 def _node_verdict(rep: _NodeReport) -> str:
     if not rep.dns_ok:
-        return "DNS fail — проблема резолва с VPS бота (или hostname)"
+        return "DNS fail — резолв с VPS бота / hostname"
     if not rep.tcp_ok:
-        return "TCP fail — сеть/firewall/порт закрыт с VPS бота"
+        return (
+            "Хост недоступен (TCP timeout/refuse) — "
+            "часто suspend/неоплата VPS, выключен сервер или firewall"
+        )
+    # библиотечный зонд важнее «сырого» GET, если есть
+    if rep.api_lib is not None:
+        if rep.api_lib.ok:
+            if rep.api_inbounds and not rep.api_inbounds.ok:
+                return (
+                    "py3xui OK, сырой HTTP API нет — расхождение path/заголовков "
+                    "(смотри URL в отчёте)"
+                )
+            return "OK — API читается"
+        # lib fail
+        if rep.http_base and rep.http_base.ok:
+            return (
+                "Сайт отвечает, панель API нет — "
+                "токен/логин, path secret или панель лежит"
+            )
+
     api_fail = (
         (rep.api_inbounds and not rep.api_inbounds.ok)
         and (rep.api_clients and not rep.api_clients.ok)
     )
     hints = []
-    for p in (rep.http_base, rep.api_inbounds, rep.api_clients):
+    for p in (rep.http_base, rep.api_inbounds, rep.api_clients, rep.api_lib):
         if p and p.hint:
             hints.append(p.hint)
     if api_fail:
+        both_404 = (
+            rep.api_inbounds
+            and rep.api_clients
+            and rep.api_inbounds.status == 404
+            and rep.api_clients.status == 404
+        )
+        if both_404:
+            return (
+                "API 404 на inbounds+clients — проверь host/secret path "
+                "и что URL = {host}/panel/api/... (Bearer token)"
+            )
         if any("Cloudflare" in h or "WAF" in h or "429" in h or "403" in h for h in hints):
             return "API закрыт edge (CF/WAF/rate limit) — IP VPS бота?"
         if any(
@@ -232,9 +313,9 @@ def _node_verdict(rep: _NodeReport) -> str:
             return "Gateway/origin (nginx или панель не отвечает JSON)"
         if any(p and p.body_kind == "html" for p in (rep.api_inbounds, rep.api_clients)):
             return "API отдаёт HTML вместо JSON (challenge/login page)"
-        if any(p and p.error and "Timeout" in p.error for p in (rep.api_inbounds, rep.api_clients)):
+        if any(p and p.error and "Timeout" in (p.error or "") for p in (rep.api_inbounds, rep.api_clients)):
             return "Timeout API — панель/прокси тормозит или режет"
-        return "API read fail (inbounds+clients) — как в health-check"
+        return "API read fail (inbounds+clients)"
     if rep.http_base and rep.http_base.ok:
         return "HTTP base OK, API под вопросом"
     return "частичный сбой"
@@ -244,6 +325,7 @@ def _global_verdict(reports: list[_NodeReport]) -> str:
     if not reports:
         return "нет данных"
     n = len(reports)
+    primary = next((r for r in reports if r.is_primary), None)
     dns_fail = sum(1 for r in reports if not r.dns_ok)
     tcp_fail = sum(1 for r in reports if r.dns_ok and not r.tcp_ok)
     api_fail = sum(
@@ -251,10 +333,25 @@ def _global_verdict(reports: list[_NodeReport]) -> str:
         for r in reports
         if r.dns_ok
         and r.tcp_ok
+        and (
+            (r.api_lib is not None and not r.api_lib.ok)
+            or (
+                r.api_inbounds
+                and r.api_clients
+                and not r.api_inbounds.ok
+                and not r.api_clients.ok
+            )
+        )
+    )
+    api_404 = sum(
+        1
+        for r in reports
+        if r.dns_ok
+        and r.tcp_ok
         and r.api_inbounds
         and r.api_clients
-        and not r.api_inbounds.ok
-        and not r.api_clients.ok
+        and r.api_inbounds.status == 404
+        and r.api_clients.status == 404
     )
     cf_like = sum(
         1
@@ -264,6 +361,22 @@ def _global_verdict(reports: list[_NodeReport]) -> str:
             for p in (r.http_base, r.api_inbounds, r.api_clients)
         )
     )
+
+    # 1) Primary host dead — главный кейс (неоплата / suspend)
+    if primary and primary.dns_ok and not primary.tcp_ok:
+        extra = ""
+        if api_404 >= 2:
+            extra = (
+                "\n🟡 Дополнительно: у зеркал API 404 при живом HTTP — "
+                "отдельная проблема path/токена, не следствие падения Primary."
+            )
+        elif api_fail >= 2:
+            extra = "\n🟡 Дополнительно: у части зеркал API тоже недоступен — см. разбор."
+        return (
+            "🔴 ★ Primary: DNS есть, TCP/HTTPS не отвечает — "
+            "хост недоступен с VPS бота (часто suspend / неоплата / выключен сервер)."
+            f"{extra}"
+        )
 
     if dns_fail == n:
         return (
@@ -275,6 +388,12 @@ def _global_verdict(reports: list[_NodeReport]) -> str:
             "🔴 Все ноды: TCP/сеть fail с VPS — "
             "исходящий доступ VPS, firewall, маршрут"
         )
+    if api_404 >= max(2, (n + 1) // 2):
+        return (
+            "🔴 Массовый API 404 при живом сайте — "
+            "неверный panel path/secret или API не проксируется; "
+            "не путать с CF (см. URL в разборе)"
+        )
     if api_fail >= max(2, (n + 1) // 2) and cf_like >= 1:
         return (
             "🔴 Массовый API fail + признаки edge/WAF — "
@@ -283,10 +402,12 @@ def _global_verdict(reports: list[_NodeReport]) -> str:
     if api_fail >= max(2, (n + 1) // 2):
         return (
             "🔴 Массовый API read fail при живом TCP — "
-            "общий reverse-proxy/CF/origin или rate limit; "
-            "VPN-трафик клиентов может быть жив"
+            "общий reverse-proxy/origin/auth; VPN-трафик клиентов может быть жив"
         )
-    if any(r.is_primary and not (r.api_inbounds and r.api_inbounds.ok) for r in reports):
+    if primary and (
+        (primary.api_lib is not None and not primary.api_lib.ok)
+        or (primary.api_inbounds and not primary.api_inbounds.ok)
+    ):
         return "🟠 ★ Primary API недоступна — пользователи в lockdown"
     return "🟡 Частичный сбой — см. разбор по нодам"
 
@@ -315,31 +436,77 @@ async def diagnose_node(
 
     if base:
         rep.http_base = await _http_get(client, base + "/")
-        headers = _auth_headers(node)
-        rep.api_inbounds = await _http_get(
-            client, f"{base}/panel/api/inbounds/list", headers=headers,
-        )
-        rep.api_clients = await _http_get(
-            client, f"{base}/panel/api/clients/list", headers=headers,
-        )
+        headers, rep.auth_mode = _auth_headers(node)
+        # Тот же URL, что py3xui: {host}/panel/api/...
+        inbounds_url = f"{base}/panel/api/inbounds/list"
+        clients_url = f"{base}/panel/api/clients/list"
+        rep.api_inbounds = await _http_get(client, inbounds_url, headers=headers)
+        rep.api_clients = await _http_get(client, clients_url, headers=headers)
+        # Параллельно — как health (Bearer/login через библиотеку)
+        if rep.tcp_ok:
+            rep.api_lib = await _probe_via_library(node)
 
     rep.verdict = _node_verdict(rep)
     return rep
 
 
-def _format_http(label: str, p: Optional[_HttpProbe]) -> str:
+def _format_http(label: str, p: Optional[_HttpProbe], *, show_url: bool = False) -> str:
     if p is None:
         return f"  {label}: —"
     if p.error:
-        return f"  {label}: ❌ {p.error}" + (f" ({p.elapsed_ms}ms)" if p.elapsed_ms else "")
-    parts = [f"HTTP {p.status}", p.body_kind or "?", f"{p.elapsed_ms}ms"]
-    if p.content_type:
-        parts.append(p.content_type)
-    mark = "✅" if p.ok else "❌"
-    line = f"  {label}: {mark} " + " · ".join(parts)
+        line = f"  {label}: ❌ {p.error}" + (f" · {p.elapsed_ms}ms" if p.elapsed_ms else "")
+    else:
+        parts = [f"HTTP {p.status}", p.body_kind or "?", f"{p.elapsed_ms}ms"]
+        if p.content_type:
+            parts.append(p.content_type)
+        mark = "✅" if p.ok else "❌"
+        line = f"  {label}: {mark} " + " · ".join(parts)
+    if show_url and p.url:
+        # короткий URL без query
+        short = p.url if len(p.url) <= 72 else p.url[:71] + "…"
+        line += f"\n    <code>{short}</code>"
     if p.hint:
         line += f"\n    → {p.hint}"
     return line
+
+
+def _action_hints(reports: list[_NodeReport], global_v: str) -> list[str]:
+    hints: list[str] = []
+    primary = next((r for r in reports if r.is_primary), None)
+    if primary and primary.dns_ok and not primary.tcp_ok:
+        hints.extend(
+            [
+                "• ★ Primary: биллинг/статус VPS (suspend, неоплата, power)",
+                "• С VPS бота: <code>nc -zv HOST 443</code> / curl -vk https://HOST/",
+            ]
+        )
+    if "404" in global_v or any(
+        r.api_inbounds and r.api_inbounds.status == 404 for r in reports
+    ):
+        hints.extend(
+            [
+                "• Сверить host ноды (без лишнего /panel) и secret path",
+                "• curl -H 'Authorization: Bearer TOKEN' …/panel/api/inbounds/list",
+                "• Auth: Bearer (как py3xui), не Cookie 3x-ui=",
+            ]
+        )
+    if "WAF" in global_v or "Cloudflare" in global_v or "CF" in global_v:
+        hints.extend(
+            [
+                "• Cloudflare → Security Events (IP VPS бота)",
+                "• Bot Fight / WAF / Rate limit на зоне",
+            ]
+        )
+    if not hints:
+        hints.extend(
+            [
+                "• С VPS: curl к panel/api/inbounds/list с Bearer",
+                "• VPN-клиенты могут работать — это admin API",
+            ]
+        )
+    else:
+        hints.append("• VPN-трафик клиентов может быть жив при мёртвом admin API")
+    return hints
 
 
 def format_diagnostic_report(
@@ -350,20 +517,38 @@ def format_diagnostic_report(
 ) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     global_v = _global_verdict(reports)
+    ok_tcp = sum(1 for r in reports if r.tcp_ok)
+    ok_api = sum(
+        1
+        for r in reports
+        if (r.api_lib and r.api_lib.ok)
+        or (r.api_inbounds and r.api_inbounds.ok)
+    )
     lines = [
         "🔍 <b>Автодиагностика панелей</b>",
         "━━━━━━━━━━━━━━━━",
-        f"⏰ {now}",
+        f"⏰ <code>{now}</code>",
         f"📌 Триггер: {trigger}",
         f"📊 Health: {health_summary}",
+        f"📡 Сейчас: TCP {ok_tcp}/{len(reports)} · API {ok_api}/{len(reports)}",
         "",
-        f"<b>Вердикт:</b>\n{global_v}",
+        "════════════════════════════════",
+        "<b>Вердикт</b>",
+        "════════════════════════════════",
+        global_v,
         "",
-        "<b>По нодам:</b>",
+        "════════════════════════════════",
+        "<b>Разбор по нодам</b>",
+        "════════════════════════════════",
     ]
     for r in reports:
         star = "★ " if r.is_primary else ""
-        lines.append(f"\n<b>{star}{r.name}</b> · <code>{r.host_display}</code>")
+        role = "Primary" if r.is_primary else "mirror"
+        lines.append("")
+        lines.append(f"<b>{star}{r.name}</b> · <i>{role}</i>")
+        lines.append(f"<code>{r.host_display}</code>")
+        if r.auth_mode:
+            lines.append(f"  auth: <code>{r.auth_mode}</code>")
         if r.health_error:
             lines.append(f"  health: <code>{r.health_error[:120]}</code>")
         if r.dns_ok:
@@ -376,20 +561,20 @@ def format_diagnostic_report(
         else:
             lines.append(f"  TCP:{r.port} ❌ {r.tcp_error or 'fail'}")
         lines.append(_format_http("HTTPS /", r.http_base))
-        lines.append(_format_http("API inbounds/list", r.api_inbounds))
-        lines.append(_format_http("API clients/list", r.api_clients))
-        lines.append(f"  ➜ <i>{r.verdict}</i>")
+        lines.append(_format_http("API inbounds", r.api_inbounds, show_url=True))
+        lines.append(_format_http("API clients", r.api_clients, show_url=True))
+        lines.append(_format_http("API py3xui", r.api_lib))
+        lines.append(f"  ➜ <b>{r.verdict}</b>")
 
     lines.extend(
         [
             "",
-            "<b>Что проверить:</b>",
-            "• Cloudflare → Security Events (IP VPS бота)",
-            "• Bot Fight / WAF / Rate limit на зоне",
-            "• С VPS: curl к panel/api/inbounds/list",
-            "• VPN-клиенты могут работать — это admin API",
+            "════════════════════════════════",
+            "<b>Что проверить</b>",
+            "════════════════════════════════",
+            *_action_hints(reports, global_v),
             "",
-            "<i>Отчёт один на инцидент (пока ноды снова не станут OK).</i>",
+            "<i>Один отчёт на инцидент — пока ноды снова не станут OK.</i>",
         ]
     )
     return "\n".join(lines)
