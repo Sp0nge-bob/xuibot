@@ -37,7 +37,7 @@ curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/insta
 | **install.sh** | Интерактивная установка одной командой |
 | **install.sh UX** | Прогресс пакетов ОС (heartbeat), «ввод скрыт» для токенов, apt/dnf/yum/microdnf/apk/zypper/pacman |
 | **vpnplategabot** | Системная команда меню (ставится при install/update) |
-| **Пункт 9 · полный снос** | Units + каталог + user `vpnbot` + sudoers (подтверждение `DELETE`) |
+| **Пункт 9 · полный снос** | Units + каталог + user + sudoers; выбор **с Redis / без**; подтверждение `DELETE` |
 | **Slim на VPS** | При install/update **не копируются** `docs/`, `report/`, `scripts/dev/`, корневые `*.md` — документация только на GitHub |
 | Документация | One-liner вынесен в начало README / installation |
 
@@ -89,7 +89,7 @@ curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/insta
 6  Логи          (q — назад)
 7  Остановить
 8  Удалить службы
-9  Снести бота полностью   ← NEW
+9  Снести бота полностью   ← NEW (выбор: с Redis / без)
 0  Выход
 ```
 

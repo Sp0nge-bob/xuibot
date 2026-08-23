@@ -88,7 +88,7 @@ sudo bash deploy/vpn-bot-ctl.sh
 | **6** | Логи `tail -f` |
 | **7** | Остановить службы |
 | **8** | Удалить unit-файлы (службы) |
-| **9** | **Снести бота полностью** — units + каталог + user `vpnbot` + sudoers (подтверждение: `DELETE`) |
+| **9** | **Снести бота полностью** — units + каталог + user `vpnbot` + sudoers; выбор **с Redis / без Redis**; подтверждение: `DELETE` |
 
 **Первая установка** (без git на сервере):
 
@@ -113,6 +113,14 @@ sudo bash deploy/vpn-bot-ctl.sh update --edge       # последний ком�
 **Если изменился `pyproject.toml` / новые зависимости:** после `update` при необходимости пункт **1**.
 
 **Redis:** пункт 1 на Debian/Ubuntu ставит `redis-server` и добавляет `REDIS_URL=redis://127.0.0.1:6379/0`, если строки нет в `.env`.
+
+**Полный снос (пункт 9 / `purge`):** перед `DELETE` спрашивает, удалять ли Redis. По умолчанию Redis **оставляется** (на хосте могут быть другие сервисы). Вариант «с Redis» делает `stop/disable` и снимает пакет `redis-server`.
+
+```bash
+sudo vpnplategabot                    # меню → 9
+sudo bash deploy/vpn-bot-ctl.sh purge --without-redis
+sudo bash deploy/vpn-bot-ctl.sh purge --with-redis
+```
 
 Алиас: `sudo bash deploy/install-systemd.sh` (то же меню).
 

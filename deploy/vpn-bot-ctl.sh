@@ -63,7 +63,7 @@ draw_menu() {
     ui_section "Опасная зона"
     ui_menu_item "7" "Остановить"
     ui_menu_item "8" "Удалить службы" "только systemd units"
-    ui_menu_item "9" "Снести бота полностью" "units · каталог · user"
+    ui_menu_item "9" "Снести бота полностью" "units · каталог · user · Redis?"
 
     printf '\n'
     ui_menu_item "0" "Выход"
@@ -183,7 +183,9 @@ ${C_BOLD}${C_CYAN}VPN Bot${C_RESET} — systemd CLI ${C_DIM}(Charm-стиль, N
   ${C_GREEN}sudo bash deploy/vpn-bot-ctl.sh update${C_RESET}          последний Release (stable)
   ${C_GREEN}sudo bash deploy/vpn-bot-ctl.sh update --edge${C_RESET}   последний коммит main
   ${C_GREEN}sudo bash deploy/vpn-bot-ctl.sh restart|status|logs|stop|uninstall${C_RESET}
-  ${C_GREEN}sudo bash deploy/vpn-bot-ctl.sh purge${C_RESET}           полный снос (нужно ввести DELETE)
+  ${C_GREEN}sudo bash deploy/vpn-bot-ctl.sh purge${C_RESET}           полный снос (выбор Redis + DELETE)
+  ${C_GREEN}sudo bash deploy/vpn-bot-ctl.sh purge --with-redis${C_RESET}  снос бота + пакета redis-server
+  ${C_GREEN}sudo bash deploy/vpn-bot-ctl.sh purge --without-redis${C_RESET} снос бота, Redis оставить
 
 Обновление без локального .git. Сохраняются: .env, data/, .venv/
 
@@ -274,7 +276,7 @@ EOF
         purge|destroy)
             require_root
             ui_banner "purge" "полный снос"
-            cmd_purge_bot
+            cmd_purge_bot "$@"
             ;;
         -h|--help)
             print_help

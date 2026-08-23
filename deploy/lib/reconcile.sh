@@ -467,18 +467,55 @@ cmd_reconcile() {
 
 cmd_purge_bot() {
     # Полный снос: units + APP_DIR + SERVICE_USER + sudoers
+    # Опционально: redis-server (--with-redis / интерактивный выбор)
     require_root
     load_config
 
-    local confirm=""
+    local confirm="" redis_choice="" with_redis="" arg
+    # Заранее заданный выбор: env или argv (иначе спросим интерактивно)
+    case "${PURGE_WITH_REDIS:-}" in
+        1|true|yes|YES|Y|y) with_redis=1 ;;
+        0|false|no|NO|N|n) with_redis=0 ;;
+    esac
+    for arg in "$@"; do
+        case "$arg" in
+            --with-redis|with-redis) with_redis=1 ;;
+            --without-redis|without-redis|no-redis) with_redis=0 ;;
+        esac
+    done
+
     printf '\n'
     warn "ПОЛНЫЙ СНОС бота с сервера"
     printf '  Каталог:     %s\n' "$APP_DIR"
     printf '  Пользователь: %s\n' "$SERVICE_USER"
     printf '  Units:       %s %s\n' "$TELEGRAM_UNIT" "$WEB_UNIT"
     printf '  sudoers:     /etc/sudoers.d/vpn-bot-restart\n'
+    printf '  cli:         /usr/local/bin/vpnplategabot\n'
     printf '\n  Будет удалено %sбезвозвратно%s (data/, .env, код).\n' "${C_RED:-}" "${C_RESET:-}"
-    printf '  Redis-server %sне%s трогаем (может использоваться другими сервисами).\n' "${C_BOLD:-}" "${C_RESET:-}"
+
+    if [[ -z "$with_redis" ]]; then
+        printf '\n  %sУдалить также Redis?%s\n' "${C_BOLD:-}" "${C_RESET:-}"
+        printf '  %s1%s) Без Redis  — оставить redis-server (рекомендуется, если есть другие сервисы)\n' \
+            "${C_GREEN:-}" "${C_RESET:-}"
+        printf '  %s2%s) С Redis    — stop/disable + удалить пакет redis-server\n' \
+            "${C_YELLOW:-}" "${C_RESET:-}"
+        printf '  %s⚠%s  Вариант 2 сломает другие приложения на этом хосте, которым нужен Redis.\n' \
+            "${C_YELLOW:-}" "${C_RESET:-}"
+        printf '\n  Выбор [1/2, Enter = 1]: '
+        # shellcheck disable=SC2162
+        read -r redis_choice </dev/tty || true
+        case "$(printf '%s' "$redis_choice" | tr '[:upper:]' '[:lower:]')" in
+            2|y|yes|д|да|redis|with*) with_redis=1 ;;
+            *) with_redis=0 ;;
+        esac
+    fi
+
+    if [[ "$with_redis" -eq 1 ]]; then
+        printf '  Redis:       %sбудет удалён%s (пакет + служба)\n' "${C_RED:-}${C_BOLD:-}" "${C_RESET:-}"
+    else
+        printf '  Redis:       %sне трогаем%s\n' "${C_GREEN:-}" "${C_RESET:-}"
+    fi
+
     printf '\n  Введите %sDELETE%s для подтверждения: ' "${C_BOLD:-}${C_RED:-}" "${C_RESET:-}"
     # shellcheck disable=SC2162
     read -r confirm </dev/tty
@@ -531,8 +568,19 @@ cmd_purge_bot() {
         ok "Удалён $STATE_FILE"
     fi
 
+    if [[ "$with_redis" -eq 1 ]]; then
+        purge_redis_server || warn "Redis удалить полностью не удалось — проверьте вручную"
+    else
+        ok "Redis оставлен на сервере"
+    fi
+
     echo
     ok "Полный снос завершён"
+    if [[ "$with_redis" -eq 1 ]]; then
+        log "Снесено: бот + Redis"
+    else
+        log "Снесено: бот (Redis на месте)"
+    fi
     log "Повторная установка: curl …/deploy/install.sh | sudo bash"
     return 0
 }

@@ -84,3 +84,59 @@ show_redis_status() {
         fi
     fi
 }
+
+# Полное удаление redis-server (для purge --with-redis).
+# Останавливает службу и снимает пакет; предупреждает, если PM неизвестен.
+purge_redis_server() {
+    log "Удаление Redis (stop + disable + пакет)…"
+
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl disable --now redis-server 2>/dev/null || true
+        systemctl disable --now redis 2>/dev/null || true
+        systemctl stop redis-server 2>/dev/null || true
+        systemctl stop redis 2>/dev/null || true
+    fi
+    if command -v service >/dev/null 2>&1; then
+        service redis-server stop 2>/dev/null || true
+        service redis stop 2>/dev/null || true
+    fi
+
+    local removed=0
+    if command -v apt-get >/dev/null 2>&1; then
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get remove -y --purge redis-server redis-tools 2>/dev/null || \
+            apt-get remove -y --purge redis-server 2>/dev/null || true
+        apt-get autoremove -y 2>/dev/null || true
+        removed=1
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf remove -y redis 2>/dev/null || true
+        removed=1
+    elif command -v yum >/dev/null 2>&1; then
+        yum remove -y redis 2>/dev/null || true
+        removed=1
+    elif command -v apk >/dev/null 2>&1; then
+        apk del redis 2>/dev/null || true
+        removed=1
+    elif command -v zypper >/dev/null 2>&1; then
+        zypper --non-interactive remove -y redis 2>/dev/null || true
+        removed=1
+    elif command -v pacman >/dev/null 2>&1; then
+        pacman -Rns --noconfirm redis 2>/dev/null || true
+        removed=1
+    else
+        warn "Неизвестный пакетный менеджер — удалите redis вручную"
+    fi
+
+    if command -v redis-cli >/dev/null 2>&1 && redis_ping_ok; then
+        warn "Redis всё ещё отвечает на ping — пакет мог не удалиться"
+        return 1
+    fi
+
+    if [[ "$removed" -eq 1 ]]; then
+        ok "Redis снят (служба остановлена, пакет удалён где возможно)"
+    else
+        warn "Автоудаление Redis не выполнено"
+        return 1
+    fi
+    return 0
+}
