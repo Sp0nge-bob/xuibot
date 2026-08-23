@@ -347,6 +347,10 @@ def admin_debug_kb(
             text="📥 Подтянуть с панели",
             callback_data="adm:debug:pull_panel",
         )],
+        [InlineKeyboardButton(
+            text="🔍 Диагностика панелей",
+            callback_data="adm:debug:panel_diag",
+        )],
         [
             InlineKeyboardButton(
                 text="🎁 Пробные",

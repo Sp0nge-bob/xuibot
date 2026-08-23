@@ -574,10 +574,42 @@ def format_diagnostic_report(
             "════════════════════════════════",
             *_action_hints(reports, global_v),
             "",
-            "<i>Один отчёт на инцидент — пока ноды снова не станут OK.</i>",
         ]
     )
+    if "ручн" in (trigger or "").lower() or "manual" in (trigger or "").lower():
+        lines.append("<i>Ручной запуск из Отладки — кулдаун инцидента не затрагивается.</i>")
+    else:
+        lines.append(
+            "<i>Один отчёт на инцидент — пока ноды снова не станут OK.</i>"
+        )
     return "\n".join(lines)
+
+
+async def run_manual_panel_diagnostics(
+    *,
+    trigger: str = "ручной запуск (Отладка)",
+) -> str:
+    """Полный отчёт по запросу админа: свежий health + DNS/TCP/HTTP/API."""
+    from services.node_health import check_all_nodes_health
+
+    results = await check_all_nodes_health(
+        timeout_sec=float(getattr(settings, "PANEL_OUTAGE_DIAG_TIMEOUT_SEC", 12.0) or 12.0),
+    )
+    return await run_panel_outage_diagnostics(results, trigger=trigger)
+
+
+async def send_diagnostic_report_to_chat(bot, chat_id: int, text: str) -> int:
+    """Отправить отчёт чанками в один чат. Возвращает число отправленных частей."""
+    chunks = _chunk_html(text)
+    sent = 0
+    for i, chunk in enumerate(chunks):
+        prefix = f"<i>часть {i + 1}/{len(chunks)}</i>\n" if len(chunks) > 1 else ""
+        try:
+            await bot.send_message(chat_id, prefix + chunk, parse_mode="HTML")
+            sent += 1
+        except Exception as e:
+            logger.error("Panel diag send to {} failed: {}", chat_id, e)
+    return sent
 
 
 def _chunk_html(text: str, limit: int = _TG_CHUNK) -> list[str]:

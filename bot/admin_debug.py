@@ -42,6 +42,7 @@ from .messages import (
     admin_debug_orders_list_text,
     admin_debug_orders_menu_text,
     admin_debug_orders_reset_confirm_text,
+    admin_debug_panel_diag_running_text,
     admin_debug_promo_reset_confirm_text,
     admin_debug_pull_panel_confirm_text,
     admin_debug_pull_panel_result_text,
@@ -197,6 +198,53 @@ async def cb_admin_debug_test_mode_reset(cb: CallbackQuery):
     await clear_test_mode_override()
     await safe_cb_answer(cb, "TEST_MODE из .env")
     await _show_debug_menu(cb)
+
+
+@router.callback_query(F.data == "adm:debug:panel_diag")
+async def cb_admin_debug_panel_diag(cb: CallbackQuery):
+    """Ручной полный отчёт автодиагностики панелей (без ожидания outage)."""
+    if not is_debug_admin(cb.from_user.id):
+        return
+    await safe_cb_answer(cb, "Запускаю…")
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+    await send_or_edit(
+        cb,
+        admin_debug_panel_diag_running_text(),
+        InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="« К отладке", callback_data="adm:debug:enter")],
+            ]
+        ),
+    )
+    try:
+        from services.panel_outage_diagnostics import (
+            run_manual_panel_diagnostics,
+            send_diagnostic_report_to_chat,
+        )
+
+        report = await run_manual_panel_diagnostics(
+            trigger="ручной запуск (Отладка)",
+        )
+        sent = await send_diagnostic_report_to_chat(
+            cb.bot, cb.from_user.id, report,
+        )
+        await send_or_edit(
+            cb,
+            (
+                "✅ <b>Диагностика завершена</b>\n\n"
+                f"Отправлено частей отчёта: <b>{sent}</b>\n"
+                "Смотрите сообщения выше в этом чате."
+            ),
+            await _debug_kb(),
+        )
+    except Exception as e:
+        logger.exception("Manual panel diagnostics failed: {}", e)
+        await send_or_edit(
+            cb,
+            f"❌ Диагностика не удалась: <code>{type(e).__name__}: {e}</code>",
+            await _debug_kb(),
+        )
 
 
 @router.callback_query(F.data == "adm:debug:pull_panel")
