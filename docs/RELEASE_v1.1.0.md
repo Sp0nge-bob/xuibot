@@ -33,6 +33,7 @@ curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/insta
 |-----------|----------|
 | **install.sh** | Интерактивная установка одной командой |
 | **Пункт 9 · полный снос** | Units + каталог + user `vpnbot` + sudoers (подтверждение `DELETE`) |
+| **Slim на VPS** | При install/update **не копируются** `docs/`, `report/`, `scripts/dev/`, корневые `*.md` — документация только на GitHub |
 | Документация | One-liner вынесен в начало README / installation |
 
 *(Базовый Charm-меню, stable/edge update и логи с `q` — уже в 1.0.1.)*
