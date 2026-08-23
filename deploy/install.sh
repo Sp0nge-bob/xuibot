@@ -201,23 +201,23 @@ fetch_code() {
     src="$(find "$tmp/extract" -mindepth 1 -maxdepth 1 -type d | head -1)"
     [[ -f "$src/app.py" ]] || die "В архиве нет app.py"
     mkdir -p "$APP_DIR"
+    # excludes из нового дерева (docs не копируем на VPS)
+    # shellcheck source=/dev/null
+    source "$src/deploy/lib/slim_excludes.sh"
     if command -v rsync >/dev/null 2>&1; then
-        rsync -a \
-            --exclude '.env' \
-            --exclude '.env.local' \
-            --exclude 'data/' \
-            --exclude '.venv/' \
-            --exclude 'deploy/state.env' \
-            --exclude '.git/' \
-            "$src"/ "$APP_DIR"/
+        # shellcheck disable=SC2046
+        rsync -a $(slim_rsync_exclude_args) "$src"/ "$APP_DIR"/
     else
-        (cd "$src" && tar -cf - --exclude='./.env' --exclude='./data' --exclude='./.venv' --exclude='./.git' . \
-            | tar -xf - -C "$APP_DIR")
+        (cd "$src" && tar -cf - \
+            --exclude='./.env' --exclude='./data' --exclude='./.venv' --exclude='./.git' \
+            --exclude='./docs' --exclude='./report' --exclude='./scripts/dev' --exclude='./*.md' \
+            . | tar -xf - -C "$APP_DIR")
     fi
+    slim_purge_docs_from_app_dir "$APP_DIR"
     rm -rf "$tmp"
     chmod +x "$APP_DIR/deploy/"*.sh 2>/dev/null || true
     chmod +x "$APP_DIR/deploy/lib/"*.sh 2>/dev/null || true
-    ok "Код разложен"
+    ok "Код разложен (без docs/report/*.md)"
 }
 
 # ── wizard ─────────────────────────────────────────────────────

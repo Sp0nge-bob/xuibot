@@ -25,6 +25,8 @@ curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/insta
 
 Повторный запуск не затирает `data/` / `.venv/`; про существующий `.env` спросит отдельно.
 
+**Slim на VPS:** при install/update **не копируются** `docs/`, `report/`, `scripts/dev/`, корневые `*.md` (документация остаётся на GitHub). Нужны только код, `deploy/`, `assets/`, `templates/`.
+
 ---
 
 ## Требования

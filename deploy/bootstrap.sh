@@ -109,26 +109,25 @@ SRC="$(find "$TMP/extract" -mindepth 1 -maxdepth 1 -type d | head -1)"
 [[ -f "$SRC/app.py" ]] || { _bs_err "в архиве нет app.py"; exit 1; }
 
 mkdir -p "$APP_DIR"
-_bs_log "Раскладка кода (сохраняем .env · data · .venv)…"
+_bs_log "Раскладка кода (без docs/; сохраняем .env · data · .venv)…"
+# shellcheck source=/dev/null
+source "$SRC/deploy/lib/slim_excludes.sh"
 if command -v rsync >/dev/null 2>&1; then
-    rsync -a \
-        --exclude '.env' \
-        --exclude '.env.local' \
-        --exclude 'data/' \
-        --exclude '.venv/' \
-        --exclude 'deploy/state.env' \
-        --exclude '.git/' \
-        "$SRC"/ "$APP_DIR"/
+    # shellcheck disable=SC2046
+    rsync -a $(slim_rsync_exclude_args) "$SRC"/ "$APP_DIR"/
 else
-    (cd "$SRC" && tar -cf - --exclude='./.env' --exclude='./data' --exclude='./.venv' --exclude='./.git' . \
-        | tar -xf - -C "$APP_DIR")
+    (cd "$SRC" && tar -cf - \
+        --exclude='./.env' --exclude='./data' --exclude='./.venv' --exclude='./.git' \
+        --exclude='./docs' --exclude='./report' --exclude='./scripts/dev' --exclude='./*.md' \
+        . | tar -xf - -C "$APP_DIR")
 fi
+slim_purge_docs_from_app_dir "$APP_DIR"
 
 chmod +x "$APP_DIR/deploy/vpn-bot-ctl.sh" "$APP_DIR/deploy/"*.sh 2>/dev/null || true
 chmod +x "$APP_DIR/deploy/lib/"*.sh 2>/dev/null || true
 
 echo
-_bs_ok "Код в $APP_DIR"
+_bs_ok "Код в $APP_DIR (slim: без docs/report/*.md)"
 printf '\n%sДальше:%s\n' "$C_BOLD" "$C_RESET"
 printf '  %sПолная установка одной командой (мастер .env + systemd):%s\n' "$C_BOLD" "$C_RESET"
 printf '    %scurl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/install.sh \\%s\n' "$C_GREEN" "$C_RESET"

@@ -204,17 +204,18 @@ apply_code_tarball() {
         return 1
     fi
 
-    log "Накладываем код на $APP_DIR (сохраняем .env, data/, .venv/)"
+    log "Накладываем код на $APP_DIR (без docs/report/*.md; .env/data/.venv сохраняем)"
+    # shellcheck source=slim_excludes.sh
+    source "$DEPLOY_DIR/lib/slim_excludes.sh"
+    # Prefer excludes from new tree if present
+    if [[ -f "$extract_root/deploy/lib/slim_excludes.sh" ]]; then
+        # shellcheck source=/dev/null
+        source "$extract_root/deploy/lib/slim_excludes.sh"
+    fi
     if command -v rsync >/dev/null 2>&1; then
-        rsync -a \
-            --delete \
-            --exclude '.env' \
-            --exclude '.env.local' \
-            --exclude '.env.production' \
-            --exclude 'data/' \
-            --exclude '.venv/' \
-            --exclude 'deploy/state.env' \
-            --exclude '.git/' \
+        # shellcheck disable=SC2046
+        rsync -a --delete \
+            $(slim_rsync_exclude_args) \
             --exclude "$DEPLOY_REVISION_FILE" \
             --exclude "$DEPLOY_META_FILE" \
             "$extract_root"/ "$APP_DIR"/
@@ -227,6 +228,10 @@ apply_code_tarball() {
                 --exclude='./data' \
                 --exclude='./.venv' \
                 --exclude='./.git' \
+                --exclude='./docs' \
+                --exclude='./report' \
+                --exclude='./scripts/dev' \
+                --exclude='./*.md' \
                 --exclude="./deploy/state.env" \
                 . | tar -xf - -C "$APP_DIR"
         ) || {
@@ -234,6 +239,7 @@ apply_code_tarball() {
             return 1
         }
     fi
+    slim_purge_docs_from_app_dir "$APP_DIR"
 
     write_deploy_meta "$channel" "$version" "$sha" "$remote"
     rm -rf "$tmp"

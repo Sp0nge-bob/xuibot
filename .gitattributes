@@ -1,0 +1,8 @@
+# Для git archive / ручных slim-сборок (GitHub «Source code» zip всё равно полный —
+# на VPS docs отсекаются в install/update через deploy/lib/slim_excludes.sh).
+docs/** export-ignore
+report/** export-ignore
+scripts/dev/** export-ignore
+*.md export-ignore
+!deploy/**/*.md
+.github/** export-ignore
