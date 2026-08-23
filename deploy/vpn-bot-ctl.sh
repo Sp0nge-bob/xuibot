@@ -169,7 +169,11 @@ ${C_BOLD}${C_CYAN}VPN Bot${C_RESET} — systemd CLI ${C_DIM}(Charm-стиль, N
 
 Обновление без локального .git. Сохраняются: .env, data/, .venv/
 
-Bootstrap:
+Установка с нуля (мастер):
+  curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/install.sh \\
+    | sudo bash
+
+Только код (без мастера):
   curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/bootstrap.sh \\
     | sudo bash -s -- /opt/vpn-bot
 EOF

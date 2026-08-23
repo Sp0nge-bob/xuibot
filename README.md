@@ -10,17 +10,38 @@ Telegram-бот для продажи VPN-подписок: оплата чер�
 
 ---
 
-## Быстрый старт (продакшен)
+## Установка одной командой
+
+На чистом VPS (Ubuntu/Debian), от root:
 
 ```bash
-# без git на сервере — одна команда:
-curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/bootstrap.sh \
-  | sudo bash -s -- /opt/vpn-bot
-sudo nano /opt/vpn-bot/.env    # из .env.example
-sudo bash /opt/vpn-bot/deploy/vpn-bot-ctl.sh   # пункт 1 → установка
+curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/install.sh \
+  | sudo bash
 ```
 
-Или вручную:
+Или с каталогом (по умолчанию `/opt/vpn-bot`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/install.sh \
+  | sudo bash -s -- /opt/vpn-bot
+```
+
+Мастер скачает **последний Release**, проверит **BOT_TOKEN** через Telegram `getMe`, спросит панель 3x-ui и (опционально) Platega, затем поставит Redis, venv и systemd.
+
+---
+
+## Быстрый старт (вручную)
+
+Только код без мастера:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/bootstrap.sh \
+  | sudo bash -s -- /opt/vpn-bot
+sudo nano /opt/vpn-bot/.env
+sudo bash /opt/vpn-bot/deploy/vpn-bot-ctl.sh   # пункт 1
+```
+
+Или полностью вручную:
 
 ```bash
 cd /opt/vpn-bot

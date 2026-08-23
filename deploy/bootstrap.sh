@@ -130,6 +130,9 @@ chmod +x "$APP_DIR/deploy/lib/"*.sh 2>/dev/null || true
 echo
 _bs_ok "Код в $APP_DIR"
 printf '\n%sДальше:%s\n' "$C_BOLD" "$C_RESET"
-printf '  %s1.%s  Проверьте %s/.env%s\n' "$C_CYAN" "$C_RESET" "$APP_DIR" "$C_DIM (из .env.example при первом запуске)$C_RESET"
-printf '  %s2.%s  %ssudo bash %s/deploy/vpn-bot-ctl.sh%s\n' "$C_CYAN" "$C_RESET" "$C_GREEN" "$APP_DIR" "$C_RESET"
-printf '      → пункт %s1%s (установка), затем %s2%s (stable) при необходимости\n\n' "$C_BOLD" "$C_RESET" "$C_BOLD" "$C_RESET"
+printf '  %sПолная установка одной командой (мастер .env + systemd):%s\n' "$C_BOLD" "$C_RESET"
+printf '    %scurl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/install.sh \\%s\n' "$C_GREEN" "$C_RESET"
+printf '      %s| sudo bash -s -- %s%s\n\n' "$C_GREEN" "$APP_DIR" "$C_RESET"
+printf '  Или вручную:\n'
+printf '  %s1.%s  Проверьте %s/.env%s\n' "$C_CYAN" "$C_RESET" "$APP_DIR" "$C_DIM (из .env.example)$C_RESET"
+printf '  %s2.%s  %ssudo bash %s/deploy/vpn-bot-ctl.sh%s → пункт 1\n\n' "$C_CYAN" "$C_RESET" "$C_GREEN" "$APP_DIR" "$C_RESET"

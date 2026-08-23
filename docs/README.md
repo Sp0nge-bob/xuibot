@@ -28,7 +28,15 @@ Telegram-бот для продажи VPN-подписок: оплата чер�
 
 ## С чего начать
 
-1. [Установка](installation.md) — venv и `.env`
+**Установка одной командой** (VPS):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/install.sh | sudo bash
+```
+
+Подробности: [Установка](installation.md).
+
+1. [Установка](installation.md) — one-liner или venv вручную
 2. [Конфигурация](configuration.md) — токены и URL
 3. [Деплой](deployment.md) — чеклист прода
 4. [3x-ui](xui.md) + [Platega](platega.md) — интеграции

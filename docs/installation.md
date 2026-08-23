@@ -4,34 +4,51 @@
 
 # Установка
 
-**Требования:** **Python 3.11–3.14** (`requires-python` в `pyproject.toml`: `>=3.11,<3.15`), доступ к главной панели 3x-ui, HTTPS-домен для webhook.
+## Одной командой (рекомендуется)
 
-Поддерживаются CPython 3.11, 3.12, 3.13 и **3.14**. Скрипт деплоя (`deploy/lib/python.sh`) предпочитает более новую установленную версию (`python3.14` → … → `python3.11`).
+На Ubuntu/Debian VPS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/install.sh \
+  | sudo bash
+```
+
+Каталог по умолчанию: `/opt/vpn-bot` (можно передать аргументом: `… | sudo bash -s -- /opt/vpn-bot`).
+
+**Что делает мастер** (`deploy/install.sh`):
+
+1. Ставит пакеты (`curl`, `python3`, …) и скачивает **последний GitHub Release**
+2. Спрашивает `BOT_TOKEN` и **сразу проверяет** его через `https://api.telegram.org/bot…/getMe`
+3. Спрашивает `BOT_ADMINS`, Primary **3x-ui** (`XUI_HOST` + token или логин/пароль)
+4. Platega — опционально; иначе включает `TEST_MODE=true`
+5. Запускает полный install: Redis, venv, systemd, старт служб
+
+Повторный запуск не затирает `data/` / `.venv/`; про существующий `.env` спросит отдельно.
+
+---
+
+## Требования
+
+**Python 3.11–3.14** (`requires-python` в `pyproject.toml`: `>=3.11,<3.15`), доступ к главной панели 3x-ui, HTTPS-домен для webhook (если не TEST_MODE).
+
+Скрипт деплоя (`deploy/lib/python.sh`) предпочитает более новую версию (`python3.14` → … → `python3.11`).
+
+## Ручная установка (venv)
 
 ```bash
 cd /opt/vpn-bot
-# любая 3.11–3.14, например:
 python3.11 -m venv .venv
-# python3.14 -m venv .venv
 source .venv/bin/activate
 pip install -U pip
 pip install -e .
 cp .env.example .env
 ```
 
-Заполните `.env` (см. [Конфигурация](configuration.md)), затем запустите бота.
-
-**Одна команда** (webhook + Telegram):
+Заполните `.env` (см. [Конфигурация](configuration.md)), затем:
 
 ```bash
-python run_all.py
-```
-
-Или в двух терминалах:
-
-```bash
-python app.py       # webhook Platega
-python run_bot.py   # Telegram polling
+python run_all.py          # webhook + Telegram
+# или: python app.py + python run_bot.py
 ```
 
 Для отладки в одном процессе: `START_BOT_IN_WEBAPP=true`, затем `python app.py`.
