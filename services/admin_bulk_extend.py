@@ -32,6 +32,8 @@ async def bulk_add_days_to_all_active(days: int, *, admin_tg_id: int | None = No
     if emails:
         try:
             panel = await bulk_adjust_client_days(emails, days)
+        except ValueError:
+            raise
         except Exception as e:
             logger.exception("bulkAdjust +{}d failed: {}", days, e)
             raise ValueError(f"Панель не приняла bulkAdjust: {e}") from e

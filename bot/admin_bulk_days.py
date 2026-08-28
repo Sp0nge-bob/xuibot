@@ -165,7 +165,9 @@ async def cb_admin_bulk_days_do(cb: CallbackQuery, state: FSMContext):
     from services.admin_bulk_extend import bulk_add_days_to_all_active
 
     admin_id = cb.from_user.id
-    status = await cb.message.answer("⏰ Продлеваю на панели и в базе…")
+    status = await cb.message.answer(
+        "⏰ Панель обрабатывает всех клиентов — это может занять 1–2 минуты…"
+    )
 
     async def _run() -> None:
         global _job_running

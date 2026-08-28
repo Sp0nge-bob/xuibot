@@ -41,6 +41,8 @@ class Settings(BaseSettings):
 
     # Нагрузка на панель 3x-ui (для 1000+ клиентов)
     XUI_PANEL_CONCURRENCY: int = 5
+    # clients/bulkAdjust на большой inbound JSON дольше дефолтных 5с httpx
+    XUI_BULK_ADJUST_TIMEOUT_SEC: float = 300.0
     # Диагностика админки: таймаут на одну ноду и на весь сбор сводки
     DIAGNOSTICS_NODE_TIMEOUT_SEC: float = 25.0
     DIAGNOSTICS_TOTAL_TIMEOUT_SEC: float = 120.0

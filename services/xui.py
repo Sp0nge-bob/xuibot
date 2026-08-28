@@ -18,6 +18,7 @@ import secrets
 from datetime import datetime, timedelta
 from typing import Any, Optional, Tuple
 
+import httpx
 from py3xui import AsyncApi, Client
 from py3xui.api.api_base import ApiFields
 from loguru import logger
@@ -564,9 +565,6 @@ async def delete_orphan_clients_everywhere() -> dict[str, Any]:
     return await delete_orphan_clients_on_nodes(nodes, label="all")
 
 
-_BULK_ADJUST_CHUNK = 400
-
-
 def _parse_bulk_adjust_obj(response: Any) -> tuple[int, list[dict[str, Any]]]:
     try:
         body = response.json()
@@ -616,20 +614,33 @@ async def bulk_adjust_client_days(emails: list[str], days: int) -> dict[str, Any
 
     api = await get_api()
     url = api.client._url("panel/api/clients/bulkAdjust")
-    skipped: list[dict[str, Any]] = []
-    adjusted = 0
-    for i in range(0, len(clean), _BULK_ADJUST_CHUNK):
-        chunk = clean[i : i + _BULK_ADJUST_CHUNK]
-        await _throttle()
+    timeout_sec = max(30.0, float(settings.XUI_BULK_ADJUST_TIMEOUT_SEC))
+    timeout = httpx.Timeout(connect=20.0, read=timeout_sec, write=30.0, pool=20.0)
+    # Один запрос: панель и так группирует по inbound и переписывает JSON один раз.
+    # Повтор при таймауте опасен — дни могут накрутиться дважды.
+    prev_retries = api.client.max_retries
+    api.client.max_retries = 1
+    await _throttle()
+    try:
         response = await api.client._post(
             url,
             {"Accept": "application/json"},
-            {"emails": chunk, "addDays": days, "addBytes": 0},
+            {"emails": clean, "addDays": days, "addBytes": 0},
+            timeout=timeout,
         )
-        chunk_adjusted, chunk_skipped = _parse_bulk_adjust_obj(response)
-        adjusted += chunk_adjusted
-        skipped.extend(chunk_skipped)
+    except httpx.TimeoutException as e:
+        logger.warning(
+            "clients/bulkAdjust timeout after {:.0f}s emails={}: {}",
+            timeout_sec, len(clean), e,
+        )
+        raise ValueError(
+            f"Панель не ответила за {int(timeout_sec)} с (bulkAdjust). "
+            "Сроки в боте не менялись — повторите позже."
+        ) from e
+    finally:
+        api.client.max_retries = prev_retries
 
+    adjusted, skipped = _parse_bulk_adjust_obj(response)
     panel_cache.invalidate()
     result["adjusted"] = adjusted
     result["skipped"] = skipped
