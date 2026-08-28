@@ -38,6 +38,11 @@ vpn_platega_bot.egg-info/
 .cursor/
 mcps/
 grokerrorreports/
+
+# Локальный handoff для агентов — не пушим в GitHub
+.grok/
+AGENTS.md
+docs/SESSION_CONTEXT.md
 agent-tools/
 replacements.txt
 email_callback.py
