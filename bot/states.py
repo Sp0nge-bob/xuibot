@@ -37,6 +37,8 @@ class AdminStates(StatesGroup):
     waiting_lockdown_whitelist = State()
     in_order_user_message = State()
     waiting_admin_extend_days = State()
+    waiting_broadcast_message = State()
+    waiting_bulk_days_custom = State()
 
 
 class AdminPricingStates(StatesGroup):

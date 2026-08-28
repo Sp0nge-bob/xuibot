@@ -661,23 +661,6 @@ def diagnostics_kb(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def admin_server_status_kb(items: list) -> InlineKeyboardMarkup:
-    rows: list[list[InlineKeyboardButton]] = []
-    for item in items:
-        inbound_id = int(item["id"])
-        available = bool(item.get("available", True))
-        icon = "🟢" if available else "🔴"
-        label = (item.get("remark") or f"#{inbound_id}").strip()
-        if len(label) > 24:
-            label = label[:21] + "…"
-        rows.append([InlineKeyboardButton(
-            text=f"{icon} {label}",
-            callback_data=f"adm:server_status:toggle:{inbound_id}",
-        )])
-    rows.append([InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
 def admin_inbounds_kb(*, differs_from_env: bool = False) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = [
         [InlineKeyboardButton(text="✏️ Изменить инбаунды", callback_data="adm:inbounds:edit")],
@@ -850,6 +833,51 @@ def admin_extend_cancel_kb(subscription_id: int) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="« Отмена", callback_data=f"adm:sub:extend:{subscription_id}")],
         ]
     )
+
+
+def admin_broadcast_prompt_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="« Контент", callback_data="adm:hub:content")],
+        [InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")],
+    ])
+
+
+def admin_broadcast_confirm_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📢 Разослать всем", callback_data="adm:broadcast:send")],
+        [InlineKeyboardButton(text="« Отмена", callback_data="adm:broadcast")],
+    ])
+
+
+def admin_bulk_days_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="+7 дн.", callback_data="adm:bulk_days:pick:7"),
+            InlineKeyboardButton(text="+30 дн.", callback_data="adm:bulk_days:pick:30"),
+        ],
+        [
+            InlineKeyboardButton(text="+90 дн.", callback_data="adm:bulk_days:pick:90"),
+            InlineKeyboardButton(text="✏️ Своё…", callback_data="adm:bulk_days:custom"),
+        ],
+        [InlineKeyboardButton(text="« VPN", callback_data="adm:hub:vpn")],
+        [InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")],
+    ])
+
+
+def admin_bulk_days_confirm_kb(days: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=f"✅ Продлить всех на {days} дн.",
+            callback_data=f"adm:bulk_days:do:{days}",
+        )],
+        [InlineKeyboardButton(text="« Назад", callback_data="adm:bulk_days")],
+    ])
+
+
+def admin_bulk_days_cancel_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="« Отмена", callback_data="adm:bulk_days")],
+    ])
 
 
 def admin_sub_orders_kb(

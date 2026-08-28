@@ -5,6 +5,7 @@ Unified client API 3x-ui 3.2+ (report/api.txt).
   POST clients/update/{email}    — продление / disable
   POST clients/groups/bulkAdd    — привязка группы (UI панели)
   POST clients/del/{email}       — удаление tg*
+  POST clients/bulkAdjust        — массовый сдвиг expiry (addDays)
   POST clients/delDepleted       — все истёкшие / исчерпавшие трафик
   POST clients/delOrphans        — без привязки к inbound (+ мусор трафика/IP)
   POST clients/{email}/attach    — догон инбаунда (если нет в settings)
@@ -561,6 +562,82 @@ async def delete_orphan_clients_everywhere() -> dict[str, Any]:
     if not nodes:
         nodes = [{"id": 0, "host": settings.XUI_HOST}]
     return await delete_orphan_clients_on_nodes(nodes, label="all")
+
+
+_BULK_ADJUST_CHUNK = 400
+
+
+def _parse_bulk_adjust_obj(response: Any) -> tuple[int, list[dict[str, Any]]]:
+    try:
+        body = response.json()
+    except Exception:
+        return 0, []
+    if not isinstance(body, dict):
+        return 0, []
+    obj = body.get("obj")
+    if not isinstance(obj, dict):
+        return 0, []
+    try:
+        adjusted = max(0, int(obj.get("adjusted") or 0))
+    except (TypeError, ValueError):
+        adjusted = 0
+    skipped_raw = obj.get("skipped") or []
+    skipped: list[dict[str, Any]] = []
+    if isinstance(skipped_raw, list):
+        for item in skipped_raw:
+            if not isinstance(item, dict):
+                continue
+            skipped.append({
+                "email": str(item.get("email") or ""),
+                "reason": str(item.get("reason") or ""),
+            })
+    return adjusted, skipped
+
+
+async def bulk_adjust_client_days(emails: list[str], days: int) -> dict[str, Any]:
+    """POST clients/bulkAdjust addDays на ★ Primary. Только tg/tgfree клиенты бота."""
+    days = int(days)
+    if days == 0:
+        raise ValueError("Число дней не должно быть 0")
+
+    clean: list[str] = []
+    seen: set[str] = set()
+    for raw in emails:
+        email = (raw or "").strip()
+        if not email or email in seen:
+            continue
+        _assert_bot_client_email(email)
+        seen.add(email)
+        clean.append(email)
+
+    result: dict[str, Any] = {"adjusted": 0, "skipped": [], "emails": len(clean)}
+    if not clean:
+        return result
+
+    api = await get_api()
+    url = api.client._url("panel/api/clients/bulkAdjust")
+    skipped: list[dict[str, Any]] = []
+    adjusted = 0
+    for i in range(0, len(clean), _BULK_ADJUST_CHUNK):
+        chunk = clean[i : i + _BULK_ADJUST_CHUNK]
+        await _throttle()
+        response = await api.client._post(
+            url,
+            {"Accept": "application/json"},
+            {"emails": chunk, "addDays": days, "addBytes": 0},
+        )
+        chunk_adjusted, chunk_skipped = _parse_bulk_adjust_obj(response)
+        adjusted += chunk_adjusted
+        skipped.extend(chunk_skipped)
+
+    panel_cache.invalidate()
+    result["adjusted"] = adjusted
+    result["skipped"] = skipped
+    logger.info(
+        "clients/bulkAdjust +{}d emails={} adjusted={} skipped={}",
+        days, len(clean), adjusted, len(skipped),
+    )
+    return result
 
 
 async def delete_depleted_clients_everywhere() -> dict[str, Any]:

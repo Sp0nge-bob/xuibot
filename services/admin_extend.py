@@ -8,13 +8,28 @@ from services.xui import extend_client, get_unified_panel_client
 from utils.utc import utc_iso_to_ms
 
 
+def _days_word(n: int) -> str:
+    n = abs(int(n))
+    if n % 10 == 1 and n % 100 != 11:
+        return "день"
+    if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14):
+        return "дня"
+    return "дней"
+
+
 def admin_extend_notify_text(*, days: int, new_end_date: str) -> str:
     end_s = (new_end_date or "")[:10] or "—"
     n = int(days)
     return (
-        f"Ваша подписка была продлена администратором на <b>{n}</b> "
-        f"{'день' if n % 10 == 1 and n % 100 != 11 else 'дня' if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14) else 'дней'}.\n"
+        f"Ваша подписка была продлена администратором на <b>{n}</b> {_days_word(n)}.\n"
         f"Новый срок: до <b>{end_s}</b>."
+    )
+
+
+def admin_bulk_extend_notify_text(*, days: int) -> str:
+    n = int(days)
+    return (
+        f"Ваша подписка была продлена администратором на <b>{n}</b> {_days_word(n)}."
     )
 
 

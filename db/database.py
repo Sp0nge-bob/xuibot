@@ -197,6 +197,14 @@ async def get_or_create_user(tg_id: int, username: Optional[str] = None, first_n
         await db.commit()
         return {"tg_id": tg_id, "username": username, "first_name": first_name}
 
+
+async def list_user_tg_ids() -> List[int]:
+    """Все tg_id из users — получатели массовой рассылки."""
+    async with get_db() as db:
+        async with db.execute("SELECT tg_id FROM users ORDER BY tg_id") as cur:
+            rows = await cur.fetchall()
+            return [int(r[0]) for r in rows]
+
 async def create_order(
     tg_id: int,
     plan_id: str,

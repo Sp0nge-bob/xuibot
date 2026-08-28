@@ -54,11 +54,11 @@ ADMIN_HUBS: dict[str, HubDef] = {
     "vpn": {
         "root_label": "🖧 VPN",
         "title": "🖧 VPN и панели",
-        "description": "Ноды 3x-ui, инбаунды, доступность и лимиты подключений.",
+        "description": "Ноды 3x-ui, инбаунды, лимиты подключений и массовое продление.",
         "items": [
             ("🖧 Ноды", "adm:nodes"),
             ("📡 Inbounds", "adm:inbounds"),
-            ("🌐 Доступность инбаундов", "adm:server_status"),
+            ("⏰ Добавить дни всем", "adm:bulk_days"),
             ("📱 Лимит IP", "adm:limit_ip"),
             ("🔐 Happ", "adm:happ_crypto"),
         ],
@@ -66,9 +66,10 @@ ADMIN_HUBS: dict[str, HubDef] = {
     "content": {
         "root_label": "📝 Контент",
         "title": "📝 Контент бота",
-        "description": "FAQ, текст /start и юридические документы.",
+        "description": "FAQ, объявления, текст /start и юридические документы.",
         "items": [
             ("❓ FAQ", "adm:faq"),
+            ("📢 Объявление", "adm:broadcast"),
             ("📢 /start", "adm:start_text"),
             ("📄 Документы", "adm:legal"),
         ],

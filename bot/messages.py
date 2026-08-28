@@ -1428,6 +1428,104 @@ def admin_extend_done_text(*, days: int, new_end: str, notified: bool) -> str:
     )
 
 
+def admin_broadcast_prompt_text(*, user_count: int) -> str:
+    return screen(
+        "📢 <b>Объявление</b>",
+        "Пришлите <b>одно сообщение</b> — его целиком получат все пользователи бота.",
+        "Сохраняются текст, форматирование, фото, альбом, видео и файлы.",
+        hint=f"Получателей в базе: {user_count}. /admin — отмена.",
+    )
+
+
+def admin_broadcast_confirm_text(*, parts: int, user_count: int) -> str:
+    album = "альбом" if parts > 1 else "сообщение"
+    return screen(
+        "📢 <b>Превью объявления</b>",
+        f"Так уйдёт {album} ({parts} сообщ.) <b>{user_count}</b> пользователям.",
+        hint="Сообщение выше — как увидят клиенты. Не удаляйте исходное сообщение до конца рассылки.",
+    )
+
+
+def admin_broadcast_empty_users_text() -> str:
+    return screen(
+        "📢 <b>Объявление</b>",
+        "В базе ещё нет пользователей для рассылки.",
+        hint="Кнопка появится после первого /start клиента.",
+    )
+
+
+def admin_broadcast_progress_text(*, sent: int, failed: int, total: int) -> str:
+    return (
+        f"📢 Рассылка: <b>{sent}</b> из <b>{total}</b>"
+        + (f", ошибок: <b>{failed}</b>" if failed else "")
+    )
+
+
+def admin_broadcast_done_text(*, sent: int, failed: int, total: int) -> str:
+    return screen(
+        "📢 <b>Рассылка завершена</b>",
+        f"Доставлено: <b>{sent}</b> из <b>{total}</b>.",
+        f"Не доставлено: <b>{failed}</b>." if failed else "Все сообщения ушли.",
+    )
+
+
+def admin_bulk_days_menu_text(*, sub_count: int) -> str:
+    return screen(
+        "⏰ <b>Добавить дни всем</b>",
+        f"Активных подписок: <b>{sub_count}</b>.",
+        "Срок увеличится и в боте, и на ★ Primary (bulkAdjust).",
+        hint="Клиенты получат уведомление. Выберите срок или введите своё число.",
+    )
+
+
+def admin_bulk_days_empty_text() -> str:
+    return screen(
+        "⏰ <b>Добавить дни всем</b>",
+        "Нет активных подписок.",
+    )
+
+
+def admin_bulk_days_custom_prompt_text() -> str:
+    return (
+        "✏️ <b>Своё число дней</b>\n\n"
+        "Отправьте число дней одним сообщением (например <code>14</code>).\n"
+        "Максимум: <b>3650</b>."
+    )
+
+
+def admin_bulk_days_confirm_text(*, days: int, sub_count: int) -> str:
+    return screen(
+        "⏰ <b>Подтверждение</b>",
+        f"Продлить <b>{sub_count}</b> активных подписок на <b>{days}</b> дн.?",
+        hint="Действие нельзя отменить. Клиенты будут уведомлены.",
+    )
+
+
+def admin_bulk_days_done_text(
+    *,
+    days: int,
+    db_updated: int,
+    panel_adjusted: int,
+    panel_skipped: int,
+    notified: int,
+    notify_failed: int,
+    error: str | None = None,
+) -> str:
+    lines = [
+        f"Срок +<b>{days}</b> дн.",
+        f"БД бота: обновлено <b>{db_updated}</b>.",
+        f"Панель: сдвинуто <b>{panel_adjusted}</b>"
+        + (f", пропущено <b>{panel_skipped}</b>" if panel_skipped else "")
+        + ".",
+        f"Уведомлено: <b>{notified}</b>"
+        + (f", не доставлено: <b>{notify_failed}</b>" if notify_failed else "")
+        + ".",
+    ]
+    if error:
+        lines.append(f"⚠️ {html.escape(error)}")
+    return screen("⏰ <b>Массовое продление</b>", *lines)
+
+
 def _format_admin_dt(raw: str | None) -> str:
     if not raw:
         return "—"

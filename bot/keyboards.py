@@ -12,7 +12,6 @@ from ui.theme import (
     BTN_HOME,
     BTN_PAY,
     BTN_FAQ,
-    BTN_SERVER_STATUS,
     BTN_POLICY,
     BTN_PRIVACY_POLICY,
     BTN_PROMO,
@@ -346,11 +345,6 @@ def subscription_manage_kb(
             text="💸 Запросить возврат",
             callback_data=f"refund:{sub_id}",
         )])
-    if not is_trial:
-        rows.append([InlineKeyboardButton(
-            text=BTN_SERVER_STATUS,
-            callback_data=f"server_status:{sub_id}",
-        )])
     rows.append(nav_row(back_callback))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -552,14 +546,6 @@ def trial_confirm_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="✅ Активировать", callback_data="trial_confirm")],
         [InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")],
     ])
-
-
-def server_status_kb(*, back_callback: str = "main_menu") -> InlineKeyboardMarkup:
-    if back_callback == "main_menu":
-        rows = [[InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")]]
-    else:
-        rows = [nav_row(back_callback)]
-    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def referral_program_kb(share_url: str) -> InlineKeyboardMarkup:
