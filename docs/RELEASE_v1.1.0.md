@@ -38,6 +38,7 @@ curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/insta
 | **install.sh UX** | Прогресс пакетов ОС (heartbeat), «ввод скрыт» для токенов, apt/dnf/yum/microdnf/apk/zypper/pacman |
 | **vpnplategabot** | Системная команда меню (ставится при install/update) |
 | **Пункт 9 · полный снос** | Units + каталог + user + sudoers; выбор **с Redis / без**; подтверждение `DELETE` |
+| **Продление −1 день** | Фикс TZ: naive `end_date` → expiry ms всегда как UTC (`utils/utc.py`) |
 | **Slim на VPS** | При install/update **не копируются** `docs/`, `report/`, `scripts/dev/`, корневые `*.md` — документация только на GitHub |
 | Документация | One-liner вынесен в начало README / installation |
 

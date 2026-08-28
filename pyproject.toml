@@ -37,5 +37,5 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["bot*", "config*", "db*", "services*", "ui*"]
+include = ["bot*", "config*", "db*", "services*", "ui*", "utils*"]
 exclude = ["data*", "grokerrorreports*", "tests*"]

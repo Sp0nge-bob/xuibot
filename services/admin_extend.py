@@ -1,12 +1,11 @@
 """Ручное продление подписки администратором (БД + Primary + уведомление клиенту)."""
 from __future__ import annotations
 
-from datetime import datetime
-
 from loguru import logger
 
 from db import database as db
 from services.xui import extend_client, get_unified_panel_client
+from utils.utc import utc_iso_to_ms
 
 
 def admin_extend_notify_text(*, days: int, new_end_date: str) -> str:
@@ -40,9 +39,7 @@ async def admin_extend_subscription(
         raise ValueError("Подписка не найдена или неактивна")
 
     new_end_iso = await db.extend_subscription_record(subscription_id, days)
-    new_expiry_ms = int(
-        datetime.fromisoformat(new_end_iso.replace("Z", "")).timestamp() * 1000
-    )
+    new_expiry_ms = utc_iso_to_ms(new_end_iso)
     email = sub["client_email"]
     panel_client = await get_unified_panel_client(email)
     if panel_client:

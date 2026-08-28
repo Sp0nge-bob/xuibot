@@ -1,6 +1,4 @@
 """Выдача и админский сброс пробной подписки."""
-from datetime import datetime, timedelta
-
 from loguru import logger
 
 from config.trial import (
@@ -27,6 +25,7 @@ from services.limit_ip import format_connections_limit_line, get_trial_limit_ip
 from services.node_sync import schedule_secondary_sync
 from services.subscription_admin import admin_reset_all_trials, admin_reset_trial_for_user
 from services.xui import provision_client
+from utils.utc import days_from_now_ms, ms_to_utc_iso, parse_utc
 
 
 async def get_trial_button_visible(tg_id: int) -> bool:
@@ -40,11 +39,14 @@ async def claim_trial(tg_id: int) -> FulfillmentResult:
         raise ValueError(reason)
 
     email = trial_client_email(tg_id)
+    end_ms = days_from_now_ms(TRIAL_DAYS)
+    end_iso = ms_to_utc_iso(end_ms)
     email, sub_id, sub_link = await provision_client(
         tg_id=tg_id,
         plan_days=TRIAL_DAYS,
         traffic_gb=TRIAL_TRAFFIC_GB,
         client_email=email,
+        target_expiry_ms=end_ms,
     )
 
     sub_db_id = await db.create_subscription(
@@ -56,13 +58,14 @@ async def claim_trial(tg_id: int) -> FulfillmentResult:
         sub_id=sub_id,
         days=TRIAL_DAYS,
         traffic_gb=TRIAL_TRAFFIC_GB,
+        end_date=end_iso,
     )
     await trial_db.record_trial_grant(tg_id, sub_db_id)
     schedule_secondary_sync(sub_db_id)
 
     inbound_count = await get_subscription_inbound_count()
     limit_ip = await get_trial_limit_ip()
-    end_date = (datetime.utcnow() + timedelta(days=TRIAL_DAYS)).strftime("%d.%m.%Y")
+    end_date = parse_utc(end_iso).strftime("%d.%m.%Y")
     lines = [
         "✅ <b>Пробный период активирован!</b>",
         "━━━━━━━━━━━━━━━━",

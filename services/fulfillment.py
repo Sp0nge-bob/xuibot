@@ -1,7 +1,6 @@
 """Общая логика выдачи и продления подписки (тест, webhook, ручная проверка)."""
 import io
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
 
@@ -25,6 +24,7 @@ from services.xui import (
     build_sub_link,
     get_unified_panel_client,
 )
+from utils.utc import days_from_now_ms, ms_to_utc_iso, utc_iso_to_ms
 
 from services.pricing import apply_promo_on_paid_order
 from services.node_sync import schedule_secondary_sync
@@ -131,9 +131,7 @@ async def _fulfill_extend(
         raise ValueError("Нет подписки для продления")
 
     new_end_iso = await db.extend_subscription_record(target_sub["id"], plan["days"])
-    new_expiry_ms = int(
-        datetime.fromisoformat(new_end_iso.replace("Z", "")).timestamp() * 1000
-    )
+    new_expiry_ms = utc_iso_to_ms(new_end_iso)
     email = target_sub["client_email"]
     panel_client = await get_unified_panel_client(email)
     if panel_client:
@@ -193,14 +191,16 @@ async def _fulfill_new(
     log_context: str,
 ) -> FulfillmentResult:
     email = await db.allocate_client_email(tg_id)
+    end_ms = days_from_now_ms(plan["days"])
+    end_date = ms_to_utc_iso(end_ms)
     email, sub_id, sub_link = await provision_client(
         tg_id=tg_id,
         plan_days=plan["days"],
         traffic_gb=plan["traffic_gb"],
         client_email=email,
+        target_expiry_ms=end_ms,
     )
     display_name = (sub_display_name or "").strip() or await db.suggest_subscription_display_name(tg_id)
-    end_date = (datetime.utcnow() + timedelta(days=plan["days"])).strftime("%Y-%m-%d")
     sub_db_id = await db.create_subscription(
         tg_id=tg_id,
         order_id=order_id,
@@ -211,6 +211,7 @@ async def _fulfill_new(
         days=plan["days"],
         traffic_gb=plan["traffic_gb"],
         display_name=display_name,
+        end_date=end_date,
     )
     schedule_secondary_sync(sub_db_id)
     inbound_count = await get_subscription_inbound_count()

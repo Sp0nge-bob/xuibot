@@ -469,9 +469,12 @@ async def create_subscription(
     traffic_gb: int,
     *,
     display_name: Optional[str] = None,
+    end_date: Optional[str] = None,
 ) -> int:
-    now = datetime.utcnow()
-    end = now + timedelta(days=days)
+    from utils.utc import add_days_utc, parse_utc, utc_now
+
+    now = utc_now()
+    end = parse_utc(end_date) if end_date else add_days_utc(now, days)
     async with get_db() as db:
         cursor = await db.execute(
             """INSERT INTO subscriptions 
@@ -644,6 +647,8 @@ async def get_subscription_by_order_id(order_id: int) -> Optional[Dict[str, Any]
 
 async def add_subscription_bonus_days(subscription_id: int, days: int) -> str:
     """Добавить дни к end_date подписки. Возвращает новый end_date ISO."""
+    from utils.utc import add_days_utc
+
     extra = int(days)
     if extra <= 0:
         sub = await get_subscription_by_id(subscription_id)
@@ -651,8 +656,7 @@ async def add_subscription_bonus_days(subscription_id: int, days: int) -> str:
     sub = await get_subscription_by_id(subscription_id)
     if not sub:
         raise ValueError("Подписка не найдена")
-    current_end = datetime.fromisoformat(str(sub["end_date"]).replace("Z", ""))
-    new_end = current_end + timedelta(days=extra)
+    new_end = add_days_utc(str(sub["end_date"]), extra)
     async with get_db() as db:
         await db.execute(
             "UPDATE subscriptions SET end_date = ? WHERE id = ?",
@@ -678,13 +682,15 @@ async def add_grant_bonus_days(subscription_id: int, days: int) -> None:
 
 
 async def extend_subscription_record(subscription_id: int, additional_days: int) -> str:
+    from utils.utc import add_days_utc, parse_utc, utc_now
+
     sub = await get_subscription_by_id(subscription_id)
     if not sub:
         raise ValueError("Подписка не найдена")
-    current_end = datetime.fromisoformat(sub["end_date"])
-    now = datetime.utcnow()
+    current_end = parse_utc(sub["end_date"])
+    now = utc_now()
     base = current_end if current_end > now else now
-    new_end = base + timedelta(days=additional_days)
+    new_end = add_days_utc(base, additional_days)
     async with get_db() as db:
         await db.execute(
             """UPDATE subscriptions
@@ -698,12 +704,14 @@ async def extend_subscription_record(subscription_id: int, additional_days: int)
 
 async def shrink_subscription_record(subscription_id: int, days: int) -> tuple[str, bool]:
     """Сократить подписку на days. Возвращает (end_date ISO, is_active)."""
+    from utils.utc import parse_utc, utc_now
+
     sub = await get_subscription_by_id(subscription_id)
     if not sub:
         raise ValueError("Подписка не найдена")
-    current_end = datetime.fromisoformat(str(sub["end_date"]).replace("Z", ""))
+    current_end = parse_utc(str(sub["end_date"]))
     new_end = current_end - timedelta(days=days)
-    still_active = new_end > datetime.utcnow()
+    still_active = new_end > utc_now()
     async with get_db() as db:
         await db.execute(
             "UPDATE subscriptions SET end_date = ?, is_active = ? WHERE id = ?",

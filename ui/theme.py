@@ -97,16 +97,26 @@ def money(amount: int | float) -> str:
 
 def format_date(iso_date: str) -> str:
     try:
-        dt = datetime.fromisoformat(iso_date.replace("Z", ""))
+        from utils.utc import parse_utc
+
+        dt = parse_utc(iso_date)
         return dt.strftime("%d.%m.%Y")
     except ValueError:
         return iso_date[:10]
 
 
 def days_left(iso_date: str) -> int:
+    """Оставшиеся сутки (округление вверх по оставшемуся времени)."""
     try:
-        end = datetime.fromisoformat(iso_date.replace("Z", ""))
-        return max(0, (end - datetime.utcnow()).days)
+        import math
+
+        from utils.utc import parse_utc, utc_now
+
+        end = parse_utc(iso_date)
+        sec = (end - utc_now()).total_seconds()
+        if sec <= 0:
+            return 0
+        return max(0, int(math.ceil(sec / 86400.0)))
     except ValueError:
         return 0
 

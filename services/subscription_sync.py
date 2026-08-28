@@ -1,6 +1,5 @@
 """Синхронизация подписок бота с 3x-ui. Чтение — лёгкое; запись — только repair=True."""
 import time
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
@@ -16,19 +15,17 @@ from services.xui import (
     repair_client_inbounds,
     get_api,
 )
+from utils.utc import ms_to_utc_iso, utc_iso_to_ms, utc_now_ms
 
 _last_sync_by_tg: dict[int, float] = {}
 
 
 def _ms_to_iso(ms: int) -> str:
-    if not ms:
-        return datetime.utcnow().isoformat()
-    return datetime.utcfromtimestamp(ms / 1000).isoformat()
+    return ms_to_utc_iso(ms)
 
 
 def _iso_to_ms(iso_date: str) -> int:
-    dt = datetime.fromisoformat(iso_date.replace("Z", ""))
-    return int(dt.timestamp() * 1000)
+    return utc_iso_to_ms(iso_date)
 
 
 def _traffic_label(gb: int) -> str:
@@ -132,7 +129,7 @@ async def _apply_panel_to_db(
         await db.deactivate_subscription(sub["id"])
         return None
 
-    now_ms = int(datetime.utcnow().timestamp() * 1000)
+    now_ms = utc_now_ms()
     panel_expiry_ms = int(client.expiry_time or 0)
     db_expiry_ms = _iso_to_ms(str(sub["end_date"]))
 

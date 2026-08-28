@@ -1,7 +1,6 @@
 """Реферальная программа: скидки при оплате и бонусные дни."""
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
 from loguru import logger
@@ -16,6 +15,7 @@ from config.trial import is_trial_email
 from db import database as db
 from db import referrals as ref_db
 from services.xui import extend_client, get_unified_panel_client
+from utils.utc import utc_iso_to_ms
 
 
 def parse_referral_start_arg(raw: str | None) -> int | None:
@@ -74,8 +74,7 @@ async def credit_referrer_days(referrer_tg_id: int, days: int) -> None:
     new_end = await db.extend_subscription_record(target["id"], extra)
     email = target["client_email"]
     if await get_unified_panel_client(email):
-        new_expiry_ms = int(datetime.fromisoformat(new_end.replace("Z", "")).timestamp() * 1000)
-        await extend_client(email, extra, target_expiry_ms=new_expiry_ms)
+        await extend_client(email, extra, target_expiry_ms=utc_iso_to_ms(new_end))
     logger.info("Referral: +{} дн. рефереру tg_id={} sub #{}", extra, referrer_tg_id, target["id"])
 
 
@@ -86,8 +85,9 @@ async def apply_pending_referral_days_for_user(tg_id: int, subscription_id: int)
     new_end = await db.add_subscription_bonus_days(subscription_id, pending)
     sub = await db.get_subscription_by_id(subscription_id)
     if sub and await get_unified_panel_client(sub["client_email"]):
-        expiry_ms = int(datetime.fromisoformat(new_end.replace("Z", "")).timestamp() * 1000)
-        await extend_client(sub["client_email"], pending, target_expiry_ms=expiry_ms)
+        await extend_client(
+            sub["client_email"], pending, target_expiry_ms=utc_iso_to_ms(new_end),
+        )
     logger.info("Referral: применено {} дн. из очереди tg_id={}", pending, tg_id)
     return pending
 
@@ -112,8 +112,11 @@ async def process_referral_rewards_for_order(order: dict[str, Any], *, subscript
         new_end = await db.add_subscription_bonus_days(subscription_id, referred_bonus)
         sub = await db.get_subscription_by_id(subscription_id)
         if sub and await get_unified_panel_client(sub["client_email"]):
-            expiry_ms = int(datetime.fromisoformat(new_end.replace("Z", "")).timestamp() * 1000)
-            await extend_client(sub["client_email"], referred_bonus, target_expiry_ms=expiry_ms)
+            await extend_client(
+                sub["client_email"],
+                referred_bonus,
+                target_expiry_ms=utc_iso_to_ms(new_end),
+            )
         await ref_db.mark_welcome_used(referred_tg_id)
 
     referrer_bonus = 0

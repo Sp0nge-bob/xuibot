@@ -1242,7 +1242,9 @@ async def provision_client(
     if target_expiry_ms is not None:
         expiry_time = target_expiry_ms
     else:
-        expiry_time = int((datetime.utcnow() + timedelta(days=plan_days)).timestamp() * 1000)
+        from utils.utc import days_from_now_ms
+
+        expiry_time = days_from_now_ms(plan_days)
 
     from services.limit_ip import resolve_limit_ip_for_email
 
@@ -1308,7 +1310,9 @@ async def extend_client(
     if not reference:
         raise ValueError(f"Клиент {email} не найден в 3x-ui")
 
-    now_ms = int(datetime.utcnow().timestamp() * 1000)
+    from utils.utc import days_from_now_ms, utc_now_ms
+
+    now_ms = utc_now_ms()
     sub_id = reference.sub_id or secrets.token_urlsafe(12)[:16]
 
     if target_expiry_ms is not None:
@@ -1318,7 +1322,7 @@ async def extend_client(
         base_ms = current_expiry if current_expiry > now_ms else now_ms
         if min_base_ms and min_base_ms > base_ms:
             base_ms = min_base_ms
-        new_expiry = base_ms + additional_days * 24 * 60 * 60 * 1000
+        new_expiry = days_from_now_ms(additional_days, from_ms=base_ms)
 
     from services.limit_ip import resolve_limit_ip_for_email
 
