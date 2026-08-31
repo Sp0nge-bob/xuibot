@@ -725,7 +725,7 @@ def admin_debug_entry_confirm_text() -> str:
     return screen(
         "🧪 <b>Отладка</b>",
         "Служебные инструменты, сверка с панелью и сброс тестовых данных.",
-        "Сбросы записей необратимы.",
+        "⚠️ Сбросы записей необратимы.",
         hint="Войти в раздел?",
     )
 
@@ -910,23 +910,24 @@ def admin_debug_menu_text(
     lockdown_whitelist_count: int = 0,
 ) -> str:
     test_label = "вкл" if test_mode else "выкл"
-    tickets_line = f"тикеты <b>{tickets_count}</b>"
+    tickets_line = f"🎫 Тикеты: <b>{tickets_count}</b>"
     if ticket_messages_count:
         tickets_line += f" · сообщ. <b>{ticket_messages_count}</b>"
     return screen(
         "🧪 <b>Отладка</b>",
         (
-            f"TEST_MODE · <b>{test_label}</b> (<code>{test_mode_source}</code>)\n"
-            f"Блокировка · <b>{lockdown_summary}</b>"
-            f" · белый список <b>{lockdown_whitelist_count}</b>"
+            f"🧪 TEST_MODE: <b>{test_label}</b> · <code>{test_mode_source}</code>\n"
+            f"🔒 Блокировка: <b>{lockdown_summary}</b>\n"
+            f"   └ белый список: <b>{lockdown_whitelist_count}</b>"
         ),
         (
-            f"Пользователи <b>{users_count}</b>  ·  заказы <b>{orders_count}</b>"
-            f"  ·  {tickets_line}\n"
-            f"Пробные <b>{trial_count}</b>  ·  промо <b>{promo_uses}</b>"
-            f"  ·  скидки ждут <b>{promo_pending}</b>"
+            f"👥 Пользователи: <b>{users_count}</b>\n"
+            f"🧾 Заказы: <b>{orders_count}</b>\n"
+            f"{tickets_line}\n"
+            f"🎁 Пробные: <b>{trial_count}</b>\n"
+            f"🎟 Промо: <b>{promo_uses}</b> · ждут <b>{promo_pending}</b>"
         ),
-        hint="Сброс промо, тикетов и пользователей необратим.",
+        hint="⚠️ Промо, тикеты и пользователи — сброс записей.",
     )
 
 
@@ -962,12 +963,12 @@ def admin_debug_pull_panel_result_text(stats: dict) -> str:
     return screen(
         "📥 <b>Сверка с Primary</b>",
         (
-            f"Всего <b>{stats.get('total', 0)}</b>"
-            f"  ·  обновлено <b>{stats.get('updated', 0)}</b>"
-            f"  ·  без изменений <b>{stats.get('unchanged', 0)}</b>\n"
-            f"Деактивировано <b>{stats.get('deactivated', 0)}</b>"
-            f"  ·  нет/выкл/истекло на панели <b>{stats.get('missing', 0)}</b>\n"
-            f"Ошибок <b>{stats.get('failed', 0)}</b>"
+            f"Всего: <b>{stats.get('total', 0)}</b>\n"
+            f"Обновлено: <b>{stats.get('updated', 0)}</b>\n"
+            f"Без изменений: <b>{stats.get('unchanged', 0)}</b>\n"
+            f"Деактивировано: <b>{stats.get('deactivated', 0)}</b>"
+            f" · нет/выкл на панели: <b>{stats.get('missing', 0)}</b>\n"
+            f"Ошибок: <b>{stats.get('failed', 0)}</b>"
         ),
         sample_block,
     )
@@ -1137,10 +1138,10 @@ def admin_debug_orders_menu_text(
     return screen(
         "🧾 <b>Заказы</b>",
         (
-            f"Всего <b>{total_count}</b>\n"
-            f"Оплаченные <b>{paid_count}</b>"
-            f"  ·  ожидают <b>{pending_count}</b>"
-            f"  ·  неудачные <b>{failed_count}</b>"
+            f"Всего: <b>{total_count}</b>\n"
+            f"✅ Оплаченные: <b>{paid_count}</b>\n"
+            f"⏳ Ожидают: <b>{pending_count}</b>\n"
+            f"❌ Неудачные: <b>{failed_count}</b>"
         ),
         hint="Просмотр списков или сброс истории.",
     )

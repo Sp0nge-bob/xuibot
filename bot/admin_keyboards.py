@@ -275,7 +275,7 @@ def admin_backup_interval_edit_kb() -> InlineKeyboardMarkup:
 
 def admin_debug_entry_confirm_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Войти", callback_data="adm:debug:enter")],
+        [InlineKeyboardButton(text="✅ Войти", callback_data="adm:debug:enter")],
         [InlineKeyboardButton(text="« Назад", callback_data="adm:menu")],
     ])
 
@@ -286,7 +286,7 @@ def admin_debug_lockdown_kb(
     enabled: bool = False,
     add_mode: bool = False,
 ) -> InlineKeyboardMarkup:
-    toggle_label = "Разблокировать" if enabled else "Заблокировать"
+    toggle_label = "🔓 Снять" if enabled else "🔒 Включить"
     rows: list[list[InlineKeyboardButton]] = [
         [
             InlineKeyboardButton(
@@ -294,7 +294,7 @@ def admin_debug_lockdown_kb(
                 callback_data="adm:debug:lockdown:toggle",
             ),
             InlineKeyboardButton(
-                text="Добавить ID",
+                text="➕ ID",
                 callback_data="adm:debug:lockdown:add",
             ),
         ],
@@ -320,8 +320,8 @@ def admin_debug_kb(
     test_mode_overridden: bool = False,
     lockdown_active: bool = False,
 ) -> InlineKeyboardMarkup:
-    test_label = "Тест · вкл" if test_mode else "Тест · выкл"
-    lock_label = "Блокировка · вкл" if lockdown_active else "Блокировка"
+    test_label = "🧪 Тест: вкл" if test_mode else "🧪 Тест: выкл"
+    lock_label = "🔒 Блокировка"
     rows: list[list[InlineKeyboardButton]] = [
         [
             InlineKeyboardButton(
@@ -336,42 +336,42 @@ def admin_debug_kb(
     ]
     if test_mode_overridden:
         rows.append([InlineKeyboardButton(
-            text="Тест из .env",
+            text="↩️ из .env",
             callback_data="adm:debug:test_mode_reset",
         )])
     rows += [
         [
             InlineKeyboardButton(
-                text="Из панели",
+                text="📥 С панели",
                 callback_data="adm:debug:pull_panel",
             ),
             InlineKeyboardButton(
-                text="Диагностика",
+                text="🔍 Диагностика",
                 callback_data="adm:debug:panel_diag",
             ),
         ],
         [
             InlineKeyboardButton(
-                text="Заказы",
+                text="🧾 Заказы",
                 callback_data="adm:debug:orders",
             ),
             InlineKeyboardButton(
-                text="Пробные",
+                text="🎁 Пробные",
                 callback_data="adm:trial",
             ),
         ],
         [
             InlineKeyboardButton(
-                text="Сброс промо",
+                text="🎟 Промо",
                 callback_data="adm:debug:promos_reset",
             ),
             InlineKeyboardButton(
-                text="Сброс тикетов",
+                text="🎫 Тикеты",
                 callback_data="adm:debug:tickets_reset",
             ),
         ],
         [InlineKeyboardButton(
-            text="Сброс пользователей",
+            text="👥 Пользователи",
             callback_data="adm:debug:users_reset",
         )],
         [InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")],
@@ -382,7 +382,7 @@ def admin_debug_kb(
 def admin_debug_pull_panel_confirm_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
-            text="Подтянуть",
+            text="📥 Подтянуть",
             callback_data="adm:debug:pull_panel:confirm",
         )],
         [InlineKeyboardButton(text="« Отмена", callback_data="adm:debug:enter")],
@@ -392,7 +392,7 @@ def admin_debug_pull_panel_confirm_kb() -> InlineKeyboardMarkup:
 def admin_debug_users_reset_confirm_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
-            text="Подтвердить",
+            text="⚠️ Подтвердить",
             callback_data="adm:debug:users_reset:confirm",
         )],
         [InlineKeyboardButton(text="« Отмена", callback_data="adm:debug:enter")],
@@ -402,7 +402,7 @@ def admin_debug_users_reset_confirm_kb() -> InlineKeyboardMarkup:
 def admin_debug_tickets_reset_confirm_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
-            text="Подтвердить",
+            text="⚠️ Подтвердить",
             callback_data="adm:debug:tickets_reset:confirm",
         )],
         [InlineKeyboardButton(text="« Отмена", callback_data="adm:debug:enter")],
@@ -414,12 +414,12 @@ def admin_debug_orders_kb(
     failed_count: int = 0,
     pending_count: int = 0,
 ) -> InlineKeyboardMarkup:
-    failed_label = f"Неудачные · {failed_count}" if failed_count else "Неудачные"
-    pending_label = f"Ожидают · {pending_count}" if pending_count else "Ожидают"
+    failed_label = f"❌ Неудачные · {failed_count}" if failed_count else "❌ Неудачные"
+    pending_label = f"⏳ Ожидают · {pending_count}" if pending_count else "⏳ Ожидают"
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
-                text="Оплаченные",
+                text="📋 Оплаченные",
                 callback_data="adm:debug:orders:list:paid:0",
             ),
             InlineKeyboardButton(
@@ -432,7 +432,7 @@ def admin_debug_orders_kb(
             callback_data="adm:debug:orders:list:failed:0",
         )],
         [InlineKeyboardButton(
-            text="Сбросить историю",
+            text="🗑 Сбросить историю",
             callback_data="adm:debug:orders_reset",
         )],
         [InlineKeyboardButton(text="« К отладке", callback_data="adm:debug:enter")],
@@ -515,7 +515,7 @@ def admin_debug_order_message_kb(
 def admin_debug_orders_reset_confirm_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
-            text="Подтвердить",
+            text="⚠️ Подтвердить",
             callback_data="adm:debug:orders_reset:confirm",
         )],
         [InlineKeyboardButton(text="« Отмена", callback_data="adm:debug:orders")],
@@ -525,7 +525,7 @@ def admin_debug_orders_reset_confirm_kb() -> InlineKeyboardMarkup:
 def admin_debug_promo_reset_confirm_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
-            text="Подтвердить",
+            text="⚠️ Подтвердить",
             callback_data="adm:debug:promos_reset:confirm",
         )],
         [InlineKeyboardButton(text="« Отмена", callback_data="adm:debug:enter")],
