@@ -343,10 +343,6 @@ def admin_debug_kb(
         callback_data="adm:debug:lockdown",
     )])
     rows += [
-        [InlineKeyboardButton(  # TEMP_MENU_DESIGN
-            text="🎨 Дизайн /start (тест)",
-            callback_data="adm:debug:ui",
-        )],
         [InlineKeyboardButton(
             text="📥 Подтянуть с панели",
             callback_data="adm:debug:pull_panel",

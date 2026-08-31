@@ -95,26 +95,7 @@ def main_menu_text(
     pending_discount_expires_at: Optional[str] = None,
     pending_payment_plan_name: Optional[str] = None,
     test_mode: bool = False,
-    design_id: Optional[str] = None,  # TEMP_MENU_DESIGN
 ) -> str:
-    # TEMP_MENU_DESIGN: ветка макетов /start, потом вырезать параметр и if
-    if design_id and design_id != "classic":
-        from ui.menu_designs import render_alt_main_menu
-
-        return render_alt_main_menu(
-            first_name,
-            username,
-            subscriptions,
-            greeting_template=greeting_template,
-            announcement=announcement,
-            refund_pending_chargeback=refund_pending_chargeback,
-            pending_discount_promo=pending_discount_promo,
-            pending_discount_expires_at=pending_discount_expires_at,
-            pending_payment_plan_name=pending_payment_plan_name,
-            test_mode=test_mode,
-            design_id=design_id,
-        )
-
     blocks: list[str] = [user_chip(first_name, username, template=greeting_template)]
 
     if announcement:
