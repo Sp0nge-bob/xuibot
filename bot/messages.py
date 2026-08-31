@@ -722,11 +722,17 @@ def admin_faq_edit_body_prompt_text() -> str:
 
 
 def admin_debug_entry_confirm_text() -> str:
-    return screen(
-        "🧪 <b>Отладка</b>",
-        "Служебные инструменты, сверка с панелью и сброс тестовых данных.",
-        "⚠️ Сбросы записей необратимы.",
-        hint="Войти в раздел?",
+    return (
+        "🧪 <b>Раздел отладки</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        "⚠️ Здесь доступны опасные операции:\n"
+        "• массовый сброс пробных подписок\n"
+        "• очистка всех применений промокодов\n"
+        "• сброс истории всех заказов\n"
+        "• сброс учёта всех тикетов\n"
+        "• сброс учёта пользователей\n\n"
+        "Используйте только для отладки и тестирования.\n\n"
+        "Войти в раздел?"
     )
 
 
@@ -910,46 +916,47 @@ def admin_debug_menu_text(
     lockdown_whitelist_count: int = 0,
 ) -> str:
     test_label = "вкл" if test_mode else "выкл"
-    tickets_line = f"🎫 Тикеты: <b>{tickets_count}</b>"
-    if ticket_messages_count:
-        tickets_line += f" · сообщ. <b>{ticket_messages_count}</b>"
-    return screen(
-        "🧪 <b>Отладка</b>",
-        (
-            f"🧪 TEST_MODE: <b>{test_label}</b> · <code>{test_mode_source}</code>\n"
-            f"🔒 Блокировка: <b>{lockdown_summary}</b>\n"
-            f"   └ белый список: <b>{lockdown_whitelist_count}</b>"
-        ),
-        (
-            f"👥 Пользователи: <b>{users_count}</b>\n"
-            f"🧾 Заказы: <b>{orders_count}</b>\n"
-            f"{tickets_line}\n"
-            f"🎁 Пробные: <b>{trial_count}</b>\n"
-            f"🎟 Промо: <b>{promo_uses}</b> · ждут <b>{promo_pending}</b>"
-        ),
-        hint="⚠️ Промо, тикеты и пользователи — сброс записей.",
+    return (
+        "🧪 <b>Отладка</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        f"🧪 TEST_MODE: <b>{test_label}</b> (<code>{test_mode_source}</code>)\n"
+        f"🔒 Ограничение доступа: <b>{lockdown_summary}</b>"
+        f" · белый список: <b>{lockdown_whitelist_count}</b>\n"
+        f"🎁 Активных пробных подписок: <b>{trial_count}</b>\n"
+        f"🎟 Применений промокодов (promo_uses): <b>{promo_uses}</b>\n"
+        f"⏳ Ожидающих скидок (pending): <b>{promo_pending}</b>\n"
+        f"🧾 Заказов в истории: <b>{orders_count}</b>\n"
+        f"🎫 Тикетов: <b>{tickets_count}</b> · сообщений: <b>{ticket_messages_count}</b>\n"
+        f"👥 Пользователей в БД: <b>{users_count}</b>\n\n"
+        "📥 <b>Подтянуть с панели</b> — ★ Primary → БД "
+        "(сроки после ручных правок в 3x-ui).\n"
+        "🔍 <b>Диагностика панелей</b> — полный отчёт DNS/TCP/API "
+        "(без ожидания падения нод).\n\n"
+        "Выберите действие:"
     )
 
 
 def admin_debug_panel_diag_running_text() -> str:
-    return screen(
-        "🔍 <b>Диагностика панелей</b>",
-        "Собираю health, DNS, TCP, HTTPS и API по всем нодам.",
-        "Это может занять 1–2 мин. Отчёт придёт отдельными сообщениями.",
+    return (
+        "🔍 <b>Диагностика панелей</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        "Собираю health + DNS / TCP / HTTPS / API по всем нодам…\n"
+        "Это может занять до ~1–2 мин. Отчёт придёт отдельными сообщениями."
     )
 
 
 def admin_debug_pull_panel_confirm_text(*, active_subs: int) -> str:
-    return screen(
-        "📥 <b>Сверка с Primary</b>",
-        f"Активных подписок в БД: <b>{active_subs}</b>",
-        (
-            "Бот прочитает клиентов на основной панели и запишет в БД "
-            "срок, sub_id, трафик и активность.\n\n"
-            "Приоритет у панели: даты в БД станут как в 3x-ui, в том числе короче. "
-            "На панель ничего не пишется."
-        ),
-        hint="Не путать с синхронизацией нод (там БД → панель).",
+    return (
+        "📥 <b>Подтянуть данные с ★ Primary</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        f"Активных подписок в БД: <b>{active_subs}</b>\n\n"
+        "Бот прочитает клиентов на <b>основной</b> панели и запишет в БД:\n"
+        "• <code>end_date</code> (срок)\n"
+        "• <code>sub_id</code>, трафик\n"
+        "• <code>is_active</code> (если на панели выкл / истёк — off в БД)\n\n"
+        "⚠️ <b>Приоритет у панели</b> — даты в БД будут как в 3x-ui "
+        "(в т.ч. укорочение). На панель <b>ничего не пишется</b>.\n\n"
+        "Не путать с «Синхронизировать ноды» (там БД → панель)."
     )
 
 
@@ -957,20 +964,19 @@ def admin_debug_pull_panel_result_text(stats: dict) -> str:
     samples = stats.get("samples") or []
     sample_block = ""
     if samples:
-        sample_block = "<b>Примеры:</b>\n" + "\n".join(
+        sample_block = "\n\n<b>Примеры:</b>\n" + "\n".join(
             f"• <code>{s}</code>" for s in samples[:8]
         )
-    return screen(
-        "📥 <b>Сверка с Primary</b>",
-        (
-            f"Всего: <b>{stats.get('total', 0)}</b>\n"
-            f"Обновлено: <b>{stats.get('updated', 0)}</b>\n"
-            f"Без изменений: <b>{stats.get('unchanged', 0)}</b>\n"
-            f"Деактивировано: <b>{stats.get('deactivated', 0)}</b>"
-            f" · нет/выкл на панели: <b>{stats.get('missing', 0)}</b>\n"
-            f"Ошибок: <b>{stats.get('failed', 0)}</b>"
-        ),
-        sample_block,
+    return (
+        "📥 <b>Сверка с ★ Primary завершена</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        f"Всего в прогоне: <b>{stats.get('total', 0)}</b>\n"
+        f"Обновлено: <b>{stats.get('updated', 0)}</b>\n"
+        f"Без изменений: <b>{stats.get('unchanged', 0)}</b>\n"
+        f"Деактивировано: <b>{stats.get('deactivated', 0)}</b>"
+        f" (нет/выкл/истекло на панели: <b>{stats.get('missing', 0)}</b>)\n"
+        f"Ошибок: <b>{stats.get('failed', 0)}</b>"
+        f"{sample_block}"
     )
 
 
@@ -1041,27 +1047,27 @@ def admin_debug_lockdown_menu_text(
 
 
 def admin_debug_lockdown_add_prompt_text() -> str:
-    return screen(
-        "➕ <b>Белый список</b>",
-        "Отправьте TG ID пользователя, которому нужен доступ во время блокировки.",
-        hint="Отмена — кнопка ниже.",
+    return (
+        "➕ <b>Добавить в белый список</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        "Отправьте TG ID пользователя, которому нужен доступ во время блокировки.\n"
+        "Для отмены: кнопка «К блокировке»."
     )
 
 
 def admin_debug_users_reset_confirm_text(*, users_count: int) -> str:
-    return screen(
-        "👥 <b>Сброс пользователей</b>",
-        f"Записей в <code>users</code>: <b>{users_count}</b>",
-        (
-            "Будет выполнено:\n"
-            "• удаление клиентов с панелей 3x-ui\n"
-            "• деактивация активных подписок в БД\n"
-            "• удаление записей <code>users</code>\n"
-            "• сброс лимитов пробного периода\n\n"
-            "Заказы и тикеты не трогаются.\n"
-            "При следующем /start пользователи зарегистрируются заново."
-        ),
-        hint="Продолжить?",
+    return (
+        "👥 <b>Сброс учёта пользователей</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        f"Записей в <code>users</code>: <b>{users_count}</b>\n\n"
+        "Будет выполнено:\n"
+        "• удаление клиентов с панелей 3x-ui\n"
+        "• деактивация всех активных подписок в БД\n"
+        "• удаление всех записей из <code>users</code>\n"
+        "• сброс лимитов пробного периода\n\n"
+        "Заказы и тикеты не трогаются (сбросьте отдельно при необходимости).\n"
+        "При следующем /start пользователи зарегистрируются заново.\n\n"
+        "Продолжить?"
     )
 
 
@@ -1070,42 +1076,46 @@ def admin_debug_tickets_reset_confirm_text(
     tickets_count: int,
     messages_count: int,
 ) -> str:
-    return screen(
-        "🎫 <b>Сброс тикетов</b>",
-        f"Тикетов: <b>{tickets_count}</b>  ·  сообщений: <b>{messages_count}</b>",
-        (
-            "Удалятся все записи <code>tickets</code> и <code>ticket_messages</code> "
-            "(открытые и закрытые, включая возвраты).\n\n"
-            "Пользователи и подписки останутся."
-        ),
-        hint="Продолжить?",
+    return (
+        "🎫 <b>Сброс учёта тикетов</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        f"Тикетов в БД: <b>{tickets_count}</b>\n"
+        f"Сообщений в переписках: <b>{messages_count}</b>\n\n"
+        "Будет выполнено:\n"
+        "• удаление всех записей из <code>ticket_messages</code>\n"
+        "• удаление всех записей из <code>tickets</code>\n\n"
+        "Открытые и закрытые тикеты (возвраты, поддержка) будут удалены.\n"
+        "Пользователи и подписки останутся.\n\n"
+        "Продолжить?"
     )
 
 
 def admin_debug_orders_reset_confirm_text(*, orders_count: int) -> str:
-    return screen(
-        "🧾 <b>Сброс заказов</b>",
-        f"Заказов в БД: <b>{orders_count}</b>",
-        (
-            "Удалятся все записи <code>orders</code>, "
-            "отвяжется <code>order_id</code> у подписок и тикетов, "
-            "очистятся привязки промокодов к заказам.\n\n"
-            "Подписки и пользователи останутся."
-        ),
-        hint="Продолжить?",
+    return (
+        "🧾 <b>Сброс истории заказов</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        f"Заказов в БД: <b>{orders_count}</b>\n\n"
+        "Будет выполнено:\n"
+        "• удаление всех записей из <code>orders</code>\n"
+        "• отвязка <code>order_id</code> у подписок и тикетов\n"
+        "• очистка привязок промокодов к заказам\n\n"
+        "Подписки и пользователи останутся.\n\n"
+        "Продолжить?"
     )
 
 
 def admin_debug_promo_reset_confirm_text(*, uses_count: int, pending_count: int) -> str:
-    return screen(
-        "🎟 <b>Сброс промо</b>",
-        f"Использований: <b>{uses_count}</b>  ·  ожидают: <b>{pending_count}</b>",
-        (
-            "Удалятся <code>promo_uses</code> и ожидающие скидки, "
-            "обнулится <code>used_count</code> у промокодов.\n\n"
-            "Сами промокоды останутся."
-        ),
-        hint="Продолжить?",
+    return (
+        "🎟 <b>Очистка применений промокодов</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        f"Записей promo_uses: <b>{uses_count}</b>\n"
+        f"Ожидающих скидок: <b>{pending_count}</b>\n\n"
+        "Будет выполнено:\n"
+        "• удаление всех записей <code>promo_uses</code>\n"
+        "• удаление всех ожидающих скидок (<code>promo_pending_discounts</code>)\n"
+        "• обнуление <code>used_count</code> у всех промокодов\n\n"
+        "Сами промокоды останутся без изменений.\n\n"
+        "Продолжить?"
     )
 
 
@@ -1135,15 +1145,14 @@ def admin_debug_orders_menu_text(
     pending_count: int,
     failed_count: int,
 ) -> str:
-    return screen(
-        "🧾 <b>Заказы</b>",
-        (
-            f"Всего: <b>{total_count}</b>\n"
-            f"✅ Оплаченные: <b>{paid_count}</b>\n"
-            f"⏳ Ожидают: <b>{pending_count}</b>\n"
-            f"❌ Неудачные: <b>{failed_count}</b>"
-        ),
-        hint="Просмотр списков или сброс истории.",
+    return (
+        "🧾 <b>Заказы</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        f"Всего в БД: <b>{total_count}</b>\n"
+        f"✅ Оплаченных: <b>{paid_count}</b>\n"
+        f"⏳ Ожидают оплаты: <b>{pending_count}</b>\n"
+        f"❌ Неуспешных: <b>{failed_count}</b>\n\n"
+        "Просмотрите оплаты, ожидающие и неудачные заказы или сбросьте историю."
     )
 
 

@@ -275,8 +275,11 @@ def admin_backup_interval_edit_kb() -> InlineKeyboardMarkup:
 
 def admin_debug_entry_confirm_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Войти", callback_data="adm:debug:enter")],
-        [InlineKeyboardButton(text="« Назад", callback_data="adm:menu")],
+        [InlineKeyboardButton(
+            text="✅ Да, войти в отладку",
+            callback_data="adm:debug:enter",
+        )],
+        [InlineKeyboardButton(text="« Отмена", callback_data="adm:menu")],
     ])
 
 
@@ -286,18 +289,16 @@ def admin_debug_lockdown_kb(
     enabled: bool = False,
     add_mode: bool = False,
 ) -> InlineKeyboardMarkup:
-    toggle_label = "🔓 Снять" if enabled else "🔒 Включить"
+    toggle_label = "🔓 Снять блокировку" if enabled else "🔒 Заблокировать бот"
     rows: list[list[InlineKeyboardButton]] = [
-        [
-            InlineKeyboardButton(
-                text=toggle_label,
-                callback_data="adm:debug:lockdown:toggle",
-            ),
-            InlineKeyboardButton(
-                text="➕ ID",
-                callback_data="adm:debug:lockdown:add",
-            ),
-        ],
+        [InlineKeyboardButton(
+            text=toggle_label,
+            callback_data="adm:debug:lockdown:toggle",
+        )],
+        [InlineKeyboardButton(
+            text="➕ Добавить TG ID",
+            callback_data="adm:debug:lockdown:add",
+        )],
     ]
     for u in whitelist[:12]:
         tg_id = int(u["tg_id"])
@@ -320,50 +321,50 @@ def admin_debug_kb(
     test_mode_overridden: bool = False,
     lockdown_active: bool = False,
 ) -> InlineKeyboardMarkup:
-    test_label = "🧪 Тест: вкл" if test_mode else "🧪 Тест: выкл"
-    lock_label = "🔒 Блокировка"
+    test_toggle = (
+        "⏸ Выключить TEST_MODE"
+        if test_mode
+        else "▶️ Включить TEST_MODE"
+    )
     rows: list[list[InlineKeyboardButton]] = [
-        [
-            InlineKeyboardButton(
-                text=test_label,
-                callback_data="adm:debug:test_mode_toggle",
-            ),
-            InlineKeyboardButton(
-                text=lock_label,
-                callback_data="adm:debug:lockdown",
-            ),
-        ],
+        [InlineKeyboardButton(
+            text=test_toggle,
+            callback_data="adm:debug:test_mode_toggle",
+        )],
     ]
     if test_mode_overridden:
         rows.append([InlineKeyboardButton(
-            text="↩️ из .env",
+            text="↩️ TEST_MODE из .env",
             callback_data="adm:debug:test_mode_reset",
         )])
+    lockdown_label = "🔒 Блокировка · активна" if lockdown_active else "🔒 Блокировка"
+    rows.append([InlineKeyboardButton(
+        text=lockdown_label,
+        callback_data="adm:debug:lockdown",
+    )])
     rows += [
+        [InlineKeyboardButton(
+            text="📥 Подтянуть с панели",
+            callback_data="adm:debug:pull_panel",
+        )],
+        [InlineKeyboardButton(
+            text="🔍 Диагностика панелей",
+            callback_data="adm:debug:panel_diag",
+        )],
         [
             InlineKeyboardButton(
-                text="📥 С панели",
-                callback_data="adm:debug:pull_panel",
+                text="🎁 Пробные",
+                callback_data="adm:trial",
             ),
             InlineKeyboardButton(
-                text="🔍 Диагностика",
-                callback_data="adm:debug:panel_diag",
+                text="🎟 Промокоды",
+                callback_data="adm:debug:promos_reset",
             ),
         ],
         [
             InlineKeyboardButton(
                 text="🧾 Заказы",
                 callback_data="adm:debug:orders",
-            ),
-            InlineKeyboardButton(
-                text="🎁 Пробные",
-                callback_data="adm:trial",
-            ),
-        ],
-        [
-            InlineKeyboardButton(
-                text="🎟 Промо",
-                callback_data="adm:debug:promos_reset",
             ),
             InlineKeyboardButton(
                 text="🎫 Тикеты",
@@ -382,7 +383,7 @@ def admin_debug_kb(
 def admin_debug_pull_panel_confirm_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
-            text="📥 Подтянуть",
+            text="⚠️ Да, подтянуть с ★ Primary",
             callback_data="adm:debug:pull_panel:confirm",
         )],
         [InlineKeyboardButton(text="« Отмена", callback_data="adm:debug:enter")],
@@ -392,7 +393,7 @@ def admin_debug_pull_panel_confirm_kb() -> InlineKeyboardMarkup:
 def admin_debug_users_reset_confirm_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
-            text="⚠️ Подтвердить",
+            text="⚠️ Подтвердить удаление",
             callback_data="adm:debug:users_reset:confirm",
         )],
         [InlineKeyboardButton(text="« Отмена", callback_data="adm:debug:enter")],
@@ -402,7 +403,7 @@ def admin_debug_users_reset_confirm_kb() -> InlineKeyboardMarkup:
 def admin_debug_tickets_reset_confirm_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
-            text="⚠️ Подтвердить",
+            text="⚠️ Подтвердить удаление",
             callback_data="adm:debug:tickets_reset:confirm",
         )],
         [InlineKeyboardButton(text="« Отмена", callback_data="adm:debug:enter")],
@@ -414,19 +415,19 @@ def admin_debug_orders_kb(
     failed_count: int = 0,
     pending_count: int = 0,
 ) -> InlineKeyboardMarkup:
-    failed_label = f"❌ Неудачные · {failed_count}" if failed_count else "❌ Неудачные"
-    pending_label = f"⏳ Ожидают · {pending_count}" if pending_count else "⏳ Ожидают"
+    failed_label = f"❌ Неудачные ({failed_count})" if failed_count else "❌ Неудачные"
+    pending_label = (
+        f"⏳ Ожидают оплаты ({pending_count})" if pending_count else "⏳ Ожидают оплаты"
+    )
     return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text="📋 Оплаченные",
-                callback_data="adm:debug:orders:list:paid:0",
-            ),
-            InlineKeyboardButton(
-                text=pending_label,
-                callback_data="adm:debug:orders:list:pending:0",
-            ),
-        ],
+        [InlineKeyboardButton(
+            text="📋 Оплаченные заказы",
+            callback_data="adm:debug:orders:list:paid:0",
+        )],
+        [InlineKeyboardButton(
+            text=pending_label,
+            callback_data="adm:debug:orders:list:pending:0",
+        )],
         [InlineKeyboardButton(
             text=failed_label,
             callback_data="adm:debug:orders:list:failed:0",
@@ -515,7 +516,7 @@ def admin_debug_order_message_kb(
 def admin_debug_orders_reset_confirm_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
-            text="⚠️ Подтвердить",
+            text="⚠️ Подтвердить удаление",
             callback_data="adm:debug:orders_reset:confirm",
         )],
         [InlineKeyboardButton(text="« Отмена", callback_data="adm:debug:orders")],
@@ -525,7 +526,7 @@ def admin_debug_orders_reset_confirm_kb() -> InlineKeyboardMarkup:
 def admin_debug_promo_reset_confirm_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
-            text="⚠️ Подтвердить",
+            text="⚠️ Подтвердить очистку",
             callback_data="adm:debug:promos_reset:confirm",
         )],
         [InlineKeyboardButton(text="« Отмена", callback_data="adm:debug:enter")],
