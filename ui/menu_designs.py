@@ -22,6 +22,7 @@ from ui.theme import (
 # id → короткое имя на кнопке отладки
 DESIGNS: dict[str, str] = {
     "classic": "Классика",
+    "quoted": "Цитата+",
     "quiet": "Тихий",
     "compact": "Компакт",
     "card": "Карточка",
@@ -29,6 +30,10 @@ DESIGNS: dict[str, str] = {
     "quote": "Цитата",
     "chips": "Чипы",
 }
+
+_BAR_WIDTH = 10
+_BAR_ON = "█"
+_BAR_OFF = "░"
 
 CLASSIC = "classic"
 SETTING_DEBUG_MENU_DESIGN = "debug_menu_design"
@@ -80,6 +85,41 @@ async def set_menu_design_id(design_id: str) -> str:
 
 def design_label(design_id: str) -> str:
     return DESIGNS.get(normalize_design_id(design_id), DESIGNS[CLASSIC])
+
+
+def progress_bar(ratio: float, *, width: int = _BAR_WIDTH) -> str:
+    """ratio 0..1 → полоска █░ фиксированной ширины."""
+    ratio = min(1.0, max(0.0, float(ratio)))
+    filled = int(round(ratio * width))
+    filled = min(width, max(0, filled))
+    return _BAR_ON * filled + _BAR_OFF * (width - filled)
+
+
+def _bar_line(sub: Dict[str, Any]) -> str:
+    """Остаток / длина окна start→end. Без start_date — только остаток."""
+    from utils.utc import parse_utc
+
+    left = days_left(sub.get("end_date") or "")
+    total_days: int | None = None
+    start_raw = sub.get("start_date")
+    end_raw = sub.get("end_date")
+    if start_raw and end_raw:
+        try:
+            start = parse_utc(start_raw)
+            end = parse_utc(end_raw)
+            span = (end - start).total_seconds()
+            if span > 0:
+                total_days = max(1, int(round(span / 86400.0)))
+        except ValueError:
+            total_days = None
+    if total_days:
+        ratio = min(1.0, left / total_days)
+    else:
+        ratio = 1.0 if left > 0 else 0.0
+    bar = progress_bar(ratio)
+    if total_days and total_days > left:
+        return f"{bar}  {left} / {total_days} дн."
+    return f"{bar}  {left} дн."
 
 
 def _days_ru(n: int) -> str:
@@ -190,6 +230,11 @@ def _empty_sub(design_id: str) -> str:
             "статус    нет активной",
             f"{SEP}",
         ])
+    if design_id == "quoted":
+        return (
+            "📊 Подписка: пока нет активной.\n"
+            "<blockquote>Можно начать с пробного периода или выбрать тариф.</blockquote>"
+        )
     if design_id == "quote":
         return "<blockquote>нет активной подписки</blockquote>"
     if design_id == "chips":
@@ -248,6 +293,23 @@ def _render_subs(design_id: str, subscriptions: List[Dict[str, Any]]) -> str:
                 SEP,
             ]))
         return "\n".join(tickets)
+
+    if design_id == "quoted":
+        cards = []
+        for sub in subscriptions:
+            f = _sub_fields(sub)
+            prefix = "🎁 " if is_trial_email(sub.get("client_email")) else "📱 "
+            cards.append(
+                "<blockquote>"
+                f"{prefix}<b>{f['title']}</b>\n"
+                f"{_bar_line(sub)}\n"
+                f"до {f['end']} · {f['traffic']}"
+                "</blockquote>"
+            )
+        heading = (
+            "📊 Ваша подписка:" if len(subscriptions) == 1 else "📊 Ваши подписки:"
+        )
+        return heading + "\n" + "\n".join(cards)
 
     if design_id == "quote":
         quotes = []
