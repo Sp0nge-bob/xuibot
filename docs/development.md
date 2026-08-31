@@ -29,7 +29,7 @@ LOG_LEVEL=DEBUG
 - `python run_all.py` — webhook + Telegram
 - `python run_bot.py` — только бот (симулятор не требует webhook)
 
-**Runtime:** в `/admin` → **Отладка** можно включить/выключить TEST_MODE без перезапуска (сохраняется в БД). Сброс — «TEST_MODE из .env».
+**Runtime:** в `/admin` → **Отладка** можно включить/выключить TEST_MODE без перезапуска (сохраняется в БД). Сброс — «Тест из .env».
 
 Перед продом: `TEST_MODE=false`, сброс override в отладке, реальные credentials Platega.
 
