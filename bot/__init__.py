@@ -14,6 +14,7 @@ from .admin import router as admin_router
 from .admin_menu import router as admin_menu_router
 from .admin_tickets import router as admin_tickets_router
 from .admin_debug import router as admin_debug_router
+from .admin_debug_menu_design import router as admin_debug_menu_design_router  # TEMP_MENU_DESIGN
 from .admin_lockdown import router as admin_lockdown_router
 from .admin_start_text import router as admin_start_text_router
 from .admin_nodes import router as admin_nodes_router
@@ -57,6 +58,7 @@ dp.include_router(admin_router)
 dp.include_router(admin_menu_router)
 dp.include_router(admin_tickets_router)
 dp.include_router(admin_debug_router)
+dp.include_router(admin_debug_menu_design_router)  # TEMP_MENU_DESIGN
 dp.include_router(admin_lockdown_router)
 dp.include_router(admin_start_text_router)
 dp.include_router(admin_nodes_router)

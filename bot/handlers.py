@@ -217,6 +217,10 @@ async def _show_main_menu(
     refund_pending = await tickets_db.get_approved_refunds_pending_chargeback(user.id)
     pending_order = await get_resumable_pending_order(user.id)
     test_mode = await is_test_mode()
+    from .admin_auth import is_debug_admin  # TEMP_MENU_DESIGN
+    from ui.menu_designs import get_menu_design_id  # TEMP_MENU_DESIGN
+
+    design_id = await get_menu_design_id() if is_debug_admin(user.id) else None
     text = main_menu_text(
         user.first_name,
         user.username,
@@ -228,6 +232,7 @@ async def _show_main_menu(
         pending_discount_expires_at=pending_expires,
         pending_payment_plan_name=pending_order.get("plan_name") if pending_order else None,
         test_mode=test_mode,
+        design_id=design_id,  # TEMP_MENU_DESIGN
     )
     if prepend_text:
         text = f"{prepend_text}\n\n{text}"
