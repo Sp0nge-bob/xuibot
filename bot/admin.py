@@ -21,6 +21,8 @@ from .messages import (
     admin_extend_custom_prompt_text,
     admin_extend_done_text,
     admin_extend_pick_text,
+    admin_rotate_link_confirm_text,
+    admin_rotate_link_done_text,
     admin_plans_text,
     admin_promos_text,
     admin_promo_detail_text,
@@ -32,6 +34,10 @@ from .messages import (
 )
 from services.trial import admin_reset_all_trial_subscriptions, admin_reset_trial
 from services.admin_extend import admin_extend_notify_text, admin_extend_subscription
+from services.admin_rotate_sub import (
+    admin_rotate_link_notify_text,
+    admin_rotate_subscription_link,
+)
 from services.order_referrer import enrich_order_with_referrer
 from .states import AdminPricingStates, AdminStates
 from services.subscription_admin import admin_delete_subscription
@@ -63,6 +69,7 @@ from .admin_keyboards import (
     admin_user_detail_kb,
     admin_extend_cancel_kb,
     admin_extend_days_kb,
+    admin_rotate_link_confirm_kb,
     admin_sub_orders_kb,
     admin_sub_order_detail_kb,
     admin_delete_confirm_kb,
@@ -723,6 +730,78 @@ async def msg_admin_extend_days(message: Message, state: FSMContext):
     await state.clear()
     await _admin_do_extend_and_notify(
         message, sub_id=int(sub_id), days=days, admin_tg_id=message.from_user.id,
+    )
+
+
+@router.callback_query(F.data.regexp(r"^adm:sub:rotate:\d+$"))
+async def cb_admin_rotate_link_confirm(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    sub_id = int(cb.data.rsplit(":", 1)[1])
+    sub = await db.get_subscription_by_id(sub_id)
+    if not sub or not sub.get("is_active"):
+        await safe_cb_answer(cb, "Подписка не найдена", show_alert=True)
+        return
+    await safe_cb_answer(cb)
+    await send_or_edit(
+        cb,
+        admin_rotate_link_confirm_text(
+            sub_id=sub_id,
+            client_email=str(sub.get("client_email") or ""),
+            old_sub_id=sub.get("sub_id"),
+        ),
+        admin_rotate_link_confirm_kb(sub_id),
+    )
+
+
+@router.callback_query(F.data.regexp(r"^adm:sub:rotate:confirm:\d+$"))
+async def cb_admin_rotate_link_do(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    sub_id = int(cb.data.rsplit(":", 1)[1])
+    await safe_cb_answer(cb, "Меняем ссылку…")
+    try:
+        result = await admin_rotate_subscription_link(
+            sub_id, admin_tg_id=cb.from_user.id,
+        )
+    except ValueError as e:
+        await send_or_edit(cb, f"❌ {e}", admin_rotate_link_confirm_kb(sub_id))
+        return
+    except Exception as e:
+        logger.exception("Admin rotate link failed: {}", e)
+        await send_or_edit(
+            cb,
+            f"❌ Не удалось перегенерировать ссылку: <code>{type(e).__name__}: {e}</code>",
+            admin_rotate_link_confirm_kb(sub_id),
+        )
+        return
+
+    sub = result["subscription"]
+    notified = False
+    try:
+        from bot import bot as app_bot
+
+        await app_bot.send_message(
+            int(sub["tg_id"]),
+            admin_rotate_link_notify_text(link=result["link"]),
+        )
+        notified = True
+    except Exception as e:
+        logger.warning("Admin rotate notify tg_id={}: {}", sub.get("tg_id"), e)
+
+    await send_or_edit(
+        cb,
+        admin_rotate_link_done_text(
+            old_sub_id=result["old_sub_id"],
+            new_sub_id=result["new_sub_id"],
+            notified=notified,
+        ),
+        InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(
+                text="« К подписке",
+                callback_data=f"adm:user:{sub_id}",
+            )],
+        ]),
     )
 
 

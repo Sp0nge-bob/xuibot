@@ -440,6 +440,29 @@ async def _set_client_expiry_on_panel(
     logger.success("clients/update {} expiry={}", email, expiry_time)
 
 
+async def rotate_client_sub_id(email: str, new_sub_id: str) -> None:
+    """Сменить только subId клиента на ★ Primary. Срок, трафик, uuid, enable — как есть."""
+    token = (new_sub_id or "").strip()
+    if not token:
+        raise ValueError("Пустой subId")
+    api = await get_api()
+    info = await _unified_get_client_info(api, email)
+    if not info:
+        raise ValueError(f"Клиент {email} не найден на основной панели")
+    client, _, current_group = info
+    await _unified_update_client(
+        api,
+        client,
+        expiryTime=client.expiry_time or 0,
+        totalGB=client.total_gb or 0,
+        subId=token,
+        enable=bool(client.enable),
+        limitIp=client.limit_ip or 0,
+        current_group=current_group,
+    )
+    logger.success("clients/update {} new subId={}", email, token)
+
+
 async def _unified_attach(api: AsyncApi, email: str, inbound_ids: list[int]) -> None:
     if not inbound_ids:
         return

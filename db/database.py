@@ -1117,3 +1117,18 @@ async def update_subscription_from_panel(
                 (end_date, int(is_active), subscription_id),
             )
         await db.commit()
+
+
+async def update_subscription_sub_id(subscription_id: int, new_sub_id: str) -> None:
+    """Сменить subId ссылки. client_uuid в БД хранится тем же токеном, что и sub_id."""
+    token = (new_sub_id or "").strip()
+    if not token:
+        raise ValueError("Пустой subId")
+    async with get_db() as db:
+        await db.execute(
+            """UPDATE subscriptions
+               SET sub_id = ?, client_uuid = ?
+               WHERE id = ?""",
+            (token, token, subscription_id),
+        )
+        await db.commit()

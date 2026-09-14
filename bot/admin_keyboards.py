@@ -792,6 +792,10 @@ def admin_user_detail_kb(
             text="⏰ Продлить",
             callback_data=f"adm:sub:extend:{subscription_id}",
         )],
+        [InlineKeyboardButton(
+            text="🔄 Перегенерировать ссылку",
+            callback_data=f"adm:sub:rotate:{subscription_id}",
+        )],
     ]
     rows.append([
         InlineKeyboardButton(
@@ -833,6 +837,19 @@ def admin_extend_cancel_kb(subscription_id: int) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="« Отмена", callback_data=f"adm:sub:extend:{subscription_id}")],
         ]
     )
+
+
+def admin_rotate_link_confirm_kb(subscription_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="⚠️ Перегенерировать",
+            callback_data=f"adm:sub:rotate:confirm:{subscription_id}",
+        )],
+        [InlineKeyboardButton(
+            text="« Отмена",
+            callback_data=f"adm:user:{subscription_id}",
+        )],
+    ])
 
 
 def admin_broadcast_prompt_kb() -> InlineKeyboardMarkup:

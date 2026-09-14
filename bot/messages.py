@@ -1418,6 +1418,41 @@ def admin_extend_custom_prompt_text() -> str:
     )
 
 
+def admin_rotate_link_confirm_text(
+    *,
+    sub_id: int,
+    client_email: str,
+    old_sub_id: str | None,
+) -> str:
+    current = html.escape(str(old_sub_id or "—"))
+    return (
+        "🔄 <b>Перегенерировать ссылку</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        f"Подписка: <code>#{sub_id}</code>\n"
+        f"Клиент: <code>{html.escape(str(client_email or '—'))}</code>\n"
+        f"Текущий subId: <code>{current}</code>\n\n"
+        "Будет выдан новый subId. Срок, трафик и сам клиент не меняются.\n"
+        "Старая ссылка сразу перестанет работать.\n"
+        "Клиент получит новую ссылку в боте."
+    )
+
+
+def admin_rotate_link_done_text(
+    *,
+    old_sub_id: str | None,
+    new_sub_id: str,
+    notified: bool,
+) -> str:
+    notify = "клиент уведомлён" if notified else "уведомление не доставлено"
+    return (
+        "✅ <b>Ссылка перегенерирована</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        f"Было: <code>{html.escape(str(old_sub_id or '—'))}</code>\n"
+        f"Стало: <code>{html.escape(new_sub_id)}</code>\n"
+        f"<i>{notify}</i>"
+    )
+
+
 def admin_extend_done_text(*, days: int, new_end: str, notified: bool) -> str:
     end_s = (new_end or "")[:10] or "—"
     notify = "клиент уведомлён" if notified else "уведомление не доставлено"
