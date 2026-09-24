@@ -26,7 +26,7 @@ async def _check_node_health_impl(node: dict[str, Any]) -> dict[str, Any]:
         latency_ms = int((time.monotonic() - started) * 1000)
         error = f"{type(e).__name__}: {e}"[:200]
         invalidate_api_cache(node_id)
-        logger.debug("Health check failed for node {} ({}): {}", node_id, node.get("name"), error)
+        logger.warning("Health check failed for node {} ({}): {}", node_id, node.get("name"), error)
 
     if node_id:
         await nodes_db.record_health_check(node_id, ok=ok, latency_ms=latency_ms, error=error)

@@ -102,6 +102,7 @@ async def ensure_primary_ready_at_startup() -> dict[str, Any]:
 
     err = str(result.get("error") or "недоступна")
     _set_state(ok=False, error=err)
+    logger.error("★ Primary [{}] недоступна при старте: {}", primary.get("name"), err)
     raise RuntimeError(
         f"Запуск отменён: ★ Primary [{primary.get('name')}] недоступна — {err}\n"
         "Проверьте XUI_HOST, API-токен/логин и доступность панели 3x-ui."
