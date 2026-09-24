@@ -10,6 +10,7 @@ from loguru import logger
 from config.settings import settings
 from db import database as db
 from db import xui_nodes as nodes_db
+from utils.utc import utc_now
 from services.xui import (
     delete_orphan_clients_everywhere,
     _client_needs_replica_update,
@@ -62,15 +63,21 @@ async def _get_primary_client_state(email: str) -> dict[str, Any] | None:
 
 
 async def _batch_primary_client_states(emails: set[str]) -> dict[str, dict[str, Any]]:
-    """Один проход по основной: состояния для набора email (без N×повторов в phase2)."""
+    """Параллельный опрос основной ноды с семафором (без последовательного ожидания)."""
     if not emails:
         return {}
     api = await get_api()
     result: dict[str, dict[str, Any]] = {}
-    for email in emails:
-        info = await _unified_get_client_info(api, email)
-        if info is not None:
-            result[str(email).lower()] = _client_state_from_info(info)
+    concurrency = max(1, int(getattr(settings, "XUI_PANEL_CONCURRENCY", 5)))
+    sem = asyncio.Semaphore(concurrency)
+
+    async def _fetch(email: str) -> None:
+        async with sem:
+            info = await _unified_get_client_info(api, email)
+            if info is not None:
+                result[str(email).lower()] = _client_state_from_info(info)
+
+    await asyncio.gather(*[_fetch(email) for email in emails], return_exceptions=True)
     return result
 
 
@@ -224,7 +231,7 @@ async def _del_orphans_on_all_nodes() -> dict[str, int]:
     stats["purged"] = int(orphan_stats.get("deleted") or 0)
     stats["failed"] = int(orphan_stats.get("failed") or 0)
 
-    now = datetime.utcnow().isoformat()
+    now = utc_now().isoformat()
     by_node = orphan_stats.get("by_node") or {}
     for node in nodes:
         node_id = int(node["id"])

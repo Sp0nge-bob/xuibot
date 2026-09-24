@@ -14,6 +14,7 @@ from services.fulfillment import (
     FulfillmentResult,
     load_happ_setup_photos,
     make_qr_photo,
+    make_qr_photo_async,
 )
 from services.fulfillment_text import (
     happ_setup_text,
@@ -85,7 +86,7 @@ async def claim_trial(tg_id: int) -> FulfillmentResult:
         f"<i>Повторно — не раньше чем через {TRIAL_COOLDOWN_DAYS} дн.</i>",
     ]
 
-    photo = make_qr_photo(sub_link or email, "trial_vpn.png")
+    photo = await make_qr_photo_async(sub_link or email, "trial_vpn.png")
     logger.info("Trial granted for tg_id={} sub_id={}", tg_id, sub_db_id)
     return FulfillmentResult(
         text="\n".join(lines),

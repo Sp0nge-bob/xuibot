@@ -1,4 +1,5 @@
 import json
+import os
 from typing import Annotated, Any, List, Optional
 
 from pydantic import field_validator, model_validator
@@ -149,7 +150,7 @@ class Settings(BaseSettings):
     FSM_DATA_TTL_SEC: int = 86400
 
     model_config = {
-        "env_file": ".env",
+        "env_file": None if os.environ.get("PYTEST_RUNNING") == "1" else ".env",
         "env_file_encoding": "utf-8",
         "case_sensitive": True,
     }

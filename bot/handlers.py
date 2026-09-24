@@ -1751,14 +1751,14 @@ async def cb_sub_link(cb: CallbackQuery):
         await safe_cb_answer(cb, "Ссылка недоступна", show_alert=True)
         return
 
-    from services.fulfillment import make_qr_photo
+    from services.fulfillment import make_qr_photo_async
     from services.fulfillment_text import (
         sub_link_needs_separate_message,
         sub_link_standalone_message,
     )
 
     kind = "🎁 Пробная" if is_trial_email(sub.get("client_email")) else "✅ Платная"
-    photo = make_qr_photo(link, "vpn_link.png")
+    photo = await make_qr_photo_async(link, "vpn_link.png")
     await safe_cb_answer(cb)
     kb = back_to_main_kb()
     if sub_link_needs_separate_message(link):

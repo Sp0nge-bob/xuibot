@@ -46,6 +46,8 @@ docs/SESSION_CONTEXT.md
 agent-tools/
 replacements.txt
 email_callback.py
+web_architecture.md
+prototype*.html
 
 # OS
 .DS_Store

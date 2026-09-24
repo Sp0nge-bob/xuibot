@@ -10,6 +10,7 @@ from db.plan_prices import get_all_effective_plans, get_effective_plan
 from db import promo_codes as promo_db
 from db import promo_pending as pending_db
 from db.promo_codes import is_grant_promo
+from utils.utc import utc_now
 
 
 @dataclass
@@ -77,7 +78,7 @@ async def _validate_promo_common(
     valid_until = promo.get("valid_until")
     if valid_until:
         try:
-            if datetime.fromisoformat(valid_until.replace("Z", "")) < datetime.utcnow():
+            if datetime.fromisoformat(valid_until.replace("Z", "")) < utc_now():
                 return "Срок действия промокода истёк"
         except ValueError:
             pass

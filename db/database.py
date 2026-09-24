@@ -5,6 +5,7 @@ from typing import Optional, List, Dict, Any
 from loguru import logger
 
 from db.connection import DB_PATH, _apply_pragmas, get_db, init_connection
+from utils.utc import utc_now
 
 _INIT_MARKER = Path(DB_PATH).parent / ".init_complete"
 
@@ -168,7 +169,7 @@ async def _init_db_impl():
     await init_webhook_dedup()
     await init_referral_tables()
     _INIT_MARKER.parent.mkdir(parents=True, exist_ok=True)
-    _INIT_MARKER.write_text(datetime.utcnow().isoformat(), encoding="utf-8")
+    _INIT_MARKER.write_text(utc_now().isoformat(), encoding="utf-8")
     logger.info("Database initialized at {}", DB_PATH)
 
 
@@ -237,10 +238,9 @@ async def create_order(
 
 async def update_order_status(platega_tx_id: str, status: str):
     async with get_db() as db:
-        await _apply_pragmas(db)
         await db.execute(
             "UPDATE orders SET status = ?, paid_at = ? WHERE platega_tx_id = ?",
-            (status, datetime.utcnow().isoformat() if status == "paid" else None, platega_tx_id)
+            (status, utc_now().isoformat() if status == "paid" else None, platega_tx_id)
         )
         await db.commit()
 
@@ -248,11 +248,10 @@ async def update_order_status(platega_tx_id: str, status: str):
 async def mark_order_paid_if_pending(platega_tx_id: str) -> bool:
     """Атомарно pending → paid. False если уже paid или не pending."""
     async with get_db() as db:
-        await _apply_pragmas(db)
         cur = await db.execute(
             """UPDATE orders SET status = 'paid', paid_at = ?
                WHERE platega_tx_id = ? AND status = 'pending'""",
-            (datetime.utcnow().isoformat(), platega_tx_id),
+            (utc_now().isoformat(), platega_tx_id),
         )
         await db.commit()
         return cur.rowcount > 0
@@ -276,7 +275,6 @@ async def get_order_by_id(order_id: int) -> Optional[Dict[str, Any]]:
 async def get_subscription_by_order_id(order_id: int) -> Optional[Dict[str, Any]]:
     """Подписка, созданная этим заказом (subscriptions.order_id)."""
     async with get_db() as db:
-        await _apply_pragmas(db)
         async with db.execute(
             "SELECT * FROM subscriptions WHERE order_id = ? ORDER BY id DESC LIMIT 1",
             (order_id,),
@@ -302,7 +300,6 @@ async def resolve_subscription_for_order(order: Dict[str, Any]) -> Optional[Dict
 
 async def set_order_subscription_id(order_id: int, subscription_id: int) -> None:
     async with get_db() as db:
-        await _apply_pragmas(db)
         await db.execute(
             "UPDATE orders SET subscription_id = ? WHERE id = ?",
             (subscription_id, order_id),
@@ -312,7 +309,6 @@ async def set_order_subscription_id(order_id: int, subscription_id: int) -> None
 
 async def count_users() -> int:
     async with get_db() as db:
-        await _apply_pragmas(db)
         async with db.execute("SELECT COUNT(*) FROM users") as cur:
             return int((await cur.fetchone())[0])
 
@@ -320,7 +316,6 @@ async def count_users() -> int:
 async def reset_all_users() -> dict[str, int]:
     """Удалить users и деактивировать все активные подписки (для отладки)."""
     async with get_db() as db:
-        await _apply_pragmas(db)
         async with db.execute("SELECT COUNT(*) FROM users") as cur:
             users_count = int((await cur.fetchone())[0])
         cur = await db.execute(
@@ -340,11 +335,10 @@ async def reset_all_users() -> dict[str, int]:
 async def deactivate_orphan_subscriptions() -> int:
     """Деактивировать активные подписки без записи в users (после частичного сброса)."""
     async with get_db() as db:
-        await _apply_pragmas(db)
         cur = await db.execute(
             """UPDATE subscriptions SET is_active = 0
                WHERE is_active = 1
-                 AND tg_id NOT IN (SELECT tg_id FROM users)""",
+                  AND tg_id NOT IN (SELECT tg_id FROM users)""",
         )
         count = int(cur.rowcount)
         await db.commit()
@@ -353,14 +347,12 @@ async def deactivate_orphan_subscriptions() -> int:
 
 async def count_orders() -> int:
     async with get_db() as db:
-        await _apply_pragmas(db)
         async with db.execute("SELECT COUNT(*) FROM orders") as cur:
             return int((await cur.fetchone())[0])
 
 
 async def count_orders_by_status(status: str) -> int:
     async with get_db() as db:
-        await _apply_pragmas(db)
         async with db.execute(
             "SELECT COUNT(*) FROM orders WHERE status = ?",
             (status,),
@@ -390,7 +382,6 @@ async def list_orders(
     """
     params.extend([limit, offset])
     async with get_db() as db:
-        await _apply_pragmas(db)
         async with db.execute(sql, params) as cur:
             return [dict(r) for r in await cur.fetchall()]
 
@@ -398,7 +389,6 @@ async def list_orders(
 async def reset_all_orders() -> dict[str, int]:
     """Удалить все заказы и отвязать ссылки (подписки, тикеты, промо)."""
     async with get_db() as db:
-        await _apply_pragmas(db)
         async with db.execute("SELECT COUNT(*) FROM orders") as cur:
             orders_count = int((await cur.fetchone())[0])
 
@@ -559,8 +549,6 @@ async def get_active_paid_subscriptions(tg_id: int) -> List[Dict[str, Any]]:
 
 async def get_primary_subscription(tg_id: int) -> Optional[Dict[str, Any]]:
     async with get_db() as db:
-        await _apply_pragmas(db)
-
         async with db.execute(
             """SELECT * FROM subscriptions
                WHERE tg_id = ? AND is_active = 1
@@ -575,8 +563,6 @@ async def get_primary_subscription(tg_id: int) -> Optional[Dict[str, Any]]:
 
 async def get_primary_paid_subscription(tg_id: int) -> Optional[Dict[str, Any]]:
     async with get_db() as db:
-        await _apply_pragmas(db)
-
         async with db.execute(
             """SELECT * FROM subscriptions
                WHERE tg_id = ? AND is_active = 1
@@ -592,7 +578,6 @@ async def get_primary_paid_subscription(tg_id: int) -> Optional[Dict[str, Any]]:
 async def get_last_paid_subscription(tg_id: int) -> Optional[Dict[str, Any]]:
     """Последняя платная подписка (активная или истёкшая) — для повторной покупки."""
     async with get_db() as db:
-        await _apply_pragmas(db)
         async with db.execute(
             """SELECT * FROM subscriptions
                WHERE tg_id = ? AND client_email NOT LIKE 'tgfree%'
@@ -784,8 +769,6 @@ _SYNC_SUB_COLS = (
 
 async def get_all_active_subscriptions() -> List[Dict[str, Any]]:
     async with get_db() as db:
-        await _apply_pragmas(db)
-
         async with db.execute(
             f"SELECT {_SYNC_SUB_COLS} FROM subscriptions "
             "WHERE is_active = 1 ORDER BY end_date DESC"
@@ -796,7 +779,6 @@ async def get_all_active_subscriptions() -> List[Dict[str, Any]]:
 
 async def count_active_trial_subscriptions() -> int:
     async with get_db() as db:
-        await _apply_pragmas(db)
         async with db.execute(
             """SELECT COUNT(*) FROM subscriptions s
                INNER JOIN users u ON u.tg_id = s.tg_id
@@ -807,9 +789,8 @@ async def count_active_trial_subscriptions() -> int:
 
 
 async def get_expired_subscriptions() -> List[Dict[str, Any]]:
-    now = datetime.utcnow().isoformat()
+    now = utc_now().isoformat()
     async with get_db() as db:
-
         async with db.execute(
             "SELECT * FROM subscriptions WHERE is_active = 1 AND end_date < ?",
             (now,)
@@ -824,7 +805,7 @@ async def get_subscriptions_needing_expiry_reminder(
     min_hours_since_reminder: int = 24,
 ) -> List[Dict[str, Any]]:
     """Активные платные подписки в окне [сейчас; сейчас+days_before], без напоминания за min_hours."""
-    now = datetime.utcnow()
+    now = utc_now()
     now_iso = now.isoformat()
     window_end_iso = (now + timedelta(days=days_before)).isoformat()
     reminder_cutoff_iso = (now - timedelta(hours=min_hours_since_reminder)).isoformat()
@@ -846,7 +827,7 @@ async def get_subscriptions_needing_expiry_reminder(
 async def mark_expiry_reminders_sent(subscription_ids: List[int]) -> None:
     if not subscription_ids:
         return
-    now_iso = datetime.utcnow().isoformat()
+    now_iso = utc_now().isoformat()
     placeholders = ",".join("?" * len(subscription_ids))
     async with get_db() as db:
         await db.execute(
@@ -866,7 +847,7 @@ async def deactivate_subscription(sub_id: int):
 async def get_stale_inactive_subscriptions(*, after_days: int) -> List[Dict[str, Any]]:
     """Неактивные подписки, end_date старше after_days (0 = сразу после деактивации)."""
     after_days = max(0, int(after_days))
-    cutoff = (datetime.utcnow() - timedelta(days=after_days)).isoformat()
+    cutoff = (utc_now() - timedelta(days=after_days)).isoformat()
     async with get_db() as db:
         async with db.execute(
             """SELECT * FROM subscriptions

@@ -1,4 +1,5 @@
 """Общая логика выдачи и продления подписки (тест, webhook, ручная проверка)."""
+import asyncio
 import io
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -169,7 +170,7 @@ async def _fulfill_extend(
         inbound_count=inbound_count,
         limit_ip=limit_ip,
     )
-    photo = make_qr_photo(sub_link or email, "vpn_extend.png")
+    photo = await make_qr_photo_async(sub_link or email, "vpn_extend.png")
     if log_context:
         logger.success("{} extended sub #{} for tg_id={}", log_context, target_sub["id"], tg_id)
     return FulfillmentResult(
@@ -227,7 +228,7 @@ async def _fulfill_new(
         inbound_count=inbound_count,
         limit_ip=limit_ip,
     )
-    photo = make_qr_photo(sub_link or email, "vpn.png")
+    photo = await make_qr_photo_async(sub_link or email, "vpn.png")
     if log_context:
         logger.success("{} created sub #{} for tg_id={}", log_context, sub_db_id, tg_id)
     return FulfillmentResult(
@@ -295,3 +296,8 @@ def make_qr_photo(qr_text: str, filename: str) -> BufferedInputFile:
     qr_img.save(buf, format="PNG", optimize=True)
     buf.seek(0)
     return BufferedInputFile(buf.read(), filename=filename)
+
+
+async def make_qr_photo_async(qr_text: str, filename: str) -> BufferedInputFile:
+    """Асинхронная генерация QR в отдельном потоке (не блокирует event loop)."""
+    return await asyncio.to_thread(make_qr_photo, qr_text, filename)

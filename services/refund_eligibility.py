@@ -20,7 +20,10 @@ def subscription_paid_end_date(sub: dict) -> datetime | None:
     bonus = int(sub.get("grant_bonus_days") or 0)
     if bonus <= 0:
         return None
-    end = _parse_dt(sub["end_date"])
+    try:
+        end = _parse_dt(sub["end_date"])
+    except (TypeError, ValueError):
+        return None
     return end - timedelta(days=bonus)
 
 
@@ -48,9 +51,14 @@ def is_grant_only_subscription(sub: dict, *, has_paid_orders: bool) -> bool:
     return sub.get("order_id") is None
 
 
-def refund_denied_alert(sub: dict, *, has_paid_orders: bool) -> str | None:
+def refund_denied_alert(
+    sub: dict,
+    *,
+    has_paid_orders: bool,
+    now: datetime | None = None,
+) -> str | None:
     """Текст alert, если возврат запрещён; иначе None."""
-    if is_on_promo_only_period(sub):
+    if is_on_promo_only_period(sub, now=now):
         return REFUND_PROMO_TAIL_ALERT
     if is_grant_only_subscription(sub, has_paid_orders=has_paid_orders):
         return REFUND_GRANT_SUB_ALERT
