@@ -137,6 +137,33 @@ async def platega_webhook(
     if not tx_id or not status:
         return JSONResponse({"ok": True})
 
+    # Проверяем, не относится ли заказ к сайту (source == 'web')
+    payload_val = str(body.get("payload") or "")
+    order = await db.get_order_by_platega_tx(tx_id) if tx_id else None
+    if not order and payload_val.isdigit():
+        order = await db.get_order(int(payload_val))
+
+    if order and order.get("source") == "web":
+        logger.info(
+            "Platega webhook tx={} belongs to WEB order #{} -> forwarding to website...",
+            tx_id,
+            order.get("id"),
+        )
+        import httpx
+        try:
+            web_url = getattr(settings, "WEBSITE_WEBHOOK_URL", "http://127.0.0.1:8080/api/webhook/platega")
+            async with httpx.AsyncClient(timeout=12.0) as client:
+                fwd_headers = {"Content-Type": "application/json"}
+                if x_merchant_id:
+                    fwd_headers["X-MerchantId"] = x_merchant_id
+                if x_secret:
+                    fwd_headers["X-Secret"] = x_secret
+                fwd_resp = await client.post(web_url, headers=fwd_headers, json=body)
+                return JSONResponse(status_code=fwd_resp.status_code, content=fwd_resp.json())
+        except Exception as e:
+            logger.error("Failed to forward webhook to website: {}", e)
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=502)
+
     if not await acquire_webhook(tx_id, status):
         logger.debug("Duplicate webhook ignored: {} {}", tx_id, status)
         return JSONResponse({"ok": True})
