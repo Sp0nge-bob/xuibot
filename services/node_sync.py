@@ -174,6 +174,7 @@ async def reconcile_subscriptions_with_panel() -> dict[str, int]:
     try:
         api = await get_api()
         subs = await db.get_all_active_subscriptions()
+        logger.info("reconcile_subscriptions_with_panel: checking {} active subscriptions...", len(subs))
         for sub in subs:
             sid = (sub.get("sub_id") or "").strip()
             if not sid:
@@ -185,13 +186,15 @@ async def reconcile_subscriptions_with_panel() -> dict[str, int]:
                     real_email = c.email.strip()
                     db_email = str(sub.get("client_email") or "").strip()
                     if real_email.lower() != db_email.lower():
-                        logger.warning(
+                        logger.info(
                             "Reconciliation: sub #{} DB email was '{}', but panel has '{}'. Restoring true client_email in DB.",
                             sub["id"], db_email, real_email,
                         )
                         await db.update_subscription_client_email(sub["id"], real_email)
                         sub["client_email"] = real_email
                         stats["reconciled"] += 1
+                    else:
+                        logger.debug("Reconciliation: sub #{} email '{}' already matches panel", sub["id"], real_email)
 
                     # Исправление отображаемого имени (display_name)
                     curr_disp = str(sub.get("display_name") or "").strip()
@@ -203,11 +206,14 @@ async def reconcile_subscriptions_with_panel() -> dict[str, int]:
                             if curr_disp == f"Web ({base_email})" or not curr_disp:
                                 new_disp = f"Web ({base_email} #{suffix})"
                                 await db.update_subscription_display_name(sub["id"], new_disp)
+                else:
+                    logger.warning("Reconciliation: sub #{} with sub_id='{}' not found on panel", sub["id"], sid)
             except Exception as ex:
                 stats["errors"] += 1
-                logger.debug("Reconciliation error for sub #{}: {}", sub.get("id"), ex)
+                logger.error("Reconciliation error for sub #{}: {}", sub.get("id"), ex)
     except Exception as e:
         logger.error("reconcile_subscriptions_with_panel failed: {}", e)
+    logger.info("reconcile_subscriptions_with_panel finished: {}", stats)
     return stats
 
 

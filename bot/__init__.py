@@ -172,6 +172,12 @@ async def start_bot():
     start_scheduler()
     await reschedule_backup_job()
 
+    try:
+        from services.node_sync import reconcile_subscriptions_with_panel
+        await reconcile_subscriptions_with_panel()
+    except Exception as e:
+        logger.warning("Early startup subscriptions reconciliation failed: {}", e)
+
     if settings.STARTUP_BLOCK_ON_ALL_NODES:
         await _blocking_node_startup(primary_result)
 

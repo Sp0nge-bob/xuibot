@@ -906,20 +906,72 @@ async def get_unified_panel_client(email: str) -> Optional[Client]:
 
 
 async def find_client_on_panel_by_sub_id(api: AsyncApi, sub_id: str) -> Optional[Client]:
-    """Найти клиента на панели по уникальному subId."""
+    """Найти клиента на панели по уникальному subId (унифицированный список клиентов + инбаунды)."""
     if not sub_id:
         return None
     sub_id_clean = str(sub_id).strip()
-    cache = get_panel_cache(api)
-    for inbound in await cache.refresh(api, force=False):
-        for client in inbound.settings.clients or []:
-            if (client.sub_id or "").strip() == sub_id_clean:
-                return client
-    # Попробовать с принудительным обновлением кэша инбаундов
-    for inbound in await cache.refresh(api, force=True):
-        for client in inbound.settings.clients or []:
-            if (client.sub_id or "").strip() == sub_id_clean:
-                return client
+
+    # 1. Проверяем через unified endpoint 3x-ui panel/api/clients/list
+    try:
+        url = api.client._url("panel/api/clients/list")
+        await _throttle()
+        resp = await api.client._get(url, {"Accept": "application/json"})
+        data = resp.json()
+        raw_clients = data.get(ApiFields.OBJ) or []
+        for item in raw_clients:
+            if isinstance(item, dict):
+                sid = (item.get("subId") or item.get("sub_id") or "").strip()
+                if sid == sub_id_clean:
+                    c_email = (item.get("email") or "").strip()
+                    if c_email:
+                        info = await _unified_get_client_info(api, c_email)
+                        if info:
+                            return info[0]
+                    return Client.model_validate(item)
+    except Exception as e:
+        logger.debug("clients/list lookup for sub_id {} failed: {}", sub_id_clean, e)
+
+    # 2. Прямой разбор JSON inbounds с панели
+    import json
+    try:
+        url = api.client._url("panel/api/inbounds/list")
+        await _throttle()
+        resp = await api.client._get(url, {"Accept": "application/json"})
+        raw_inbounds = resp.json().get(ApiFields.OBJ) or []
+        for ib in raw_inbounds:
+            if not isinstance(ib, dict):
+                continue
+            settings_val = ib.get("settings")
+            if isinstance(settings_val, str):
+                try:
+                    settings_val = json.loads(settings_val)
+                except Exception:
+                    settings_val = {}
+            if isinstance(settings_val, dict):
+                for c in (settings_val.get("clients") or []):
+                    if isinstance(c, dict):
+                        sid = (c.get("subId") or c.get("sub_id") or "").strip()
+                        if sid == sub_id_clean:
+                            c_email = (c.get("email") or "").strip()
+                            if c_email:
+                                info = await _unified_get_client_info(api, c_email)
+                                if info:
+                                    return info[0]
+                            return Client.model_validate(c)
+    except Exception as e:
+        logger.debug("raw inbounds lookup for sub_id {} failed: {}", sub_id_clean, e)
+
+    # 3. Кэш инбаундов
+    try:
+        cache = get_panel_cache(api)
+        for inbound in await cache.refresh(api, force=False):
+            for client in (getattr(inbound.settings, "clients", None) or []):
+                sid = (getattr(client, "sub_id", None) or getattr(client, "subId", None) or "").strip()
+                if sid == sub_id_clean:
+                    return client
+    except Exception as e:
+        logger.debug("cache lookup for sub_id {} failed: {}", sub_id_clean, e)
+
     return None
 
 
