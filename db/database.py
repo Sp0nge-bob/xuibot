@@ -1164,3 +1164,17 @@ async def update_subscription_sub_id(subscription_id: int, new_sub_id: str) -> N
             (token, token, subscription_id),
         )
         await db.commit()
+
+
+async def update_subscription_client_email(subscription_id: int, new_email: str) -> bool:
+    """Обновить client_email у существующей подписки."""
+    clean = (new_email or "").strip()
+    if not clean:
+        return False
+    async with get_db() as db:
+        cur = await db.execute(
+            "UPDATE subscriptions SET client_email = ? WHERE id = ?",
+            (clean, subscription_id),
+        )
+        await db.commit()
+        return bool(cur.rowcount and cur.rowcount > 0)

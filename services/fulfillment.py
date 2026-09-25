@@ -24,6 +24,7 @@ from services.xui import (
     extend_client,
     build_sub_link,
     get_unified_panel_client,
+    resolve_panel_client_and_email,
 )
 from utils.utc import days_from_now_ms, ms_to_utc_iso, utc_iso_to_ms
 
@@ -139,7 +140,16 @@ async def _fulfill_extend(
     new_end_iso = await db.extend_subscription_record(target_sub["id"], plan["days"])
     new_expiry_ms = utc_iso_to_ms(new_end_iso)
     email = target_sub["client_email"]
-    panel_client = await get_unified_panel_client(email)
+    sub_id = target_sub.get("sub_id")
+    panel_client, resolved_email = await resolve_panel_client_and_email(email, sub_id=sub_id)
+    if resolved_email and resolved_email != email:
+        logger.info(
+            "Fulfillment extend: reconciled email from {} to {} for sub #{}",
+            email, resolved_email, target_sub["id"],
+        )
+        email = resolved_email
+        await db.update_subscription_client_email(target_sub["id"], resolved_email)
+
     if panel_client:
         await extend_client(
             email,
@@ -151,14 +161,34 @@ async def _fulfill_extend(
             "Клиент {} есть в БД, но отсутствует на панели — clients/add",
             email,
         )
-        await provision_client(
-            tg_id=tg_id,
-            plan_days=plan["days"],
-            traffic_gb=plan["traffic_gb"],
-            sub_id=target_sub.get("sub_id"),
-            target_expiry_ms=new_expiry_ms,
-            client_email=email,
-        )
+        try:
+            await provision_client(
+                tg_id=tg_id,
+                plan_days=plan["days"],
+                traffic_gb=plan["traffic_gb"],
+                sub_id=sub_id,
+                target_expiry_ms=new_expiry_ms,
+                client_email=email,
+            )
+        except ValueError as e:
+            if "already in use" in str(e).lower() and sub_id:
+                logger.warning(
+                    "subId already in use при продлении: ищем истинного клиента на панели по sub_id={}",
+                    sub_id,
+                )
+                found_client, true_email = await resolve_panel_client_and_email(email, sub_id=sub_id)
+                if found_client:
+                    email = true_email
+                    await db.update_subscription_client_email(target_sub["id"], true_email)
+                    await extend_client(
+                        true_email,
+                        plan["days"],
+                        target_expiry_ms=new_expiry_ms,
+                    )
+                else:
+                    raise
+            else:
+                raise
     sub = await db.get_subscription_by_id(target_sub["id"])
     sub_link = await build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
     schedule_secondary_sync(target_sub["id"])

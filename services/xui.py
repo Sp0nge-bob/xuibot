@@ -905,6 +905,66 @@ async def get_unified_panel_client(email: str) -> Optional[Client]:
     return await _find_reference_client(api, email)
 
 
+async def find_client_on_panel_by_sub_id(api: AsyncApi, sub_id: str) -> Optional[Client]:
+    """Найти клиента на панели по уникальному subId."""
+    if not sub_id:
+        return None
+    sub_id_clean = str(sub_id).strip()
+    cache = get_panel_cache(api)
+    for inbound in await cache.refresh(api, force=False):
+        for client in inbound.settings.clients or []:
+            if (client.sub_id or "").strip() == sub_id_clean:
+                return client
+    # Попробовать с принудительным обновлением кэша инбаундов
+    for inbound in await cache.refresh(api, force=True):
+        for client in inbound.settings.clients or []:
+            if (client.sub_id or "").strip() == sub_id_clean:
+                return client
+    return None
+
+
+async def resolve_panel_client_and_email(
+    email: str,
+    sub_id: str | None = None,
+) -> tuple[Optional[Client], str]:
+    """
+    Надёжный поиск клиента на панели 3x-ui с поддержкой обратной совместимости:
+    1) По прямому email через unified GET
+    2) Если email с суффиксом (например name@mail.com_2) -> по базовому email
+    3) По sub_id среди настроек клиентов всех инбаундов
+    Возвращает (client, resolved_email).
+    """
+    api = await get_api()
+    clean_sub_id = str(sub_id).strip() if sub_id else ""
+
+    # 1. Прямой поиск по email
+    info = await _unified_get_client_info(api, email)
+    if info:
+        client = info[0]
+        if not clean_sub_id or not client.sub_id or client.sub_id.strip() == clean_sub_id:
+            return client, email
+
+    # 2. Если email с суффиксом _2, _3 и т.д. (например fominseva56@gmail.com_2)
+    if "_" in email and not email.startswith("tg"):
+        base_email = email.rsplit("_", 1)[0]
+        base_info = await _unified_get_client_info(api, base_email)
+        if base_info:
+            base_client = base_info[0]
+            if not clean_sub_id or not base_client.sub_id or base_client.sub_id.strip() == clean_sub_id:
+                return base_client, base_email
+
+    # 3. Поиск по sub_id среди клиентов всех инбаундов (panel_cache)
+    if clean_sub_id:
+        sub_client = await find_client_on_panel_by_sub_id(api, clean_sub_id)
+        if sub_client:
+            real_email = (sub_client.email or "").strip()
+            if real_email:
+                real_info = await _unified_get_client_info(api, real_email)
+                return (real_info[0] if real_info else sub_client), real_email
+
+    return None, email
+
+
 async def _purge_extra_inbounds(
     api: AsyncApi, email: str, allowed_inbound_ids: list[int],
 ) -> list[int]:

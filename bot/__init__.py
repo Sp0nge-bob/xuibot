@@ -102,6 +102,12 @@ async def _background_node_startup(primary_result: dict) -> None:
     except Exception as e:
         logger.exception("Node startup (background) failed: {}", e)
 
+    try:
+        from services.node_sync import reconcile_subscriptions_with_panel
+        await reconcile_subscriptions_with_panel()
+    except Exception as e:
+        logger.warning("Startup subscriptions reconciliation failed: {}", e)
+
     # Даём паузу перед тяжёлой синхронизацией нод
     await asyncio.sleep(25.0)
 

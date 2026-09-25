@@ -19,6 +19,7 @@ from services.xui import (
     _unified_update_client,
     ensure_bot_group_on_node,
     ensure_client_absent_on_primary,
+    find_client_on_panel_by_sub_id,
     get_api,
     get_api_for_node,
     list_bot_client_emails_on_panel,
@@ -163,7 +164,47 @@ async def ensure_subscription_on_primary(sub: dict[str, Any]) -> str:
     return "skipped"
 
 
+async def reconcile_subscriptions_with_panel() -> dict[str, int]:
+    """
+    Сверка и восстановление истинных client_email в БД по уникальному sub_id.
+    Если email в БД был искажён (например при привязке аккаунта или баге переименования),
+    восстанавливает имя клиента в БД в соответствии с источником истины — панелью 3x-ui.
+    """
+    stats = {"checked": 0, "reconciled": 0, "errors": 0}
+    try:
+        api = await get_api()
+        subs = await db.get_all_active_subscriptions()
+        for sub in subs:
+            sid = (sub.get("sub_id") or "").strip()
+            if not sid:
+                continue
+            stats["checked"] += 1
+            try:
+                c = await find_client_on_panel_by_sub_id(api, sid)
+                if c and c.email:
+                    real_email = c.email.strip()
+                    db_email = str(sub.get("client_email") or "").strip()
+                    if real_email.lower() != db_email.lower():
+                        logger.warning(
+                            "Reconciliation: sub #{} DB email was '{}', but panel has '{}'. Restoring true client_email in DB.",
+                            sub["id"], db_email, real_email,
+                        )
+                        await db.update_subscription_client_email(sub["id"], real_email)
+                        sub["client_email"] = real_email
+                        stats["reconciled"] += 1
+            except Exception as ex:
+                stats["errors"] += 1
+                logger.debug("Reconciliation error for sub #{}: {}", sub.get("id"), ex)
+    except Exception as e:
+        logger.error("reconcile_subscriptions_with_panel failed: {}", e)
+    return stats
+
+
 async def _sync_primary_from_db(subs: list[dict[str, Any]]) -> dict[str, int]:
+    # Сверка и автоматическое исправление client_email по уникальному sub_id
+    await reconcile_subscriptions_with_panel()
+    subs = await db.get_all_active_subscriptions()
+
     db_emails = {str(s["client_email"]).lower() for s in subs}
     orphans = await _purge_orphan_bot_clients_on_primary(db_emails)
 
