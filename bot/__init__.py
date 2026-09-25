@@ -75,17 +75,21 @@ dp.include_router(policy_router)
 
 
 async def _background_node_startup(primary_result: dict) -> None:
-    """Health нод, sync и воркеры — не блокирует polling."""
+    """Health нод, sync и воркеры — не блокирует polling и команды пользователей."""
+    # Короткая пауза, чтобы бот завершил запуск и мгновенно ответил на входящие команды
+    await asyncio.sleep(4.0)
+
     try:
         from db import xui_nodes as nodes_db
         from services.node_probe_budget import parallel_probe_wall_sec
 
         nodes = await nodes_db.list_nodes(enabled_only=True)
+        probe_timeout = min(8.0, settings.STARTUP_NODE_TIMEOUT_SEC)
         bg_limit = parallel_probe_wall_sec(
             len(nodes),
-            per_node_sec=settings.STARTUP_NODE_TIMEOUT_SEC,
-            cap_sec=180.0,
-        ) + 30.0
+            per_node_sec=probe_timeout,
+            cap_sec=60.0,
+        ) + 15.0
         await asyncio.wait_for(
             initialize_nodes_at_startup(
                 primary_result=primary_result,
@@ -94,9 +98,12 @@ async def _background_node_startup(primary_result: dict) -> None:
             timeout=bg_limit,
         )
     except asyncio.TimeoutError:
-        logger.warning("Node startup (background): таймаут 120s")
+        logger.warning("Node startup (background): таймаут проверки нод")
     except Exception as e:
         logger.exception("Node startup (background) failed: {}", e)
+
+    # Даём паузу перед тяжёлой синхронизацией нод
+    await asyncio.sleep(25.0)
 
     try:
         await run_full_nodes_sync(source="startup")

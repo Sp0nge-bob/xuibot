@@ -201,15 +201,32 @@ def get_bot_processes_usage(*, cpu_sample_sec: float = 0.1) -> Optional[list[Pro
     return usages
 
 
-def get_bot_load_snapshot(*, cpu_sample_sec: float = 0.15) -> Optional[BotLoadSnapshot]:
+_last_snapshot: Optional[BotLoadSnapshot] = None
+_last_snapshot_time: float = 0.0
+_SNAPSHOT_CACHE_TTL_SEC: float = 15.0
+
+
+def get_bot_load_snapshot(
+    *,
+    cpu_sample_sec: float = 0.15,
+    force_refresh: bool = False,
+) -> Optional[BotLoadSnapshot]:
+    global _last_snapshot, _last_snapshot_time
+    now = time.monotonic()
+    if not force_refresh and _last_snapshot is not None and (now - _last_snapshot_time) < _SNAPSHOT_CACHE_TTL_SEC:
+        return _last_snapshot
+
     usages = get_bot_processes_usage(cpu_sample_sec=cpu_sample_sec)
     if usages is None:
         return None
-    return BotLoadSnapshot(
+    snapshot = BotLoadSnapshot(
         usages=usages,
         sampled_at=datetime.utcnow(),
         cpu_sample_sec=cpu_sample_sec,
     )
+    _last_snapshot = snapshot
+    _last_snapshot_time = now
+    return snapshot
 
 
 def _expected_roles() -> list[str]:
@@ -265,14 +282,28 @@ def format_bot_processes_block(snapshot: Optional[BotLoadSnapshot]) -> str:
     )
 
 
-def build_bot_load_block(*, cpu_sample_sec: float = 0.15) -> str:
-    return format_bot_processes_block(get_bot_load_snapshot(cpu_sample_sec=cpu_sample_sec))
+def build_bot_load_block(*, cpu_sample_sec: float = 0.15, force_refresh: bool = False) -> str:
+    return format_bot_processes_block(
+        get_bot_load_snapshot(cpu_sample_sec=cpu_sample_sec, force_refresh=force_refresh)
+    )
 
 
-async def fetch_bot_load_block(*, cpu_sample_sec: float = 0.15) -> str:
-    return await asyncio.to_thread(build_bot_load_block, cpu_sample_sec=cpu_sample_sec)
+async def fetch_bot_load_block(
+    *,
+    cpu_sample_sec: float = 0.15,
+    force_refresh: bool = False,
+) -> str:
+    return await asyncio.to_thread(
+        build_bot_load_block,
+        cpu_sample_sec=cpu_sample_sec,
+        force_refresh=force_refresh,
+    )
 
 
 # Совместимость со старым именем
-async def fetch_process_usage_line(*, cpu_sample_sec: float = 0.15) -> str:
-    return await fetch_bot_load_block(cpu_sample_sec=cpu_sample_sec)
+async def fetch_process_usage_line(
+    *,
+    cpu_sample_sec: float = 0.15,
+    force_refresh: bool = False,
+) -> str:
+    return await fetch_bot_load_block(cpu_sample_sec=cpu_sample_sec, force_refresh=force_refresh)

@@ -96,6 +96,14 @@ class ActionLockMiddleware(BaseMiddleware):
             logger.warning("Priority /reboot от user {} — обход ActionLock", user_id)
             return await handler(event, data)
 
+        # Сброс зависшей блокировки при явных навигационных командах
+        if isinstance(event, Message) and event.text and event.text.startswith("/"):
+            cmd = event.text.split()[0].lower()
+            if cmd in ("/start", "/menu", "/admin"):
+                if user_id in self._processing:
+                    self._processing.discard(user_id)
+                    logger.debug("Команда {} от user {} — сброс ActionLock", cmd, user_id)
+
         if isinstance(event, CallbackQuery):
             cb_data = event.data or ""
             if self._should_debounce_callback(user_id, cb_data):

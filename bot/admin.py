@@ -121,9 +121,6 @@ def _admin_stats_block(stats: dict[str, int], *, usage_line: str = "") -> str:
 
 
 async def _admin_menu_context() -> tuple[dict[str, int], str]:
-    orphans = await db.deactivate_orphan_subscriptions()
-    if orphans:
-        logger.info("Admin menu: deactivated {} orphan subscription(s)", orphans)
     stats = await db.get_admin_stats()
     usage_line = await fetch_bot_load_block()
     summary = await nodes_db.nodes_summary()
@@ -158,7 +155,7 @@ async def cmd_admin(message: Message, state: FSMContext):
     await state.clear()
     await state.set_state(None)
     try:
-        stats, text = await _admin_menu_context()
+        stats, text = await asyncio.wait_for(_admin_menu_context(), timeout=5.0)
         await message.answer(
             text,
             reply_markup=admin_menu_kb(pending_tickets=stats.get("pending_tickets", 0)),
@@ -176,12 +173,16 @@ async def cb_admin_menu(cb: CallbackQuery, state: FSMContext):
         return
     await state.clear()
     await safe_cb_answer(cb)
-    stats, text = await _admin_menu_context()
-    await send_or_edit(
-        cb,
-        text,
-        admin_menu_kb(pending_tickets=stats.get("pending_tickets", 0)),
-    )
+    try:
+        stats, text = await asyncio.wait_for(_admin_menu_context(), timeout=5.0)
+        await send_or_edit(
+            cb,
+            text,
+            admin_menu_kb(pending_tickets=stats.get("pending_tickets", 0)),
+        )
+    except Exception as e:
+        logger.exception("Admin menu cb failed for tg_id={}: {}", cb.from_user.id, e)
+        await safe_cb_answer(cb, "Не удалось открыть меню", show_alert=True)
 
 
 async def _admin_stats_text(*, refresh: bool = False) -> str:

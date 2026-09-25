@@ -94,7 +94,7 @@ async def initialize_nodes_at_startup(
     started = time.monotonic()
     logger.info("Node startup ({}): инициализация панелей…", label)
 
-    timeout = settings.STARTUP_NODE_TIMEOUT_SEC if background else None
+    timeout = min(8.0, settings.STARTUP_NODE_TIMEOUT_SEC) if background else None
     skip_ids: set[int] = set()
     results: list[dict[str, Any]] = []
 

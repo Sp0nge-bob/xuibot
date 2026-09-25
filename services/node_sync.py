@@ -185,6 +185,7 @@ async def _sync_primary_from_db(subs: list[dict[str, Any]]) -> dict[str, int]:
             except Exception as e:
                 stats["failed"] += 1
                 logger.error("Primary sync failed for sub #{}: {}", sub.get("id"), e)
+            await asyncio.sleep(0.02)
 
     await asyncio.gather(*[_one(sub) for sub in subs])
     return stats
@@ -256,9 +257,17 @@ async def _del_orphans_on_all_nodes() -> dict[str, int]:
 
 async def run_full_nodes_sync() -> dict[str, Any]:
     """
-    1) Основная ↔ БД (лишние tg удалить, недостающие создать/обновить)
-    2) delOrphans на всех включённых нодах
+    1) Деактивация сирот в БД
+    2) Основная ↔ БД (лишние tg удалить, недостающие создать/обновить)
+    3) delOrphans на всех включённых нодах
     """
+    try:
+        orphans = await db.deactivate_orphan_subscriptions()
+        if orphans:
+            logger.info("Full nodes sync: deactivated {} orphan subscription(s)", orphans)
+    except Exception as e:
+        logger.warning("Full nodes sync: deactivate_orphan_subscriptions failed: {}", e)
+
     subs = await db.get_all_active_subscriptions()
     logger.info("Full nodes sync: {} active subscriptions in DB", len(subs))
 
