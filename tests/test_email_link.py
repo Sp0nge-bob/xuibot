@@ -177,3 +177,92 @@ async def test_unlink_email_fallback_subscription_separation():
                 assert u_row[0] is None
     finally:
         await master_conn.close()
+
+
+@pytest.mark.asyncio
+async def test_link_telegram_token_http_failure_fallback():
+    import aiosqlite
+    import httpx
+    from datetime import datetime, timezone, timedelta
+    from contextlib import asynccontextmanager
+    from services.website_client import link_telegram_token
+
+    test_db_path = "file:mem_test_link_token?mode=memory&cache=shared"
+    master_conn = await aiosqlite.connect(test_db_path, uri=True)
+    async with aiosqlite.connect(test_db_path, uri=True) as db:
+        await db.execute("""
+            CREATE TABLE telegram_link_tokens (
+                token TEXT PRIMARY KEY,
+                email TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                used INTEGER DEFAULT 0
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE email_accounts (
+                email TEXT PRIMARY KEY,
+                tg_id INTEGER
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE users (
+                tg_id INTEGER PRIMARY KEY,
+                email TEXT
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE subscriptions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tg_id INTEGER,
+                email_account TEXT
+            )
+        """)
+
+        token_str = "tok_test_12345"
+        email_str = "user_link@example.com"
+        exp_iso = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
+        await db.execute(
+            "INSERT INTO telegram_link_tokens (token, email, expires_at, used) VALUES (?, ?, ?, 0)",
+            (token_str, email_str, exp_iso),
+        )
+        await db.execute("INSERT INTO email_accounts (email, tg_id) VALUES (?, NULL)", (email_str,))
+        await db.execute("INSERT INTO users (tg_id, email) VALUES (778899, NULL)")
+        await db.execute("INSERT INTO subscriptions (tg_id, email_account) VALUES (NULL, ?)", (email_str,))
+        await db.commit()
+
+    @asynccontextmanager
+    async def temp_get_db():
+        async with aiosqlite.connect(test_db_path, uri=True) as db:
+            yield db
+
+    try:
+        # Mock HTTP returning 401 (e.g. from wrong port or unauthorized proxy)
+        with patch("httpx.AsyncClient.post", return_value=httpx.Response(401, text="Unauthorized")), \
+             patch("db.connection.get_db", temp_get_db):
+            res = await link_telegram_token(token=token_str, tg_id=778899)
+            assert res["ok"] is True
+            assert res["email"] == email_str
+
+        async with aiosqlite.connect(test_db_path, uri=True) as db:
+            # Token marked as used
+            async with db.execute("SELECT used FROM telegram_link_tokens WHERE token = ?", (token_str,)) as cur:
+                assert (await cur.fetchone())[0] == 1
+            # Email accounts updated
+            async with db.execute("SELECT tg_id FROM email_accounts WHERE email = ?", (email_str,)) as cur:
+                assert (await cur.fetchone())[0] == 778899
+            # Users updated
+            async with db.execute("SELECT email FROM users WHERE tg_id = 778899") as cur:
+                assert (await cur.fetchone())[0] == email_str
+            # Subscriptions updated
+            async with db.execute("SELECT tg_id FROM subscriptions WHERE email_account = ?", (email_str,)) as cur:
+                assert (await cur.fetchone())[0] == 778899
+    finally:
+        await master_conn.close()
+
+
+def test_candidate_urls_priority():
+    from services.website_client import get_candidate_base_urls
+    candidates = get_candidate_base_urls()
+    assert "http://127.0.0.1:8090" in candidates
+    assert "http://127.0.0.1:8080" in candidates
+

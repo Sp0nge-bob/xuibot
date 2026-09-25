@@ -151,15 +151,30 @@ async def platega_webhook(
         )
         import httpx
         try:
-            web_url = getattr(settings, "WEBSITE_WEBHOOK_URL", "http://127.0.0.1:8080/api/webhook/platega")
+            fwd_candidates = []
+            cfg_web_url = getattr(settings, "WEBSITE_WEBHOOK_URL", None)
+            if cfg_web_url:
+                fwd_candidates.append(cfg_web_url)
+            for default_fwd in ("http://127.0.0.1:8090/api/webhook/platega", "http://127.0.0.1:8080/api/webhook/platega"):
+                if default_fwd not in fwd_candidates:
+                    fwd_candidates.append(default_fwd)
+
+            fwd_headers = {"Content-Type": "application/json"}
+            if x_merchant_id:
+                fwd_headers["X-MerchantId"] = x_merchant_id
+            if x_secret:
+                fwd_headers["X-Secret"] = x_secret
+
             async with httpx.AsyncClient(timeout=12.0) as client:
-                fwd_headers = {"Content-Type": "application/json"}
-                if x_merchant_id:
-                    fwd_headers["X-MerchantId"] = x_merchant_id
-                if x_secret:
-                    fwd_headers["X-Secret"] = x_secret
-                fwd_resp = await client.post(web_url, headers=fwd_headers, json=body)
-                return JSONResponse(status_code=fwd_resp.status_code, content=fwd_resp.json())
+                for candidate_url in fwd_candidates:
+                    try:
+                        fwd_resp = await client.post(candidate_url, headers=fwd_headers, json=body)
+                        if fwd_resp.status_code in (200, 400, 422):
+                            return JSONResponse(status_code=fwd_resp.status_code, content=fwd_resp.json())
+                    except Exception:
+                        continue
+            logger.error("Failed to forward webhook to website: all candidates failed")
+            return JSONResponse({"ok": False, "error": "Website webhook unavailable"}, status_code=502)
         except Exception as e:
             logger.error("Failed to forward webhook to website: {}", e)
             return JSONResponse({"ok": False, "error": str(e)}, status_code=502)
