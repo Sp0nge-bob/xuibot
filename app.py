@@ -24,6 +24,7 @@ from config.settings import settings, warn_unsafe_runtime_config
 
 warn_unsafe_runtime_config()
 from db.database import init_db
+from db import database as db
 from db.connection import close_connection
 from services.platega import normalize_platega_status
 from services.platega_client import verify_callback_headers
@@ -138,24 +139,29 @@ async def platega_webhook(
         return JSONResponse({"ok": True})
 
     # Проверяем, не относится ли заказ к сайту (source == 'web')
-    payload_val = str(body.get("payload") or "")
-    order = await db.get_order_by_platega_tx(tx_id) if tx_id else None
-    if not order and payload_val.isdigit():
-        order = await db.get_order(int(payload_val))
+    try:
+        payload_val = str(body.get("payload") or "")
+        order = await db.get_order_by_platega_tx(tx_id) if tx_id else None
+        if not order and payload_val.isdigit():
+            order = await db.get_order_by_id(int(payload_val))
 
-    if order and order.get("source") == "web":
-        logger.info(
-            "Platega webhook tx={} belongs to WEB order #{} -> forwarding to website...",
-            tx_id,
-            order.get("id"),
-        )
-        import httpx
-        try:
+        if order and order.get("source") == "web":
+            logger.info(
+                "Platega webhook tx={} belongs to WEB order #{} -> forwarding to website...",
+                tx_id,
+                order.get("id"),
+            )
+            import httpx
             fwd_candidates = []
             cfg_web_url = getattr(settings, "WEBSITE_WEBHOOK_URL", None)
             if cfg_web_url:
                 fwd_candidates.append(cfg_web_url)
-            for default_fwd in ("http://127.0.0.1:8090/api/webhook/platega", "http://127.0.0.1:8080/api/webhook/platega"):
+            for default_fwd in (
+                "http://127.0.0.1:8090/api/webhook/platega",
+                "http://127.0.0.1:8080/api/webhook/platega",
+                "http://127.0.0.1:8000/api/webhook/platega",
+                "http://127.0.0.1:8081/api/webhook/platega",
+            ):
                 if default_fwd not in fwd_candidates:
                     fwd_candidates.append(default_fwd)
 
@@ -175,9 +181,8 @@ async def platega_webhook(
                         continue
             logger.error("Failed to forward webhook to website: all candidates failed")
             return JSONResponse({"ok": False, "error": "Website webhook unavailable"}, status_code=502)
-        except Exception as e:
-            logger.error("Failed to forward webhook to website: {}", e)
-            return JSONResponse({"ok": False, "error": str(e)}, status_code=502)
+    except Exception as e:
+        logger.error("Error inspecting/forwarding order in webhook: {}", e)
 
     if not await acquire_webhook(tx_id, status):
         logger.debug("Duplicate webhook ignored: {} {}", tx_id, status)
