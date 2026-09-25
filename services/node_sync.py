@@ -192,6 +192,17 @@ async def reconcile_subscriptions_with_panel() -> dict[str, int]:
                         await db.update_subscription_client_email(sub["id"], real_email)
                         sub["client_email"] = real_email
                         stats["reconciled"] += 1
+
+                    # Исправление отображаемого имени (display_name)
+                    curr_disp = str(sub.get("display_name") or "").strip()
+                    if real_email.startswith("tg") and curr_disp.startswith("Web ("):
+                        await db.update_subscription_display_name(sub["id"], "Моя подписка")
+                    elif "_" in real_email and not real_email.startswith("tg"):
+                        base_email, suffix = real_email.rsplit("_", 1)
+                        if suffix.isdigit():
+                            if curr_disp == f"Web ({base_email})" or not curr_disp:
+                                new_disp = f"Web ({base_email} #{suffix})"
+                                await db.update_subscription_display_name(sub["id"], new_disp)
             except Exception as ex:
                 stats["errors"] += 1
                 logger.debug("Reconciliation error for sub #{}: {}", sub.get("id"), ex)

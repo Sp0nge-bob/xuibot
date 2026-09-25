@@ -814,7 +814,7 @@ async def get_active_subscriptions(tg_id: int) -> List[Dict[str, Any]]:
 
 _SYNC_SUB_COLS = (
     "id, tg_id, order_id, client_email, client_uuid, sub_id, "
-    "start_date, end_date, traffic_limit_gb, is_active"
+    "start_date, end_date, traffic_limit_gb, is_active, display_name"
 )
 
 
