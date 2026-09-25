@@ -16,6 +16,7 @@ from db import trial_grants as trial_db
 from db import bot_settings as settings_db
 from db import tickets as tickets_db
 from .telegram_html import safe_html_fragment
+from ui.theme import screen
 from services import platega_simulator as platega_sim
 from services.payment_pending import (
     expires_in_from_order_created,
@@ -67,6 +68,9 @@ from .keyboards import (
     sub_name_prompt_kb,
     grant_promo_choice_kb,
     grant_promo_extend_picker_kb,
+    link_email_info_kb,
+    cancel_email_link_kb,
+    unlink_email_confirm_kb,
 )
 from .messages import (
     EXTEND_BLOCKED_REFUND_PENDING_MSG,
@@ -200,6 +204,8 @@ async def _show_main_menu(
         await safe_cb_answer(target)
 
     await db.get_or_create_user(user.id, user.username, user.first_name)
+    user_row = await db.get_user(user.id)
+    user_email = (user_row.get("email") or "").strip() if user_row else None
     subs = await get_active_subscriptions_for_ui(user.id)
     trial_available = await get_trial_button_visible(user.id)
     pending_promo = None
@@ -234,6 +240,7 @@ async def _show_main_menu(
     kb = main_menu_kb(
         trial_available=trial_available,
         pending_tx_id=pending_order.get("platega_tx_id") if pending_order else None,
+        user_email=user_email,
     )
 
     if isinstance(target, CallbackQuery):
@@ -405,6 +412,162 @@ async def cb_main_menu(cb: CallbackQuery, state: FSMContext):
     had_faq_view = await dismiss_faq_view(cb.bot, cb.message.chat.id)
     await _clear_promo_input_state(state)
     await _show_main_menu(cb, edit=not had_faq_view, state=state)
+
+
+@router.callback_query(F.data == "link_email_menu")
+async def cb_link_email_menu(cb: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await safe_cb_answer(cb)
+    user_row = await db.get_user(cb.from_user.id)
+    user_email = (user_row.get("email") or "").strip() if user_row else None
+
+    if user_email:
+        text = screen(
+            "✉️ Привязка почты",
+            f"К вашему Telegram привязана почта:\n<b>{user_email}</b>",
+            "Все ваши подписки объединены с личным кабинетом на сайте. Вы можете входить на сайт по этой почте с сохранением всех ключей.",
+        )
+    else:
+        text = screen(
+            "✉️ Привязка почты",
+            "Почта ещё не привязана.",
+            "Привязка объединит ваши покупки и подписки между Telegram-ботом и веб-сайтом. Вы сможете легко управлять подпиской и в боте, и в веб-кабинете.",
+        )
+    await send_or_edit(cb, text, link_email_info_kb(user_email=user_email))
+
+
+@router.callback_query(F.data == "start_link_email")
+async def cb_start_link_email(cb: CallbackQuery, state: FSMContext):
+    await safe_cb_answer(cb)
+    await state.set_state(UserStates.waiting_email_input)
+    text = screen(
+        "✉️ Привязка почты",
+        "Введите ваш адрес электронной почты (например: <code>user@example.com</code>):",
+        hint="На этот адрес будет отправлен 6-значный одноразовый код для подтверждения.",
+    )
+    await send_or_edit(cb, text, cancel_email_link_kb())
+
+
+@router.message(UserStates.waiting_email_input)
+async def msg_email_input(message: Message, state: FSMContext):
+    email = (message.text or "").strip().lower()
+    import re
+    if not re.match(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$", email):
+        await message.answer(
+            "❌ Некорректный формат email.\n\nПожалуйста, проверьте и введите корректный адрес:",
+            reply_markup=cancel_email_link_kb(),
+        )
+        return
+
+    wait_msg = await message.answer("⏳ Отправляем проверочный код на почту...")
+    from services.website_client import request_otp_email
+    res = await request_otp_email(tg_id=message.from_user.id, email=email)
+    try:
+        await wait_msg.delete()
+    except Exception:
+        pass
+
+    if res.get("ok"):
+        await state.update_data(link_email=email)
+        await state.set_state(UserStates.waiting_email_otp)
+        text = screen(
+            "✉️ Введите код из письма",
+            f"Одноразовый проверочный код отправлен на <b>{email}</b>.",
+            "Проверьте входящие сообщения (и папку «Спам» при необходимости).\n\nВведите 6-значный код:",
+        )
+        await message.answer(text, reply_markup=cancel_email_link_kb())
+    else:
+        err_detail = res.get("detail", "Не удалось отправить код подтверждения.")
+        await message.answer(
+            f"❌ {err_detail}\n\nПопробуйте ввести другой адрес или нажмите отмену:",
+            reply_markup=cancel_email_link_kb(),
+        )
+
+
+@router.message(UserStates.waiting_email_otp)
+async def msg_email_otp_input(message: Message, state: FSMContext):
+    code = (message.text or "").strip().replace(" ", "")
+    data = await state.get_data()
+    email = data.get("link_email")
+    if not email:
+        await state.clear()
+        await _show_main_menu(message)
+        return
+
+    wait_msg = await message.answer("⏳ Проверяем код...")
+    from services.website_client import verify_otp_email
+    res = await verify_otp_email(tg_id=message.from_user.id, email=email, code=code)
+    try:
+        await wait_msg.delete()
+    except Exception:
+        pass
+
+    if res.get("ok"):
+        await state.clear()
+        # Переименовываем клиентов в 3x-ui если нужно
+        try:
+            async with db.get_db() as conn:
+                async with conn.execute(
+                    "SELECT id, client_uuid, client_email FROM subscriptions WHERE tg_id = ? OR email_account = ? ORDER BY id ASC",
+                    (message.from_user.id, email),
+                ) as sub_cur:
+                    user_subs = await sub_cur.fetchall()
+                if user_subs:
+                    from services.xui import get_api
+                    api = await get_api()
+                    for idx, s_row in enumerate(user_subs):
+                        s_id, c_uuid, old_c_email = s_row[0], s_row[1], s_row[2]
+                        target_new_email = email if idx == 0 else f"{email}_{idx + 1}"
+                        if old_c_email and old_c_email != target_new_email:
+                            try:
+                                c_obj = await api.client.get_by_email(old_c_email)
+                                if c_obj:
+                                    c_obj.email = target_new_email
+                                    if hasattr(c_obj, "tg_id"):
+                                        c_obj.tg_id = message.from_user.id
+                                    await api.client.update(c_uuid or c_obj.id, c_obj)
+                                    await conn.execute("UPDATE subscriptions SET client_email = ? WHERE id = ?", (target_new_email, s_id))
+                            except Exception as ex:
+                                logger.debug("3x-ui client rename on link error: {}", ex)
+                    await conn.commit()
+        except Exception as xui_e:
+            logger.debug("3x-ui client rename skipped: {}", xui_e)
+
+        text = screen(
+            "✅ Почта успешно привязана!",
+            f"Ваш аккаунт привязан к <b>{email}</b>.",
+            "Все ваши подписки объединены с личным кабинетом на сайте.",
+        )
+        await message.answer(text, reply_markup=back_to_main_kb())
+    else:
+        err_detail = res.get("detail", "Неверный проверочный код.")
+        await message.answer(
+            f"❌ {err_detail}\n\nПопробуйте ввести код ещё раз или нажмите отмену:",
+            reply_markup=cancel_email_link_kb(),
+        )
+
+
+@router.callback_query(F.data == "unlink_email_confirm")
+async def cb_unlink_email_confirm(cb: CallbackQuery):
+    await safe_cb_answer(cb)
+    text = screen(
+        "⚠️ Отвязка почты",
+        "Вы уверены, что хотите отвязать почту от вашего Telegram-аккаунта?",
+        hint="После отвязки синхронизация с сайтом будет отключена.",
+    )
+    await send_or_edit(cb, text, unlink_email_confirm_kb())
+
+
+@router.callback_query(F.data == "unlink_email_do")
+async def cb_unlink_email_do(cb: CallbackQuery):
+    await safe_cb_answer(cb)
+    from services.website_client import unlink_email_account
+    await unlink_email_account(cb.from_user.id)
+    text = screen(
+        "✅ Почта отвязана",
+        "Почта успешно отвязана от вашего аккаунта Telegram.",
+    )
+    await send_or_edit(cb, text, back_to_main_kb())
 
 
 @router.callback_query(F.data.startswith("resume_pay:"))

@@ -6,6 +6,8 @@ class UserStates(StatesGroup):
     waiting_sub_display_name = State()
     waiting_sub_rename = State()
     waiting_sub_email_search = State()
+    waiting_email_input = State()
+    waiting_email_otp = State()
     in_ticket_chat = State()
 
 

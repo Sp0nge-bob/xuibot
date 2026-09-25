@@ -20,13 +20,16 @@ async def _apply_pragmas(db: aiosqlite.Connection) -> None:
     await db.execute("PRAGMA journal_mode=WAL")
     await db.execute("PRAGMA busy_timeout=30000")
     await db.execute("PRAGMA foreign_keys=ON")
+    await db.execute("PRAGMA synchronous=NORMAL")
+    await db.execute("PRAGMA temp_store=MEMORY")
+    await db.execute("PRAGMA cache_size=-32000")
 
 
 async def init_connection() -> None:
     global _conn
     if _conn is not None:
         return
-    _conn = await aiosqlite.connect(DB_PATH)
+    _conn = await aiosqlite.connect(DB_PATH, timeout=30.0)
     await _apply_pragmas(_conn)
     _conn.row_factory = aiosqlite.Row
 

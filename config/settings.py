@@ -107,6 +107,8 @@ class Settings(BaseSettings):
     WEBHOOK_PATH: str = "/platega-webhook"
     PUBLIC_WEBHOOK_URL: str = ""
     WEBSITE_WEBHOOK_URL: str = "http://127.0.0.1:8080/api/webhook/platega"
+    WEBSITE_API_URL: str = "http://127.0.0.1:8080"
+    SECRET_KEY: str = ""
     WEBHOOK_RATE_LIMIT_PER_MIN: int = 120
     WEBHOOK_IDEMPOTENCY_TTL_SEC: int = 300
     # Параллельная обработка webhook Platega (выдача ключей) — services/fulfillment_queue.py

@@ -16,6 +16,10 @@ from ui.theme import (
     BTN_PRIVACY_POLICY,
     BTN_PROMO,
     BTN_REFERRAL,
+    BTN_REFERRALS_SHORT,
+    BTN_LINK_EMAIL,
+    BTN_CHANGE_EMAIL,
+    BTN_UNLINK_EMAIL,
     BTN_PURCHASE_PROMO,
     BTN_PURCHASE_PLANS,
     BTN_EXIT,
@@ -53,6 +57,7 @@ def main_menu_kb(
     *,
     trial_available: bool = False,
     pending_tx_id: str | None = None,
+    user_email: str | None = None,
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     if pending_tx_id:
@@ -71,10 +76,42 @@ def main_menu_kb(
             InlineKeyboardButton(text=BTN_FAQ, callback_data="faq_menu"),
             InlineKeyboardButton(text=BTN_SUPPORT_SHORT, callback_data="support"),
         ],
-        [InlineKeyboardButton(text=BTN_POLICY, callback_data="project_policy")],
-        [InlineKeyboardButton(text=BTN_REFERRAL, callback_data="referral_program")],
+        [
+            InlineKeyboardButton(text=BTN_POLICY, callback_data="project_policy"),
+            InlineKeyboardButton(text=BTN_REFERRALS_SHORT, callback_data="referral_program"),
+        ],
+        [
+            InlineKeyboardButton(
+                text=f"✉️ {user_email}" if user_email else BTN_LINK_EMAIL,
+                callback_data="link_email_menu",
+            )
+        ],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def link_email_info_kb(*, user_email: str | None = None) -> InlineKeyboardMarkup:
+    rows = []
+    if user_email:
+        rows.append([InlineKeyboardButton(text=BTN_CHANGE_EMAIL, callback_data="start_link_email")])
+        rows.append([InlineKeyboardButton(text=BTN_UNLINK_EMAIL, callback_data="unlink_email_confirm")])
+    else:
+        rows.append([InlineKeyboardButton(text=BTN_LINK_EMAIL, callback_data="start_link_email")])
+    rows.append([InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def cancel_email_link_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="link_email_menu")],
+    ])
+
+
+def unlink_email_confirm_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⚠️ Да, отвязать почту", callback_data="unlink_email_do")],
+        [InlineKeyboardButton(text=BTN_BACK, callback_data="link_email_menu")],
+    ])
 
 
 def purchase_hub_kb() -> InlineKeyboardMarkup:
