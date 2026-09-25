@@ -282,62 +282,21 @@ async def cmd_start(message: Message, state: FSMContext):
             arg = parts[1].strip()
             if arg.startswith("link_"):
                 link_token = arg[5:].strip()
-                try:
-                    from utils.utc import utc_now
-                    async with db.get_db() as conn:
-                        async with conn.execute(
-                            "SELECT email, expires_at, used FROM telegram_link_tokens WHERE token = ?",
-                            (link_token,)
-                        ) as cur:
-                            row = await cur.fetchone()
-                        if row:
-                            email_val, exp_at, is_used = row[0], row[1], row[2]
-                            if not is_used and exp_at > utc_now().isoformat():
-                                await conn.execute("UPDATE telegram_link_tokens SET used = 1 WHERE token = ?", (link_token,))
-                                await conn.execute("UPDATE email_accounts SET tg_id = ? WHERE email = ?", (message.from_user.id, email_val))
-                                await conn.execute("UPDATE users SET email = ? WHERE tg_id = ?", (email_val, message.from_user.id))
-                                await conn.execute("UPDATE subscriptions SET tg_id = ? WHERE email_account = ?", (message.from_user.id, email_val))
-                                await conn.execute("UPDATE subscriptions SET email_account = ? WHERE tg_id = ? AND (email_account IS NULL OR email_account = '')", (email_val, message.from_user.id))
-                                await conn.commit()
-
-                                # Переименовываем клиентов в 3x-ui по новому Email для наглядности в панели
-                                try:
-                                    async with conn.execute(
-                                        "SELECT id, client_uuid, client_email FROM subscriptions WHERE tg_id = ? OR email_account = ? ORDER BY id ASC",
-                                        (message.from_user.id, email_val),
-                                    ) as sub_cur:
-                                        user_subs = await sub_cur.fetchall()
-
-                                    if user_subs:
-                                        from services.xui import get_api
-                                        api = await get_api()
-                                        for idx, s_row in enumerate(user_subs):
-                                            s_id, c_uuid, old_c_email = s_row[0], s_row[1], s_row[2]
-                                            target_new_email = email_val if idx == 0 else f"{email_val}_{idx + 1}"
-                                            if old_c_email and old_c_email != target_new_email:
-                                                try:
-                                                    c_obj = await api.client.get_by_email(old_c_email)
-                                                    if c_obj:
-                                                        c_obj.email = target_new_email
-                                                        if hasattr(c_obj, "tg_id"):
-                                                            c_obj.tg_id = message.from_user.id
-                                                        await api.client.update(c_uuid or c_obj.id, c_obj)
-                                                        await conn.execute("UPDATE subscriptions SET client_email = ? WHERE id = ?", (target_new_email, s_id))
-                                                except Exception as ex:
-                                                    logger.debug("3x-ui client rename on link error: {}", ex)
-                                        await conn.commit()
-                                except Exception as xui_e:
-                                    logger.debug("3x-ui client rename skipped: {}", xui_e)
-                                notice_text = (
-                                    f"Аккаунт успешно привязан к email: <b>{email_val}</b>\n"
-                                    f"Все ваши подписки с веб-сайта теперь доступны в Telegram-боте."
-                                )
-                            elif is_used:
-                                notice_text = "Эта ссылка для привязки уже была использована."
-                            else:
-                                notice_text = "Срок действия ссылки для привязки аккаунта истёк."
-                except Exception as e:
-                    logger.error("Error linking telegram account with token {}: {}", link_token, e)
+                from services.website_client import link_telegram_token
+                res = await link_telegram_token(
+                    token=link_token,
+                    tg_id=message.from_user.id,
+                    username=message.from_user.username,
+                    first_name=message.from_user.first_name,
+                )
+                if res.get("ok"):
+                    email_val = res.get("email") or ""
+                    notice_text = (
+                        f"✅ Аккаунт успешно привязан к email: <b>{email_val}</b>\n\n"
+                        f"Все ваши подписки с веб-сайта теперь доступны в Telegram-боте."
+                    )
+                else:
+                    notice_text = f"❌ {res.get('detail', 'Не удалось привязать аккаунт.')}"
             else:
                 referrer_id = parse_referral_start_arg(arg)
                 if referrer_id:
@@ -504,35 +463,6 @@ async def msg_email_otp_input(message: Message, state: FSMContext):
 
     if res.get("ok"):
         await state.clear()
-        # Переименовываем клиентов в 3x-ui если нужно
-        try:
-            async with db.get_db() as conn:
-                async with conn.execute(
-                    "SELECT id, client_uuid, client_email FROM subscriptions WHERE tg_id = ? OR email_account = ? ORDER BY id ASC",
-                    (message.from_user.id, email),
-                ) as sub_cur:
-                    user_subs = await sub_cur.fetchall()
-                if user_subs:
-                    from services.xui import get_api
-                    api = await get_api()
-                    for idx, s_row in enumerate(user_subs):
-                        s_id, c_uuid, old_c_email = s_row[0], s_row[1], s_row[2]
-                        target_new_email = email if idx == 0 else f"{email}_{idx + 1}"
-                        if old_c_email and old_c_email != target_new_email:
-                            try:
-                                c_obj = await api.client.get_by_email(old_c_email)
-                                if c_obj:
-                                    c_obj.email = target_new_email
-                                    if hasattr(c_obj, "tg_id"):
-                                        c_obj.tg_id = message.from_user.id
-                                    await api.client.update(c_uuid or c_obj.id, c_obj)
-                                    await conn.execute("UPDATE subscriptions SET client_email = ? WHERE id = ?", (target_new_email, s_id))
-                            except Exception as ex:
-                                logger.debug("3x-ui client rename on link error: {}", ex)
-                    await conn.commit()
-        except Exception as xui_e:
-            logger.debug("3x-ui client rename skipped: {}", xui_e)
-
         text = screen(
             "✅ Почта успешно привязана!",
             f"Ваш аккаунт привязан к <b>{email}</b>.",
