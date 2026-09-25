@@ -146,6 +146,33 @@ async def _init_db_impl():
             await db.execute(
                 "ALTER TABLE subscriptions ADD COLUMN grant_bonus_days INTEGER NOT NULL DEFAULT 0"
             )
+        if "origin" not in sub_cols:
+            await db.execute(
+                "ALTER TABLE subscriptions ADD COLUMN origin TEXT DEFAULT 'bot'"
+            )
+        if "email_account" not in sub_cols:
+            await db.execute(
+                "ALTER TABLE subscriptions ADD COLUMN email_account TEXT"
+            )
+
+        # Backfill origin for web vs bot subscriptions
+        await db.execute("""
+            UPDATE subscriptions
+            SET origin = 'web'
+            WHERE (origin IS NULL OR origin = '' OR origin = 'bot')
+              AND (
+                  display_name LIKE 'Web%'
+                  OR client_email LIKE 'web_%'
+                  OR (tg_id IS NULL AND email_account IS NOT NULL)
+                  OR order_id IN (SELECT id FROM orders WHERE source = 'web')
+              )
+        """)
+        await db.execute("""
+            UPDATE subscriptions
+            SET origin = 'bot'
+            WHERE origin IS NULL OR origin = ''
+        """)
+
         async with db.execute("PRAGMA table_info(users)") as cur:
             user_cols = {row[1] for row in await cur.fetchall()}
         if "email" not in user_cols:
@@ -501,8 +528,8 @@ async def create_subscription(
         cursor = await db.execute(
             """INSERT INTO subscriptions 
                (tg_id, order_id, inbound_id, client_email, client_uuid, sub_id, 
-                start_date, end_date, traffic_limit_gb, is_active, display_name)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)""",
+                start_date, end_date, traffic_limit_gb, is_active, display_name, origin)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'bot')""",
             (tg_id, order_id, inbound_id, client_email, client_uuid, sub_id,
              now.isoformat(), end.isoformat(), traffic_gb, display_name)
         )

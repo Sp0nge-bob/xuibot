@@ -483,7 +483,7 @@ async def cb_unlink_email_confirm(cb: CallbackQuery):
     text = screen(
         "⚠️ Отвязка почты",
         "Вы уверены, что хотите отвязать почту от вашего Telegram-аккаунта?",
-        hint="После отвязки синхронизация с сайтом будет отключена.",
+        hint="После отвязки подписки, купленные на сайте, останутся только на сайте. Подписки, оформленные в боте, останутся в боте.",
     )
     await send_or_edit(cb, text, unlink_email_confirm_kb())
 
@@ -495,7 +495,9 @@ async def cb_unlink_email_do(cb: CallbackQuery):
     await unlink_email_account(cb.from_user.id)
     text = screen(
         "✅ Почта отвязана",
-        "Почта успешно отвязана от вашего аккаунта Telegram.",
+        "Почта успешно отвязана от Telegram.\n\n"
+        "• Подписки бота сохранены в боте\n"
+        "• Подписки сайта доступны только на сайте",
     )
     await send_or_edit(cb, text, back_to_main_kb())
 

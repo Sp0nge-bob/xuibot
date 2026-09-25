@@ -114,7 +114,78 @@ async def unlink_email_account(tg_id: int) -> dict:
     try:
         from db.connection import get_db
         async with get_db() as db:
-            await db.execute("UPDATE email_accounts SET tg_id = NULL WHERE tg_id = ?", (tg_id,))
+            # Находим связанный email
+            async with db.execute("SELECT email FROM email_accounts WHERE tg_id = ?", (tg_id,)) as cur:
+                erow = await cur.fetchone()
+            email = erow[0] if erow and erow[0] else None
+            if not email:
+                async with db.execute("SELECT email FROM users WHERE tg_id = ?", (tg_id,)) as cur:
+                    urow = await cur.fetchone()
+                email = urow[0] if urow and urow[0] else None
+
+            # 1. Web-подписки: отвязываем от Telegram (tg_id = NULL), доступ в боте пропадает
+            if email:
+                await db.execute("""
+                    UPDATE subscriptions
+                    SET tg_id = NULL
+                    WHERE (tg_id = ? OR email_account = ?)
+                      AND (
+                          origin = 'web'
+                          OR display_name LIKE 'Web%'
+                          OR client_email LIKE 'web_%'
+                          OR order_id IN (SELECT id FROM orders WHERE source = 'web')
+                      )
+                """, (tg_id, email))
+            else:
+                await db.execute("""
+                    UPDATE subscriptions
+                    SET tg_id = NULL
+                    WHERE tg_id = ?
+                      AND (
+                          origin = 'web'
+                          OR display_name LIKE 'Web%'
+                          OR client_email LIKE 'web_%'
+                          OR order_id IN (SELECT id FROM orders WHERE source = 'web')
+                      )
+                """, (tg_id,))
+
+            # 2. Telegram-подписки: отвязываем от сайта (email_account = NULL), доступ на сайте пропадает
+            if email:
+                await db.execute("""
+                    UPDATE subscriptions
+                    SET email_account = NULL
+                    WHERE (tg_id = ? OR email_account = ?)
+                      AND (
+                          origin = 'bot'
+                          OR (
+                              origin != 'web'
+                              AND display_name NOT LIKE 'Web%'
+                              AND client_email NOT LIKE 'web_%'
+                              AND order_id NOT IN (SELECT id FROM orders WHERE source = 'web')
+                          )
+                      )
+                """, (tg_id, email))
+            else:
+                await db.execute("""
+                    UPDATE subscriptions
+                    SET email_account = NULL
+                    WHERE tg_id = ?
+                      AND (
+                          origin = 'bot'
+                          OR (
+                              origin != 'web'
+                              AND display_name NOT LIKE 'Web%'
+                              AND client_email NOT LIKE 'web_%'
+                              AND order_id NOT IN (SELECT id FROM orders WHERE source = 'web')
+                          )
+                      )
+                """, (tg_id,))
+
+            # 3. Разрываем связь
+            if email:
+                await db.execute("UPDATE email_accounts SET tg_id = NULL WHERE tg_id = ? OR email = ?", (tg_id, email))
+            else:
+                await db.execute("UPDATE email_accounts SET tg_id = NULL WHERE tg_id = ?", (tg_id,))
             await db.execute("UPDATE users SET email = NULL WHERE tg_id = ?", (tg_id,))
             await db.commit()
         return {"ok": True, "message": "Почта успешно отвязана"}
