@@ -32,7 +32,9 @@ from services.crypto import decrypt_secret
 _apis: dict[int, AsyncApi] = {}
 _bot_group_ensured: set[int] = set()
 _connect_logged: set[int] = set()
-_BOT_CLIENT_EMAIL = re.compile(r"^tg(?:free)?\d+(?:_\d+)?$")
+_BOT_CLIENT_EMAIL = re.compile(
+    r"^(?:tg(?:free)?\d+(?:_\d+)?|web_[a-f0-9]+|[\w.+-]+@[\w.-]+(?:_\d+)?)$"
+)
 
 
 def is_bot_client_email(email: str) -> bool:
@@ -41,7 +43,7 @@ def is_bot_client_email(email: str) -> bool:
 
 def _assert_bot_client_email(email: str) -> None:
     if not is_bot_client_email(email):
-        raise ValueError(f"Запрещено: операция только для tg-клиентов бота, получено {email!r}")
+        raise ValueError(f"Запрещено: неподдерживаемый формат клиента, получено {email!r}")
 
 
 def _tg_id_from_email(email: str) -> int:
@@ -56,7 +58,10 @@ def _tg_id_from_email(email: str) -> int:
         return 0
     if "_" in body:
         body = body.split("_", 1)[0]
-    return int(body)
+    try:
+        return int(body)
+    except ValueError:
+        return 0
 
 
 def normalize_xui_host(host: str) -> str:
