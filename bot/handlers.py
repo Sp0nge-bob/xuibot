@@ -268,22 +268,52 @@ async def cmd_start(message: Message, state: FSMContext):
         clear_active_session(message.from_user.id)
     await dismiss_faq_view(message.bot, message.chat.id)
     await state.clear()
-    referral_notice = None
+    notice_text = None
     if message.from_user and message.text:
         parts = message.text.split(maxsplit=1)
         if len(parts) > 1:
-            referrer_id = parse_referral_start_arg(parts[1])
-            if referrer_id:
-                bound = await try_bind_referrer(message.from_user.id, referrer_id)
-                if bound:
-                    welcome = await _purchase_hub_referral_welcome(message.from_user.id)
-                    referral_notice = referral_bind_applied_text(welcome_eligible=welcome)
-                    await notify_referrer_friend_bound(
-                        referrer_id,
-                        friend_first_name=message.from_user.first_name,
-                        friend_username=message.from_user.username,
-                    )
-    await _show_main_menu(message, state=state, prepend_text=referral_notice)
+            arg = parts[1].strip()
+            if arg.startswith("link_"):
+                link_token = arg[5:].strip()
+                try:
+                    from utils.utc import utc_now
+                    async with db.get_db() as conn:
+                        async with conn.execute(
+                            "SELECT email, expires_at, used FROM telegram_link_tokens WHERE token = ?",
+                            (link_token,)
+                        ) as cur:
+                            row = await cur.fetchone()
+                        if row:
+                            email_val, exp_at, is_used = row[0], row[1], row[2]
+                            if not is_used and exp_at > utc_now().isoformat():
+                                await conn.execute("UPDATE telegram_link_tokens SET used = 1 WHERE token = ?", (link_token,))
+                                await conn.execute("UPDATE email_accounts SET tg_id = ? WHERE email = ?", (message.from_user.id, email_val))
+                                await conn.execute("UPDATE users SET email = ? WHERE tg_id = ?", (email_val, message.from_user.id))
+                                await conn.execute("UPDATE subscriptions SET tg_id = ? WHERE email_account = ?", (message.from_user.id, email_val))
+                                await conn.commit()
+                                notice_text = (
+                                    f"Аккаунт успешно привязан к email: <b>{email_val}</b>\n"
+                                    f"Все ваши подписки с веб-сайта теперь доступны в Telegram-боте."
+                                )
+                            elif is_used:
+                                notice_text = "Эта ссылка для привязки уже была использована."
+                            else:
+                                notice_text = "Срок действия ссылки для привязки аккаунта истёк."
+                except Exception as e:
+                    logger.error("Error linking telegram account with token {}: {}", link_token, e)
+            else:
+                referrer_id = parse_referral_start_arg(arg)
+                if referrer_id:
+                    bound = await try_bind_referrer(message.from_user.id, referrer_id)
+                    if bound:
+                        welcome = await _purchase_hub_referral_welcome(message.from_user.id)
+                        notice_text = referral_bind_applied_text(welcome_eligible=welcome)
+                        await notify_referrer_friend_bound(
+                            referrer_id,
+                            friend_first_name=message.from_user.first_name,
+                            friend_username=message.from_user.username,
+                        )
+    await _show_main_menu(message, state=state, prepend_text=notice_text)
 
 
 @router.message(Command("subscription"))

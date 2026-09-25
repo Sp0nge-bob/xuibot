@@ -53,7 +53,8 @@ async def _deliver_result(tx_id: str, result: PaymentProcessResult) -> None:
     if not result.user_message:
         return
     order = await db.get_order_by_platega_tx(tx_id)
-    if not order:
+    if not order or not order.get("tg_id"):
+        # Заказ оформлен через веб-сайт (tg_id отсутствует)
         return
     from bot import bot as tg_bot, send_message
     from bot.fulfillment_delivery import deliver_fulfillment

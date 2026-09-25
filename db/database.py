@@ -146,6 +146,30 @@ async def _init_db_impl():
             await db.execute(
                 "ALTER TABLE subscriptions ADD COLUMN grant_bonus_days INTEGER NOT NULL DEFAULT 0"
             )
+        async with db.execute("PRAGMA table_info(users)") as cur:
+            user_cols = {row[1] for row in await cur.fetchall()}
+        if "email" not in user_cols:
+            await db.execute("ALTER TABLE users ADD COLUMN email TEXT")
+
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS email_accounts (
+                email TEXT PRIMARY KEY,
+                tg_id INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                is_blocked INTEGER DEFAULT 0,
+                block_reason TEXT DEFAULT '',
+                blocked_at TIMESTAMP
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS telegram_link_tokens (
+                token TEXT PRIMARY KEY,
+                email TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL,
+                used INTEGER DEFAULT 0
+            )
+        """)
         await _create_indexes(db)
         await db.commit()
 

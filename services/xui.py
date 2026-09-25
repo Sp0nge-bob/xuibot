@@ -27,6 +27,7 @@ from config.settings import settings
 from db.bot_settings import get_subscription_inbound_ids
 from services.panel_cache import get_panel_cache, invalidate_panel_cache, panel_cache
 from services.panel_inbounds import fetch_inbound_by_id, fetch_inbounds_list
+from services.crypto import decrypt_secret
 
 _apis: dict[int, AsyncApi] = {}
 _bot_group_ensured: set[int] = set()
@@ -137,9 +138,9 @@ async def get_api_for_node(node: dict, *, force_new: bool = False) -> AsyncApi:
         invalidate_api_cache(node_id)
     if node_id not in _apis:
         host = normalize_xui_host(node["host"])
-        token = (node.get("token") or "").strip()
+        token = decrypt_secret(node.get("token") or "").strip()
         username = (node.get("username") or "").strip()
-        password = node.get("password") or ""
+        password = decrypt_secret(node.get("password") or "")
         api: AsyncApi | None = None
 
         if token:

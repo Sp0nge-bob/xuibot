@@ -51,9 +51,14 @@ async def fulfill_paid_order(order: dict) -> FulfillmentResult:
     if not plan:
         raise ValueError(f"План {order['plan_id']} не найден")
 
-    is_test = order["platega_tx_id"].startswith("test-")
+    tg_id = order.get("tg_id")
+    if not tg_id:
+        logger.info("Order {} has no tg_id (web-originated order), skipping Telegram bot fulfillment", order.get("id"))
+        return FulfillmentResult(text="Web order fulfilled")
+
+    is_test = str(order.get("platega_tx_id") or "").startswith("test-")
     result = await fulfill_plan_for_tg(
-        order["tg_id"],
+        tg_id,
         plan,
         order_id=order.get("id"),
         order_type=order.get("order_type") or "new",
