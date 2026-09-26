@@ -200,6 +200,18 @@ async def reconcile_subscriptions_with_panel() -> dict[str, int]:
                     curr_disp = str(sub.get("display_name") or "").strip()
                     if real_email.startswith("tg") and curr_disp.startswith("Web ("):
                         await db.update_subscription_display_name(sub["id"], "Моя подписка")
+                    elif real_email.startswith("web"):
+                        if "_" in real_email:
+                            base_part, suffix = real_email.rsplit("_", 1)
+                            uid_part = base_part[3:]
+                            if curr_disp.startswith("Web (") or not curr_disp:
+                                new_disp = f"Web #{uid_part} ({suffix})"
+                                await db.update_subscription_display_name(sub["id"], new_disp)
+                        else:
+                            uid_part = real_email[3:]
+                            if curr_disp.startswith("Web (") or not curr_disp:
+                                new_disp = f"Web #{uid_part}"
+                                await db.update_subscription_display_name(sub["id"], new_disp)
                     elif "_" in real_email and not real_email.startswith("tg"):
                         base_email, suffix = real_email.rsplit("_", 1)
                         if suffix.isdigit():

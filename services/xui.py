@@ -33,7 +33,7 @@ _apis: dict[int, AsyncApi] = {}
 _bot_group_ensured: set[int] = set()
 _connect_logged: set[int] = set()
 _BOT_CLIENT_EMAIL = re.compile(
-    r"^(?:tg(?:free)?\d+(?:_\d+)?|web_[a-f0-9]+|[\w.+-]+@[\w.-]+(?:_\d+)?)$"
+    r"^(?:tg(?:free)?\d+(?:_\d+)?|web_?[a-zA-Z0-9]+(?:_\d+)?|[\w.+-]+@[\w.-]+(?:_\d+)?)$"
 )
 
 
