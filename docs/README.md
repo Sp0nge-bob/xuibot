@@ -34,6 +34,7 @@ sudo vpnplategabot update     # stable-релиз
 | [Troubleshooting](troubleshooting.md) | Типичные проблемы |
 | [Redis — план](redis-migration-plan.md) | FSM и сессии на Redis |
 | [PostgreSQL — план](postgresql-migration-plan.md) | Опциональный переход БД бота |
+| [Релиз v1.2.0](RELEASE_v1.2.0.md) | Web-экосистема, bulkAdjust, безопасность |
 
 ---
 
