@@ -223,11 +223,26 @@ def _bot_group() -> str:
     return (settings.XUI_CLIENT_GROUP or "").strip()
 
 
-async def ensure_bot_group_on_node(api: AsyncApi, node_id: int = 0) -> str:
-    """Создать группу бота на панели ноды (идемпотентно)."""
-    group = _bot_group()
-    if not group or node_id in _bot_group_ensured:
-        return group
+async def _get_client_target_group(email: str) -> str:
+    """Возвращает целевую группу для клиента (telegram-bot для tg*, web_client_group для web*)."""
+    clean_email = (email or "").strip()
+    if clean_email.startswith("web"):
+        try:
+            from db import bot_settings as bot_settings_db
+            web_group = await bot_settings_db.get_setting("web_client_group")
+            if web_group and web_group.strip():
+                return web_group.strip()
+        except Exception:
+            pass
+        return ""  # Для web-клиентов не форсируем группу telegram-bot!
+    return _bot_group()
+
+
+async def ensure_group_on_node(api: AsyncApi, group: str, node_id: int = 0) -> str:
+    """Создать группу на панели ноды (идемпотентно)."""
+    clean_grp = (group or "").strip()
+    if not clean_grp:
+        return ""
     try:
         names: set[str] = set()
         url = api.client._url("panel/api/clients/groups")
@@ -242,20 +257,30 @@ async def ensure_bot_group_on_node(api: AsyncApi, node_id: int = 0) -> str:
                 logger.debug("groups API недоступен на панели — пропуск")
             else:
                 logger.warning("Не удалось получить список групп: {}", e)
-            return group
+            return clean_grp
 
-        if group not in names:
+        if clean_grp not in names:
             create_url = api.client._url("panel/api/clients/groups/create")
             await _throttle()
             try:
-                await api.client._post(create_url, {"Accept": "application/json"}, {"name": group})
-                logger.info("Создана группа {} на панели", group)
+                await api.client._post(create_url, {"Accept": "application/json"}, {"name": clean_grp})
+                logger.info("Создана группа {} на панели", clean_grp)
             except Exception as e:
                 if not _is_not_found_error(e):
-                    logger.warning("Не удалось создать группу {}: {}", group, e)
+                    logger.warning("Не удалось создать группу {}: {}", clean_grp, e)
     finally:
-        _bot_group_ensured.add(node_id)
-    return group
+        pass
+    return clean_grp
+
+
+async def ensure_bot_group_on_node(api: AsyncApi, node_id: int = 0) -> str:
+    """Создать группу бота на панели ноды (идемпотентно)."""
+    group = _bot_group()
+    if not group or node_id in _bot_group_ensured:
+        return group
+    res = await ensure_group_on_node(api, group, node_id)
+    _bot_group_ensured.add(node_id)
+    return res
 
 
 async def ensure_bot_group() -> str:
@@ -270,13 +295,15 @@ async def ensure_bot_group() -> str:
     return await ensure_bot_group_on_node(api, node_id)
 
 
-async def _assign_client_group(api: AsyncApi, email: str) -> bool:
-    """Привязать клиента к группе бота через groups/bulkAdd (видно в UI панели)."""
+async def _assign_client_group(api: AsyncApi, email: str, group: str | None = None) -> bool:
+    """Привязать клиента к группе через groups/bulkAdd (видно в UI панели)."""
     _assert_bot_client_email(email)
-    group = _bot_group()
+    if group is None:
+        group = await _get_client_target_group(email)
     if not group:
         return False
 
+    await ensure_group_on_node(api, group)
     url = api.client._url("panel/api/clients/groups/bulkAdd")
     await _throttle()
     try:
@@ -335,6 +362,7 @@ def _unified_add_client_body(
     sub_id: str = "",
     enable: bool = True,
     limit_ip: int = 0,
+    group: str | None = None,
 ) -> dict[str, Any]:
     body: dict[str, Any] = {
         "email": email,
@@ -346,7 +374,6 @@ def _unified_add_client_body(
     }
     if sub_id:
         body["subId"] = sub_id
-    group = _bot_group()
     if group:
         body["group"] = group
     return body
@@ -364,6 +391,7 @@ async def _unified_add_client(
     limit_ip: int = 0,
 ) -> Client:
     _assert_bot_client_email(email)
+    target_group = await _get_client_target_group(email)
     payload = _unified_add_client_body(
         email=email,
         expiry_time=expiry_time,
@@ -371,6 +399,7 @@ async def _unified_add_client(
         sub_id=sub_id,
         enable=enable,
         limit_ip=limit_ip,
+        group=target_group,
     )
     url = api.client._url("panel/api/clients/add")
     await _throttle()
@@ -382,7 +411,8 @@ async def _unified_add_client(
         "clients/add {} → inboundIds {} expiryTime={} (subId={}, group={})",
         email, inbound_ids, expiry_time, sub_id, payload.get("group") or "—",
     )
-    await _assign_client_group(api, email)
+    if target_group:
+        await _assign_client_group(api, email, group=target_group)
     panel_cache.invalidate()
     return Client.model_validate(payload)
 
@@ -404,7 +434,10 @@ async def _unified_update_client(api: AsyncApi, client: Client, **overrides: Any
     }
     if sub:
         data["subId"] = str(sub)
-    group = overrides.get("group") or _bot_group()
+    if "group" in overrides:
+        group = overrides["group"]
+    else:
+        group = await _get_client_target_group(client.email)
     if group:
         data["group"] = str(group)
 
@@ -416,8 +449,8 @@ async def _unified_update_client(api: AsyncApi, client: Client, **overrides: Any
     desired_group = str(data.get("group") or "").strip()
     if desired_group and current_group == desired_group:
         logger.debug("groups/bulkAdd skip {} already in {}", client.email, desired_group)
-    else:
-        await _assign_client_group(api, client.email)
+    elif desired_group:
+        await _assign_client_group(api, client.email, group=desired_group)
     panel_cache.invalidate()
     logger.debug("clients/update {} expiry={}", client.email, data.get("expiryTime"))
 
