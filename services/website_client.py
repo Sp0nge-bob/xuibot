@@ -191,7 +191,7 @@ async def unlink_email_account(tg_id: int) -> dict:
                       AND (
                           origin = 'web'
                           OR display_name LIKE 'Web%'
-                          OR client_email LIKE 'web_%'
+                          OR client_email LIKE 'web%'
                           OR order_id IN (SELECT id FROM orders WHERE source = 'web')
                       )
                 """, (tg_id, email))
@@ -203,7 +203,7 @@ async def unlink_email_account(tg_id: int) -> dict:
                       AND (
                           origin = 'web'
                           OR display_name LIKE 'Web%'
-                          OR client_email LIKE 'web_%'
+                          OR client_email LIKE 'web%'
                           OR order_id IN (SELECT id FROM orders WHERE source = 'web')
                       )
                 """, (tg_id,))
@@ -219,7 +219,7 @@ async def unlink_email_account(tg_id: int) -> dict:
                           OR (
                               origin != 'web'
                               AND display_name NOT LIKE 'Web%'
-                              AND client_email NOT LIKE 'web_%'
+                              AND client_email NOT LIKE 'web%'
                               AND order_id NOT IN (SELECT id FROM orders WHERE source = 'web')
                           )
                       )
@@ -234,7 +234,7 @@ async def unlink_email_account(tg_id: int) -> dict:
                           OR (
                               origin != 'web'
                               AND display_name NOT LIKE 'Web%'
-                              AND client_email NOT LIKE 'web_%'
+                              AND client_email NOT LIKE 'web%'
                               AND order_id NOT IN (SELECT id FROM orders WHERE source = 'web')
                           )
                       )

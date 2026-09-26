@@ -162,7 +162,7 @@ async def _init_db_impl():
             WHERE (origin IS NULL OR origin = '' OR origin = 'bot')
               AND (
                   display_name LIKE 'Web%'
-                  OR client_email LIKE 'web_%'
+                  OR client_email LIKE 'web%'
                   OR (tg_id IS NULL AND email_account IS NOT NULL)
                   OR order_id IN (SELECT id FROM orders WHERE source = 'web')
               )
