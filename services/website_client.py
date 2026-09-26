@@ -53,9 +53,22 @@ async def request_otp_email(tg_id: int, email: str) -> dict:
     Отправляет запрос к сайту на генерацию и отправку OTP-кода через почтовый транспорт (SMTP/Resend).
     Опрашивает доступные кандидаты адреса сайта (порт 8090, 8080).
     """
+    clean_email = email.strip().lower()
+    try:
+        from db.connection import get_db
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT 1 FROM email_blacklist WHERE email = ? UNION SELECT 1 FROM email_accounts WHERE email = ? AND is_blocked = 1 LIMIT 1",
+                (clean_email, clean_email),
+            ) as bcur:
+                if await bcur.fetchone():
+                    return {"ok": False, "detail": "Данная почта находится в чёрном списке и не может быть привязана к Telegram."}
+    except Exception:
+        pass
+
     global _cached_working_base_url
     headers = _get_headers()
-    payload = {"email": email, "tg_id": tg_id}
+    payload = {"email": clean_email, "tg_id": tg_id}
     last_error_detail = "Сервис отправки почты временно недоступен. Попробуйте чуть позже."
 
     for base_url in get_candidate_base_urls():
@@ -106,9 +119,22 @@ async def verify_otp_email(tg_id: int, email: str, code: str) -> dict:
     """
     Отправляет введённый код на проверку в API сайта для подтверждения и привязки аккаунта.
     """
+    clean_email = email.strip().lower()
+    try:
+        from db.connection import get_db
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT 1 FROM email_blacklist WHERE email = ? UNION SELECT 1 FROM email_accounts WHERE email = ? AND is_blocked = 1 LIMIT 1",
+                (clean_email, clean_email),
+            ) as bcur:
+                if await bcur.fetchone():
+                    return {"ok": False, "detail": "Данная почта находится в чёрном списке и не может быть привязана к Telegram."}
+    except Exception:
+        pass
+
     global _cached_working_base_url
     headers = _get_headers()
-    payload = {"email": email, "code": code, "tg_id": tg_id}
+    payload = {"email": clean_email, "code": code, "tg_id": tg_id}
     last_error_detail = "Сервис проверки временно недоступен. Попробуйте позже."
 
     for base_url in get_candidate_base_urls():
@@ -326,6 +352,16 @@ async def link_telegram_token(
                 return {"ok": False, "detail": "Эта ссылка для привязки уже была использована."}
             if exp_at <= utc_now().isoformat():
                 return {"ok": False, "detail": "Срок действия ссылки для привязки истёк."}
+
+            try:
+                async with db.execute(
+                    "SELECT 1 FROM email_blacklist WHERE email = ? UNION SELECT 1 FROM email_accounts WHERE email = ? AND is_blocked = 1 LIMIT 1",
+                    (email_val, email_val),
+                ) as bcur:
+                    if await bcur.fetchone():
+                        return {"ok": False, "detail": "Данная почта находится в чёрном списке и не может быть привязана к Telegram."}
+            except Exception:
+                pass
 
             await db.execute("UPDATE telegram_link_tokens SET used = 1 WHERE token = ?", (token,))
             await db.execute(
