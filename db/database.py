@@ -177,6 +177,14 @@ async def _init_db_impl():
             user_cols = {row[1] for row in await cur.fetchall()}
         if "email" not in user_cols:
             await db.execute("ALTER TABLE users ADD COLUMN email TEXT")
+        if "email_bonus_granted" not in user_cols:
+            await db.execute("ALTER TABLE users ADD COLUMN email_bonus_granted INTEGER NOT NULL DEFAULT 0")
+            await db.execute("UPDATE users SET email_bonus_granted = 1 WHERE email IS NOT NULL AND TRIM(email) != ''")
+            await db.execute("""
+                UPDATE users
+                SET email_bonus_granted = 1
+                WHERE tg_id IN (SELECT tg_id FROM email_accounts WHERE tg_id IS NOT NULL AND tg_id > 0)
+            """)
 
         await db.execute("""
             CREATE TABLE IF NOT EXISTS email_accounts (
@@ -1199,3 +1207,81 @@ async def update_subscription_client_email(subscription_id: int, new_email: str)
         )
         await db.commit()
         return bool(cur.rowcount and cur.rowcount > 0)
+
+
+async def is_email_bonus_eligible(tg_id: int) -> bool:
+    """Проверяет, имеет ли пользователь право на получение бонуса за первую привязку email."""
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT email_bonus_granted FROM users WHERE tg_id = ?",
+            (tg_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            if not row:
+                return True
+            return int(row[0] or 0) == 0
+
+
+async def apply_email_link_bonus(tg_id: int) -> int:
+    """
+    Начисляет бонусные дни ко всем существующим подпискам пользователя,
+    если включена опция в настройках и пользователь ранее никогда не привязывал email.
+    Возвращает количество начисленных дней (0 если не применен).
+    """
+    from db import bot_settings as bot_settings_db
+    from services.xui import extend_client, get_unified_panel_client
+    from utils.utc import utc_iso_to_ms
+
+    enabled = await bot_settings_db.get_email_bonus_enabled()
+    if not enabled:
+        return 0
+
+    eligible = await is_email_bonus_eligible(tg_id)
+    if not eligible:
+        logger.info("Email link bonus: tg_id={} not eligible (already granted previously)", tg_id)
+        return 0
+
+    bonus_days = await bot_settings_db.get_email_bonus_days()
+    if bonus_days <= 0:
+        return 0
+
+    # 1. Помечаем пользователя как получившего бонус (атомарно защищает от повторных вызовов)
+    async with get_db() as db:
+        await db.execute(
+            "UPDATE users SET email_bonus_granted = 1 WHERE tg_id = ?",
+            (tg_id,),
+        )
+        await db.commit()
+
+    # 2. Находим все существующие подписки пользователя
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT id, client_email, end_date, is_active FROM subscriptions WHERE tg_id = ?",
+            (tg_id,),
+        ) as cur:
+            subs = [dict(r) for r in await cur.fetchall()]
+
+    if not subs:
+        logger.info("Email link bonus: tg_id={} has no subscriptions to extend, bonus recorded", tg_id)
+        return bonus_days
+
+    extended_count = 0
+    for sub in subs:
+        sub_id = int(sub["id"])
+        email = sub.get("client_email")
+        try:
+            new_end_iso = await extend_subscription_record(sub_id, bonus_days)
+            if email and await get_unified_panel_client(email):
+                await extend_client(email, bonus_days, target_expiry_ms=utc_iso_to_ms(new_end_iso))
+            extended_count += 1
+        except Exception as e:
+            logger.warning("Failed to extend sub #{} for email bonus tg_id={}: {}", sub_id, tg_id, e)
+
+    logger.success(
+        "Email link bonus: added +{}d to {} subscriptions for tg_id={}",
+        bonus_days,
+        extended_count,
+        tg_id,
+    )
+    return bonus_days
+

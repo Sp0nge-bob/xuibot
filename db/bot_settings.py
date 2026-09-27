@@ -22,6 +22,8 @@ SETTING_PAYMENT_ADMIN_NOTIFY = "payment_admin_notify_enabled"
 SETTING_TEST_MODE = "test_mode"
 SETTING_BOT_LOCKDOWN = "bot_lockdown"
 SETTING_BOT_LOCKDOWN_WHITELIST = "bot_lockdown_whitelist"
+SETTING_EMAIL_BONUS_ENABLED = "email_bonus_enabled"
+SETTING_EMAIL_BONUS_DAYS = "email_bonus_days"
 
 _SYNC_DISABLED_TRUTHY = frozenset({"1", "true", "yes", "on"})
 
@@ -474,3 +476,30 @@ async def set_bot_lockdown_whitelist(tg_ids: List[int]) -> List[int]:
         json.dumps(unique, separators=(",", ":")),
     )
     return unique
+
+
+async def get_email_bonus_enabled() -> bool:
+    raw = await get_setting(SETTING_EMAIL_BONUS_ENABLED)
+    if raw is None:
+        return False
+    return str(raw).strip().lower() in ("1", "true", "yes", "on")
+
+
+async def set_email_bonus_enabled(enabled: bool) -> None:
+    await set_setting(SETTING_EMAIL_BONUS_ENABLED, "1" if enabled else "0")
+
+
+async def get_email_bonus_days() -> int:
+    raw = await get_setting(SETTING_EMAIL_BONUS_DAYS)
+    if raw is None:
+        return 3
+    try:
+        return max(1, int(str(raw).strip()))
+    except (TypeError, ValueError):
+        return 3
+
+
+async def set_email_bonus_days(days: int) -> int:
+    val = max(1, min(365, int(days)))
+    await set_setting(SETTING_EMAIL_BONUS_DAYS, str(val))
+    return val

@@ -154,9 +154,17 @@ def build_happ_redirect_url(sub_key: str | int) -> str:
     Открывает эндпоинт сайта /happ/{sub_key}, который перенаправляет в приложение Happ.
     """
     import urllib.parse
-    base = (getattr(settings, "SUBSCRIPTION_BASE_URL", "") or "").strip()
-    if base:
-        parts = urllib.parse.urlsplit(base)
+    # 1. Явная настройка WEBSITE_PUBLIC_URL
+    target = (getattr(settings, "WEBSITE_PUBLIC_URL", "") or "").strip()
+    # 2. Публичный адрес сайта из PUBLIC_WEBHOOK_URL
+    if not target:
+        target = (getattr(settings, "PUBLIC_WEBHOOK_URL", "") or "").strip()
+    # 3. Резерв: SUBSCRIPTION_BASE_URL
+    if not target:
+        target = (getattr(settings, "SUBSCRIPTION_BASE_URL", "") or "").strip()
+
+    if target:
+        parts = urllib.parse.urlsplit(target)
         origin = f"{parts.scheme}://{parts.netloc}"
     else:
         origin = "https://caelixflow.com"

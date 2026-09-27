@@ -291,8 +291,11 @@ async def cmd_start(message: Message, state: FSMContext):
                 )
                 if res.get("ok"):
                     email_val = res.get("email") or ""
+                    from db.database import apply_email_link_bonus
+                    bonus_days = await apply_email_link_bonus(message.from_user.id)
+                    bonus_line = f"\n\n🎁 <b>Вам начислен бонус:</b> +{bonus_days} дн. ко всем подпискам!" if bonus_days > 0 else ""
                     notice_text = (
-                        f"✅ Аккаунт успешно привязан к email: <b>{email_val}</b>\n\n"
+                        f"✅ Аккаунт успешно привязан к email: <b>{email_val}</b>{bonus_line}\n\n"
                         f"Все ваши подписки с веб-сайта теперь доступны в Telegram-боте."
                     )
                 else:
@@ -463,9 +466,12 @@ async def msg_email_otp_input(message: Message, state: FSMContext):
 
     if res.get("ok"):
         await state.clear()
+        from db.database import apply_email_link_bonus
+        bonus_days = await apply_email_link_bonus(message.from_user.id)
+        bonus_line = f"\n\n🎁 <b>Вам начислен бонус:</b> +{bonus_days} дн. ко всем вашим подпискам!" if bonus_days > 0 else ""
         text = screen(
             "✅ Почта успешно привязана!",
-            f"Ваш аккаунт привязан к <b>{email}</b>.",
+            f"Ваш аккаунт привязан к <b>{email}</b>.{bonus_line}",
             "Все ваши подписки объединены с личным кабинетом на сайте.",
         )
         await message.answer(text, reply_markup=back_to_main_kb())

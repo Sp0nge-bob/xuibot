@@ -49,6 +49,7 @@ ADMIN_HUBS: dict[str, HubDef] = {
         "items": [
             ("👥 Клиенты", "adm:users"),
             ("🎫 Тикеты", "adm:tickets"),
+            ("🎁 Бонус за почту", "adm:email_bonus"),
         ],
     },
     "vpn": {

@@ -266,3 +266,74 @@ def test_candidate_urls_priority():
     assert "http://127.0.0.1:8090" in candidates
     assert "http://127.0.0.1:8080" in candidates
 
+
+def test_build_happ_redirect_url():
+    from config.settings import settings
+    from services.happ_crypto import build_happ_redirect_url
+
+    with patch.object(settings, "WEBSITE_PUBLIC_URL", "https://site.example.com"):
+        url = build_happ_redirect_url("abc-123")
+        assert url == "https://site.example.com/happ/abc-123"
+
+    with patch.object(settings, "WEBSITE_PUBLIC_URL", ""), \
+         patch.object(settings, "PUBLIC_WEBHOOK_URL", "https://mirror.example.com/platega-webhook"):
+        url = build_happ_redirect_url(42)
+        assert url == "https://mirror.example.com/happ/42"
+
+
+@pytest.mark.asyncio
+async def test_email_bonus_lifecycle():
+    from db import bot_settings as bot_settings_db
+    from db.database import apply_email_link_bonus, is_email_bonus_eligible, init_db
+    from db.connection import get_db
+
+    await init_db()
+    await bot_settings_db.init_bot_settings()
+
+    # Default settings
+    await bot_settings_db.set_email_bonus_enabled(False)
+    await bot_settings_db.set_email_bonus_days(5)
+    assert await bot_settings_db.get_email_bonus_enabled() is False
+    assert await bot_settings_db.get_email_bonus_days() == 5
+
+    test_user_id = 999111222
+    # Ensure user exists in users table with email_bonus_granted = 0
+    async with get_db() as db:
+        await db.execute("DELETE FROM users WHERE tg_id = ?", (test_user_id,))
+        await db.execute("DELETE FROM subscriptions WHERE tg_id = ?", (test_user_id,))
+        await db.execute("INSERT INTO users (tg_id, email_bonus_granted) VALUES (?, 0)", (test_user_id,))
+        await db.execute(
+            """INSERT INTO subscriptions (tg_id, client_email, end_date, is_active)
+               VALUES (?, 'client_sub_1@vpn.com', '2026-10-01T00:00:00+00:00', 1)""",
+            (test_user_id,),
+        )
+        await db.commit()
+
+    assert await is_email_bonus_eligible(test_user_id) is True
+
+    # 1. When bonus is disabled, nothing granted
+    granted = await apply_email_link_bonus(test_user_id)
+    assert granted == 0
+    assert await is_email_bonus_eligible(test_user_id) is True
+
+    # 2. When bonus is enabled, grants 5 days and marks user as granted
+    await bot_settings_db.set_email_bonus_enabled(True)
+    with patch("services.xui.get_unified_panel_client", return_value=None):
+        granted = await apply_email_link_bonus(test_user_id)
+    assert granted == 5
+
+    # Check that user is no longer eligible
+    assert await is_email_bonus_eligible(test_user_id) is False
+
+    # Check subscription end_date was extended
+    async with get_db() as db:
+        async with db.execute("SELECT end_date FROM subscriptions WHERE tg_id = ?", (test_user_id,)) as cur:
+            row = await cur.fetchone()
+            assert row[0].startswith("2026-10-06")
+
+    # 3. Second call returns 0 (cannot double-dip)
+    with patch("services.xui.get_unified_panel_client", return_value=None):
+        granted_again = await apply_email_link_bonus(test_user_id)
+    assert granted_again == 0
+
+

@@ -28,6 +28,7 @@ from .admin_diagnostics import router as admin_diagnostics_router
 from .admin_reboot import router as admin_reboot_router
 from .admin_broadcast import router as admin_broadcast_router
 from .admin_bulk_days import router as admin_bulk_days_router
+from .admin_email_bonus import router as admin_email_bonus_router
 from .faq import router as faq_router
 from .policy import router as policy_router
 from .middlewares import ActionLockMiddleware, MaintenanceLockdownMiddleware
@@ -70,6 +71,7 @@ dp.include_router(admin_legal_router)
 dp.include_router(admin_diagnostics_router)
 dp.include_router(admin_broadcast_router)
 dp.include_router(admin_bulk_days_router)
+dp.include_router(admin_email_bonus_router)
 dp.include_router(faq_router)
 dp.include_router(policy_router)
 

@@ -41,6 +41,7 @@ class AdminStates(StatesGroup):
     waiting_admin_extend_days = State()
     waiting_broadcast_message = State()
     waiting_bulk_days_custom = State()
+    waiting_email_bonus_days = State()
 
 
 class AdminPricingStates(StatesGroup):
