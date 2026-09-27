@@ -434,8 +434,9 @@ async def msg_email_input(message: Message, state: FSMContext):
         await state.set_state(UserStates.waiting_email_otp)
         text = screen(
             "✉️ Введите код из письма",
-            f"Одноразовый проверочный код отправлен на <b>{email}</b>.",
-            "Проверьте входящие сообщения (и папку «Спам» при необходимости).\n\nВведите 6-значный код:",
+            f"Одноразовый проверочный код отправлен на <b>{email}</b>.\n\n"
+            "💡 <i>Если письмо не пришло в течение 1–2 минут, обязательно проверьте папку «Спам».</i>",
+            "Введите 6-значный код:",
         )
         await message.answer(text, reply_markup=cancel_email_link_kb())
     else:
