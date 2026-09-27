@@ -146,3 +146,18 @@ async def encrypt_happ_subscription_link(plain_url: str, *, mode: str | None = N
         _cache[cache_key] = encrypted
         logger.debug("Happ crypto {} → {}", resolved_mode, encrypted[:40])
         return encrypted
+
+
+def build_happ_redirect_url(sub_key: str | int) -> str:
+    """
+    Генерирует веб-ссылку для 1-клик добавления подписки в Happ.
+    Открывает эндпоинт сайта /happ/{sub_key}, который перенаправляет в приложение Happ.
+    """
+    import urllib.parse
+    base = (getattr(settings, "SUBSCRIPTION_BASE_URL", "") or "").strip()
+    if base:
+        parts = urllib.parse.urlsplit(base)
+        origin = f"{parts.scheme}://{parts.netloc}"
+    else:
+        origin = "https://caelixflow.com"
+    return f"{origin}/happ/{sub_key}"

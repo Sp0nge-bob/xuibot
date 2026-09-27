@@ -342,6 +342,7 @@ def sub_email_search_kb() -> InlineKeyboardMarkup:
 def subscription_manage_kb(
     sub_id: int,
     *,
+    happ_url: str | None = None,
     refund_tickets: list[dict] | None = None,
     can_request_refund: bool = True,
     can_extend: bool = True,
@@ -349,9 +350,27 @@ def subscription_manage_kb(
     back_callback: str = "main_menu",
 ) -> InlineKeyboardMarkup:
     refund_tickets = refund_tickets or []
-    rows = [
-        [InlineKeyboardButton(text="🔗 Ссылка и QR", callback_data=f"sub_link:{sub_id}")],
+    rows: list[list[InlineKeyboardButton]] = []
+
+    # 1 строка - Одна большая кнопка - Добавить в Happ
+    if happ_url:
+        rows.append([InlineKeyboardButton(
+            text="📱 Добавить в Happ",
+            url=happ_url,
+        )])
+
+    # 2 строка - две кнопки, Ссылка и QR и Переименовать
+    row_2 = [
+        InlineKeyboardButton(text="🔗 Ссылка и QR", callback_data=f"sub_link:{sub_id}"),
     ]
+    if not is_trial:
+        row_2.append(InlineKeyboardButton(
+            text="✏️ Переименовать",
+            callback_data=f"sub_rename:{sub_id}",
+        ))
+    rows.append(row_2)
+
+    # 3 строка - Продлить подписку и купить еще одну
     purchase_extend_row: list[InlineKeyboardButton] = []
     if not is_trial and can_extend:
         purchase_extend_row.append(InlineKeyboardButton(
@@ -365,11 +384,8 @@ def subscription_manage_kb(
         ))
     if purchase_extend_row:
         rows.append(purchase_extend_row)
-    if not is_trial:
-        rows.append([InlineKeyboardButton(
-            text="✏️ Переименовать",
-            callback_data=f"sub_rename:{sub_id}",
-        )])
+
+    # 4 строка - тикеты возврата (если есть) и большая кнопка запросить возврат
     for ticket in refund_tickets:
         order_id = ticket.get("order_id")
         label = f"💬 Возврат заказа #{order_id}" if order_id else f"💬 Возврат #{ticket['id']}"
@@ -382,6 +398,8 @@ def subscription_manage_kb(
             text="💸 Запросить возврат",
             callback_data=f"refund:{sub_id}",
         )])
+
+    # 5 строка - назад и главное меню
     rows.append(nav_row(back_callback))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

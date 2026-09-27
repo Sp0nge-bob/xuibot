@@ -1932,3 +1932,45 @@ async def cb_sub_link(cb: CallbackQuery):
         )
 
 
+@router.callback_query(F.data.startswith("sub_info:"))
+async def cb_sub_info(cb: CallbackQuery):
+    await safe_cb_answer(cb)
+    sub_id = int(cb.data.split(":", 1)[1])
+    sub = await db.get_subscription_by_id(sub_id)
+    if not sub or sub["tg_id"] != cb.from_user.id:
+        await safe_cb_answer(cb, "Подписка не найдена", show_alert=True)
+        return
+
+    # 1. Показываем меню и статус подписки
+    from .tickets import show_subscription_detail
+    await show_subscription_detail(cb, cb.from_user.id, sub_id)
+
+    # 2. Выводим ссылку для подключения + QR-код
+    link = await build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
+    if link:
+        from services.fulfillment import make_qr_photo_async
+        from services.fulfillment_text import (
+            sub_link_needs_separate_message,
+            sub_link_standalone_message,
+        )
+        photo = await make_qr_photo_async(link, "vpn_link.png")
+        kb = back_to_main_kb()
+        kind = "🎁 Пробная" if is_trial_email(sub.get("client_email")) else "✅ Платная"
+        disp_name = subscription_display_name(sub)
+        if sub_link_needs_separate_message(link):
+            await cb.message.answer_photo(
+                photo,
+                caption=f"🔗 <b>{kind} подписка ({disp_name})</b>\n\nОтсканируйте QR или скопируйте ссылку ниже 👇",
+            )
+            followup = sub_link_standalone_message(link)
+            if followup:
+                await user_cb_message_answer(cb, followup, reply_markup=kb)
+        else:
+            await cb.message.answer_photo(
+                photo,
+                caption=f"🔗 <b>{kind} подписка ({disp_name})</b>\n\n<code>{link}</code>",
+                reply_markup=kb,
+            )
+
+
+

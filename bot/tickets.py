@@ -491,8 +491,11 @@ async def show_subscription_detail(
     # Если подписок несколько — «Назад» к списку; если одна — в главное меню
     active_subs = await get_active_subscriptions_for_ui(tg_id)
     back_cb = "manage_sub" if len(active_subs) > 1 else "main_menu"
+    from services.happ_crypto import build_happ_redirect_url
+    happ_url = build_happ_redirect_url(sub.get("sub_id") or sub.get("id"))
     kb = subscription_manage_kb(
         sub_id,
+        happ_url=happ_url,
         refund_tickets=refund_by_sub.get(sub_id, []),
         can_request_refund=can_refund,
         can_extend=not extend_blocked,
@@ -542,8 +545,11 @@ async def show_subscriptions_manage(
         sub = subs[0]
         sub_link = await build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
         text = subscription_manage_text(sub, sub_link, limit_ip=limit_ips.get(sub["id"]))
+        from services.happ_crypto import build_happ_redirect_url
+        happ_url = build_happ_redirect_url(sub.get("sub_id") or sub.get("id"))
         kb = subscription_manage_kb(
             sub["id"],
+            happ_url=happ_url,
             refund_tickets=refund_by_sub.get(sub["id"], []),
             can_request_refund=can_refund.get(sub["id"], False),
             can_extend=not extend_blocked,
