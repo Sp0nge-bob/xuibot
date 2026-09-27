@@ -799,7 +799,28 @@ async def get_pending_order(tg_id: int) -> Optional[Dict[str, Any]]:
             return dict(row) if row else None
 
 
+async def sync_web_subscriptions_for_user(tg_id: int) -> None:
+    """Связывает подписки веб-кабинета с текущим Telegram аккаунтом, если почта привязана."""
+    try:
+        async with get_db() as db:
+            await db.execute(
+                """UPDATE subscriptions
+                   SET tg_id = ?
+                   WHERE (tg_id IS NULL OR tg_id = 0)
+                     AND email_account IS NOT NULL
+                     AND (
+                         email_account IN (SELECT email FROM email_accounts WHERE tg_id = ? AND email IS NOT NULL)
+                         OR email_account IN (SELECT email FROM users WHERE tg_id = ? AND email IS NOT NULL)
+                     )""",
+                (tg_id, tg_id, tg_id),
+            )
+            await db.commit()
+    except Exception:
+        pass
+
+
 async def get_active_subscriptions(tg_id: int) -> List[Dict[str, Any]]:
+    await sync_web_subscriptions_for_user(tg_id)
     async with get_db() as db:
 
         async with db.execute(
