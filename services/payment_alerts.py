@@ -37,8 +37,18 @@ def format_payment_admin_notify_text(order: Dict[str, Any], user: Optional[Dict[
     amount = int(order.get("amount") or order.get("final_amount") or 0)
     order_id = order.get("id") or "—"
     tx_id = html.escape(str(order.get("platega_tx_id") or "—"))
-    order_type = order.get("order_type") or "new"
-    action = "Продление" if order_type == "extend" else "Новая подписка"
+    order_type = str(order.get("order_type") or "new").lower()
+    if order_type == "extend":
+        sub_name = str(order.get("sub_display_name") or "").strip()
+        sub_id = order.get("subscription_id")
+        if sub_name and not sub_name.startswith("Sub #"):
+            action = f"Продление (<b>{html.escape(sub_name)}</b>)"
+        elif sub_id:
+            action = f"Продление (<b>Подписка #{sub_id}</b>)"
+        else:
+            action = "Продление"
+    else:
+        action = "Новая подписка"
 
     source = str(order.get("source") or "bot").lower()
     source_label = "🌐 Сайт" if source in ("web", "website") else "🤖 Бот"
