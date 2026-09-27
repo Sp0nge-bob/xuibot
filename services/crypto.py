@@ -16,7 +16,6 @@ _cached_fernet: Optional[Fernet] = None
 _cached_candidates: Optional[list[Fernet]] = None
 
 KNOWN_FALLBACK_SECRETS = (
-    "93d0d106a23c4106813c5ba7b437d8c172e551aa1b3208598df6e1b4d1af168c",
     "super_secret_jwt_key_vpn_website_2026",
     "default_dev_secret_key_change_in_production",
 )
@@ -116,9 +115,15 @@ def _get_candidate_fernets() -> list[Fernet]:
     add_fernet(_make_hkdf_fernet(current_sec))
     add_fernet(_make_sha256_fernet(current_sec))
 
-    # 3. Известные резервные/исторические SECRET_KEY
+    # 3. Резервный ключ из .env (если задан OLD_SECRET_KEY)
+    old_sec = _clean_str(getattr(settings, "OLD_SECRET_KEY", ""))
+    if old_sec and old_sec != current_sec:
+        add_fernet(_make_hkdf_fernet(old_sec))
+        add_fernet(_make_sha256_fernet(old_sec))
+
+    # 4. Общеизвестные дефолты разработчика
     for fallback_sec in KNOWN_FALLBACK_SECRETS:
-        if fallback_sec != current_sec:
+        if fallback_sec != current_sec and fallback_sec != old_sec:
             add_fernet(_make_hkdf_fernet(fallback_sec))
             add_fernet(_make_sha256_fernet(fallback_sec))
 
