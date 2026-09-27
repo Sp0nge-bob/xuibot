@@ -21,6 +21,10 @@ def get_candidate_base_urls() -> list[str]:
     if cfg_url and cfg_url not in urls:
         urls.append(cfg_url)
 
+    site_url = (getattr(settings, "website_base_url", "") or "").strip().rstrip("/")
+    if site_url and site_url not in urls:
+        urls.append(site_url)
+
     defaults = [
         "http://127.0.0.1:8090",
         "http://127.0.0.1:8080",

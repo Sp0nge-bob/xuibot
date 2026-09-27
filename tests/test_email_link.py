@@ -271,14 +271,43 @@ def test_build_happ_redirect_url():
     from config.settings import settings
     from services.happ_crypto import build_happ_redirect_url
 
-    with patch.object(settings, "WEBSITE_PUBLIC_URL", "https://site.example.com"):
+    # 1. WEBSITE_PUBLIC_URL
+    with patch.object(settings, "WEBSITE_PUBLIC_URL", "https://site.example.com"), \
+         patch.object(settings, "WEBSITE_URL", ""), \
+         patch.object(settings, "WEBSITE_DOMAIN", ""):
         url = build_happ_redirect_url("abc-123")
         assert url == "https://site.example.com/happ/abc-123"
 
+    # 2. WEBSITE_URL
     with patch.object(settings, "WEBSITE_PUBLIC_URL", ""), \
+         patch.object(settings, "WEBSITE_URL", "https://site-url.com/some/path"), \
+         patch.object(settings, "WEBSITE_DOMAIN", ""):
+        url = build_happ_redirect_url("xyz")
+        assert url == "https://site-url.com/happ/xyz"
+
+    # 3. WEBSITE_DOMAIN (raw domain without protocol)
+    with patch.object(settings, "WEBSITE_PUBLIC_URL", ""), \
+         patch.object(settings, "WEBSITE_URL", ""), \
+         patch.object(settings, "WEBSITE_DOMAIN", "portal.caelixflow.com"):
+        url = build_happ_redirect_url(100)
+        assert url == "https://portal.caelixflow.com/happ/100"
+
+    # 4. Fallback to PUBLIC_WEBHOOK_URL if no website domain is set
+    with patch.object(settings, "WEBSITE_PUBLIC_URL", ""), \
+         patch.object(settings, "WEBSITE_URL", ""), \
+         patch.object(settings, "WEBSITE_DOMAIN", ""), \
          patch.object(settings, "PUBLIC_WEBHOOK_URL", "https://mirror.example.com/platega-webhook"):
         url = build_happ_redirect_url(42)
         assert url == "https://mirror.example.com/happ/42"
+
+    # 5. Fallback to default
+    with patch.object(settings, "WEBSITE_PUBLIC_URL", ""), \
+         patch.object(settings, "WEBSITE_URL", ""), \
+         patch.object(settings, "WEBSITE_DOMAIN", ""), \
+         patch.object(settings, "PUBLIC_WEBHOOK_URL", ""), \
+         patch.object(settings, "SUBSCRIPTION_BASE_URL", ""):
+        url = build_happ_redirect_url("def")
+        assert url == "https://caelixflow.com/happ/def"
 
 
 @pytest.mark.asyncio

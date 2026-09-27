@@ -154,18 +154,31 @@ def build_happ_redirect_url(sub_key: str | int) -> str:
     Открывает эндпоинт сайта /happ/{sub_key}, который перенаправляет в приложение Happ.
     """
     import urllib.parse
-    # 1. Явная настройка WEBSITE_PUBLIC_URL
-    target = (getattr(settings, "WEBSITE_PUBLIC_URL", "") or "").strip()
-    # 2. Публичный адрес сайта из PUBLIC_WEBHOOK_URL
-    if not target:
-        target = (getattr(settings, "PUBLIC_WEBHOOK_URL", "") or "").strip()
-    # 3. Резерв: SUBSCRIPTION_BASE_URL
-    if not target:
-        target = (getattr(settings, "SUBSCRIPTION_BASE_URL", "") or "").strip()
 
-    if target:
-        parts = urllib.parse.urlsplit(target)
-        origin = f"{parts.scheme}://{parts.netloc}"
-    else:
+    # 1. Приоритет: явная настройка домена/URL сайта (WEBSITE_PUBLIC_URL / WEBSITE_URL / WEBSITE_DOMAIN)
+    origin = getattr(settings, "website_base_url", "")
+
+    # 2. Публичный адрес сайта из PUBLIC_WEBHOOK_URL
+    if not origin:
+        target = (getattr(settings, "PUBLIC_WEBHOOK_URL", "") or "").strip()
+        if target:
+            if not target.startswith(("http://", "https://")):
+                target = f"https://{target}"
+            parts = urllib.parse.urlsplit(target)
+            if parts.netloc:
+                origin = f"{parts.scheme}://{parts.netloc}"
+
+    # 3. Резерв: SUBSCRIPTION_BASE_URL
+    if not origin:
+        target = (getattr(settings, "SUBSCRIPTION_BASE_URL", "") or "").strip()
+        if target:
+            if not target.startswith(("http://", "https://")):
+                target = f"https://{target}"
+            parts = urllib.parse.urlsplit(target)
+            if parts.netloc:
+                origin = f"{parts.scheme}://{parts.netloc}"
+
+    if not origin:
         origin = "https://caelixflow.com"
-    return f"{origin}/happ/{sub_key}"
+
+    return f"{origin.rstrip('/')}/happ/{sub_key}"

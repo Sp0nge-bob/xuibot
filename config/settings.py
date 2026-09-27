@@ -106,7 +106,10 @@ class Settings(BaseSettings):
     WEBHOOK_PORT: int = 8080
     WEBHOOK_PATH: str = "/platega-webhook"
     PUBLIC_WEBHOOK_URL: str = ""
+    # Веб-сайт / Портал пользователей
     WEBSITE_PUBLIC_URL: str = ""
+    WEBSITE_URL: str = ""
+    WEBSITE_DOMAIN: str = ""
     WEBSITE_WEBHOOK_URL: str = "http://127.0.0.1:8090/api/webhook/platega"
     WEBSITE_API_URL: str = "http://127.0.0.1:8090"
     SECRET_KEY: str = ""
@@ -168,6 +171,26 @@ class Settings(BaseSettings):
         def check(user_id: int) -> bool:
             return user_id in self.BOT_ADMINS
         return check
+
+    @property
+    def website_base_url(self) -> str:
+        """
+        Возвращает нормализованный публичный базовый URL веб-сайта (например, https://example.com).
+        Проверяет по приоритету: WEBSITE_PUBLIC_URL, WEBSITE_URL, WEBSITE_DOMAIN.
+        Поддерживает ввод с протоколом или без (site.com -> https://site.com).
+        """
+        import urllib.parse
+
+        for candidate in (self.WEBSITE_PUBLIC_URL, self.WEBSITE_URL, self.WEBSITE_DOMAIN):
+            raw = (candidate or "").strip()
+            if not raw:
+                continue
+            if not raw.startswith(("http://", "https://")):
+                raw = f"https://{raw}"
+            parts = urllib.parse.urlsplit(raw)
+            if parts.netloc:
+                return f"{parts.scheme}://{parts.netloc}"
+        return ""
 
     @model_validator(mode="before")
     @classmethod
