@@ -28,23 +28,39 @@ def _user_display(
 
 
 def format_payment_admin_notify_text(order: Dict[str, Any], user: Optional[Dict[str, Any]] = None) -> str:
-    tg_id = int(order["tg_id"])
+    raw_tg_id = order.get("tg_id")
+    tg_id = int(raw_tg_id) if raw_tg_id and int(raw_tg_id) > 0 else 0
     username = (user or {}).get("username")
     first_name = (user or {}).get("first_name")
 
     plan_name = html.escape(str(order.get("plan_name") or "—"))
-    amount = int(order.get("amount") or 0)
+    amount = int(order.get("amount") or order.get("final_amount") or 0)
     order_id = order.get("id") or "—"
     tx_id = html.escape(str(order.get("platega_tx_id") or "—"))
     order_type = order.get("order_type") or "new"
     action = "Продление" if order_type == "extend" else "Новая подписка"
 
+    source = str(order.get("source") or "bot").lower()
+    source_label = "🌐 Сайт" if source in ("web", "website") else "🤖 Бот"
+
     lines = [
         "💰 <b>Новая оплата</b>",
         "━━━━━━━━━━━━━━━━",
         "",
-        f"👤 Клиент: {_user_display(tg_id=tg_id, username=username, first_name=first_name)}",
-        f"🆔 TG ID: <code>{tg_id}</code>",
+        f"📱 Источник: <b>{source_label}</b>",
+    ]
+
+    if tg_id > 0:
+        lines.append(f"👤 Клиент: {_user_display(tg_id=tg_id, username=username, first_name=first_name)}")
+        lines.append(f"🆔 TG ID: <code>{tg_id}</code>")
+    else:
+        lines.append("👤 Клиент: <i>Веб-пользователь</i>")
+
+    cust_email = str(order.get("customer_email") or "").strip()
+    if cust_email:
+        lines.append(f"✉️ Email: <code>{html.escape(cust_email)}</code>")
+
+    lines.extend([
         "",
         f"📦 Тариф: <b>{plan_name}</b>",
         f"💵 Сумма: {money(amount)}",
@@ -52,7 +68,7 @@ def format_payment_admin_notify_text(order: Dict[str, Any], user: Optional[Dict[
         "",
         f"🧾 Заказ: <code>#{order_id}</code>",
         f"🆔 TX Platega: <code>{tx_id}</code>",
-    ]
+    ])
 
     method_key = (order.get("payment_method") or "").strip()
     if method_key:
@@ -83,7 +99,8 @@ async def notify_admins_payment_success(order: Dict[str, Any]) -> int:
         logger.warning("Payment admin notify skipped — BOT_ADMINS empty")
         return 0
 
-    user = await db.get_user(int(order["tg_id"]))
+    raw_tg_id = order.get("tg_id")
+    user = await db.get_user(int(raw_tg_id)) if raw_tg_id and int(raw_tg_id) > 0 else None
     text = format_payment_admin_notify_text(order, user)
 
     from bot.sender import send_message

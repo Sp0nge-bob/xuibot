@@ -366,3 +366,44 @@ async def test_email_bonus_lifecycle():
     assert granted_again == 0
 
 
+def test_payment_admin_notify_sources():
+    from services.payment_alerts import format_payment_admin_notify_text
+
+    # 1. Bot order
+    bot_order = {
+        "id": 101,
+        "tg_id": 123456,
+        "plan_name": "1 месяц",
+        "amount": 199,
+        "platega_tx_id": "tx-bot-123",
+        "order_type": "extend",
+        "source": "bot",
+        "customer_email": "user@vpn.com",
+    }
+    user = {"username": "testuser", "first_name": "Test"}
+    bot_text = format_payment_admin_notify_text(bot_order, user)
+    assert "📱 Источник: <b>🤖 Бот</b>" in bot_text
+    assert "@testuser" in bot_text
+    assert "✉️ Email: <code>user@vpn.com</code>" in bot_text
+    assert "<b>199 ₽</b>" in bot_text
+    assert "🔄 Тип: <b>Продление</b>" in bot_text
+
+    # 2. Web order without linked Telegram
+    web_order = {
+        "id": 102,
+        "tg_id": 0,
+        "plan_name": "3 месяца",
+        "amount": 499,
+        "platega_tx_id": "tx-web-456",
+        "order_type": "new",
+        "source": "web",
+        "customer_email": "webuser@example.com",
+    }
+    web_text = format_payment_admin_notify_text(web_order, None)
+    assert "📱 Источник: <b>🌐 Сайт</b>" in web_text
+    assert "Веб-пользователь" in web_text
+    assert "✉️ Email: <code>webuser@example.com</code>" in web_text
+    assert "<b>499 ₽</b>" in web_text
+    assert "🔄 Тип: <b>Новая подписка</b>" in web_text
+
+
