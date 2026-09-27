@@ -230,10 +230,6 @@ async def reconcile_subscriptions_with_panel() -> dict[str, int]:
 
 
 async def _sync_primary_from_db(subs: list[dict[str, Any]]) -> dict[str, int]:
-    # Сверка и автоматическое исправление client_email по уникальному sub_id
-    await reconcile_subscriptions_with_panel()
-    subs = await db.get_all_active_subscriptions()
-
     db_emails = {str(s["client_email"]).lower() for s in subs}
     orphans = await _purge_orphan_bot_clients_on_primary(db_emails)
 
