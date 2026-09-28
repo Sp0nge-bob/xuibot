@@ -43,6 +43,8 @@ class FulfillmentResult:
     setup_text: Optional[str] = None
     setup_photos: List[FSInputFile] = field(default_factory=list)
     subscription_id: Optional[int] = None
+    sub_id: Optional[str] = None
+    happ_url: Optional[str] = None
 
 
 async def fulfill_paid_order(order: dict) -> FulfillmentResult:
@@ -208,11 +210,16 @@ async def _fulfill_extend(
     photo = await make_qr_photo_async(sub_link or email, "vpn_extend.png")
     if log_context:
         logger.success("{} extended sub #{} for tg_id={}", log_context, target_sub["id"], tg_id)
+    from services.happ_crypto import build_happ_redirect_url
+    sub_key = target_sub.get("sub_id") or target_sub["id"]
+    happ_url = build_happ_redirect_url(sub_key)
     return FulfillmentResult(
         text=text,
         photo=photo,
         link_message=sub_link_standalone_message(sub_link),
         subscription_id=target_sub["id"],
+        sub_id=target_sub.get("sub_id"),
+        happ_url=happ_url,
     )
 
 
@@ -266,11 +273,15 @@ async def _fulfill_new(
     photo = await make_qr_photo_async(sub_link or email, "vpn.png")
     if log_context:
         logger.success("{} created sub #{} for tg_id={}", log_context, sub_db_id, tg_id)
+    from services.happ_crypto import build_happ_redirect_url
+    happ_url = build_happ_redirect_url(sub_id or sub_db_id)
     return FulfillmentResult(
         text=text,
         photo=photo,
         link_message=sub_link_standalone_message(sub_link),
         subscription_id=sub_db_id,
+        sub_id=sub_id,
+        happ_url=happ_url,
     )
 
 

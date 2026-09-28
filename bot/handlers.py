@@ -376,35 +376,59 @@ async def cb_main_menu(cb: CallbackQuery, state: FSMContext):
     await _show_main_menu(cb, edit=not had_faq_view, state=state)
 
 
+def _get_website_url() -> str:
+    url = getattr(settings, "website_base_url", "")
+    if not url:
+        import urllib.parse
+        target = (getattr(settings, "PUBLIC_WEBHOOK_URL", "") or "").strip()
+        if target:
+            if not target.startswith(("http://", "https://")):
+                target = f"https://{target}"
+            parts = urllib.parse.urlsplit(target)
+            if parts.netloc:
+                url = f"{parts.scheme}://{parts.netloc}"
+    return url or "https://caelixflow.com"
+
+
 @router.callback_query(F.data == "link_email_menu")
 async def cb_link_email_menu(cb: CallbackQuery, state: FSMContext):
     await state.clear()
     await safe_cb_answer(cb)
     user_row = await db.get_user(cb.from_user.id)
     user_email = (user_row.get("email") or "").strip() if user_row else None
+    site_url = _get_website_url()
 
     if user_email:
         text = screen(
             "✉️ Привязка почты",
-            f"К вашему Telegram привязана почта:\n<b>{user_email}</b>",
-            "Все ваши подписки объединены с личным кабинетом на сайте. Вы можете входить на сайт по этой почте с сохранением всех ключей.",
+            f"К вашему Telegram привязана почта:\n<b>{user_email}</b>\n\n"
+            f"🌐 <b>Личный кабинет на сайте:</b> <a href=\"{site_url}\">{site_url}</a>\n"
+            "Все ваши подписки объединены с личным кабинетом. Вы можете входить на сайт по этой почте "
+            "(через одноразовый код) и управлять своими VPN-ключами даже если Telegram заблокирован или недоступен.",
         )
     else:
         text = screen(
             "✉️ Привязка почты",
-            "Почта ещё не привязана.",
-            "Привязка объединит ваши покупки и подписки между Telegram-ботом и веб-сайтом. Вы сможете легко управлять подпиской и в боте, и в веб-кабинете.",
+            "Почта ещё не привязана.\n\n"
+            f"🌐 <b>Зачем привязывать почту?</b>\n"
+            f"• <b>Личный кабинет на сайте:</b> на <a href=\"{site_url}\">{site_url}</a> вы сможете войти без Telegram по коду из письма.\n"
+            "• <b>Защита от блокировок:</b> если Telegram заблокируют или он перестанет открываться, все ваши VPN-подписки, QR-коды и продление останутся доступны на сайте.\n"
+            "• <b>Единый доступ:</b> покупки в боте и на сайте объединяются в едином аккаунте.\n"
+            "• <b>Бонусные дни:</b> за первую привязку начисляются бонусные дни ко всем вашим подпискам!",
         )
-    await send_or_edit(cb, text, link_email_info_kb(user_email=user_email))
+    await send_or_edit(cb, text, link_email_info_kb(user_email=user_email, website_url=site_url))
 
 
 @router.callback_query(F.data == "start_link_email")
 async def cb_start_link_email(cb: CallbackQuery, state: FSMContext):
     await safe_cb_answer(cb)
     await state.set_state(UserStates.waiting_email_input)
+    site_url = _get_website_url()
     text = screen(
         "✉️ Привязка почты",
-        "Введите ваш адрес электронной почты (например: <code>user@example.com</code>):",
+        "Введите ваш адрес электронной почты (например: <code>user@example.com</code>):\n\n"
+        f"💡 <i>Почта свяжет ваш Telegram-аккаунт с сайтом <a href=\"{site_url}\">{site_url}</a>. "
+        "Вы сможете просматривать и продлевать подписки прямо с сайта в любое время.</i>",
         hint="На этот адрес будет отправлен 6-значный одноразовый код для подтверждения.",
     )
     await send_or_edit(cb, text, cancel_email_link_kb())
@@ -470,12 +494,21 @@ async def msg_email_otp_input(message: Message, state: FSMContext):
         from db.database import apply_email_link_bonus
         bonus_days = await apply_email_link_bonus(message.from_user.id)
         bonus_line = f"\n\n🎁 <b>Вам начислен бонус:</b> +{bonus_days} дн. ко всем вашим подпискам!" if bonus_days > 0 else ""
+        site_url = _get_website_url()
         text = screen(
             "✅ Почта успешно привязана!",
-            f"Ваш аккаунт привязан к <b>{email}</b>.{bonus_line}",
-            "Все ваши подписки объединены с личным кабинетом на сайте.",
+            f"Ваш аккаунт привязан к <b>{email}</b>.{bonus_line}\n\n"
+            f"🌐 Теперь вы можете войти в личный кабинет на сайте:\n<a href=\"{site_url}\">{site_url}</a>\n"
+            "Все ваши подписки и ключи автоматически объединены и доступны на сайте.",
         )
-        await message.answer(text, reply_markup=back_to_main_kb())
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        from bot.keyboards import BTN_HOME
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🌐 Открыть личный кабинет", url=site_url)],
+            [InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")],
+        ])
+        await message.answer(text, reply_markup=kb)
+
     else:
         err_detail = res.get("detail", "Неверный проверочный код.")
         await message.answer(
@@ -572,7 +605,7 @@ async def cb_trial_confirm(cb: CallbackQuery):
         link_message=result.link_message,
         setup_text=result.setup_text,
         setup_photos=result.setup_photos or None,
-        reply_markup=back_to_main_kb(),
+        reply_markup=fulfillment_success_kb(happ_url=result.happ_url),
     )
 
 
@@ -1330,7 +1363,7 @@ async def _apply_test_scenario(
             text=result.user_message,
             photo=result.photo,
             link_message=result.link_message,
-            reply_markup=fulfillment_success_kb(),
+            reply_markup=fulfillment_success_kb(happ_url=result.happ_url),
         )
         return
 
@@ -1418,7 +1451,7 @@ async def _respond_payment_flow(cb: CallbackQuery, order: dict, tx_id: str, flow
             text=result.user_message,
             photo=result.photo,
             link_message=result.link_message,
-            reply_markup=fulfillment_success_kb(),
+            reply_markup=fulfillment_success_kb(happ_url=result.happ_url),
         )
         return
     if status == "PENDING":
@@ -1734,7 +1767,7 @@ async def msg_promo_code(message: Message, state: FSMContext):
             text=result.fulfillment.text,
             photo=result.fulfillment.photo,
             link_message=result.fulfillment.link_message,
-            reply_markup=fulfillment_success_kb(),
+            reply_markup=fulfillment_success_kb(happ_url=getattr(result.fulfillment, "happ_url", None)),
         )
         return
 
@@ -1760,7 +1793,7 @@ async def _deliver_grant_fulfillment(cb: CallbackQuery, fulfillment) -> None:
         text=fulfillment.text,
         photo=fulfillment.photo,
         link_message=fulfillment.link_message,
-        reply_markup=fulfillment_success_kb(),
+        reply_markup=fulfillment_success_kb(happ_url=getattr(fulfillment, "happ_url", None)),
     )
 
 

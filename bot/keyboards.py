@@ -90,8 +90,10 @@ def main_menu_kb(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def link_email_info_kb(*, user_email: str | None = None) -> InlineKeyboardMarkup:
+def link_email_info_kb(*, user_email: str | None = None, website_url: str | None = None) -> InlineKeyboardMarkup:
     rows = []
+    if website_url:
+        rows.append([InlineKeyboardButton(text="🌐 Личный кабинет на сайте", url=website_url)])
     if user_email:
         rows.append([InlineKeyboardButton(text=BTN_CHANGE_EMAIL, callback_data="start_link_email")])
         rows.append([InlineKeyboardButton(text=BTN_UNLINK_EMAIL, callback_data="unlink_email_confirm")])
@@ -622,11 +624,16 @@ def back_to_main_kb() -> InlineKeyboardMarkup:
     ])
 
 
-def fulfillment_success_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text="📲 Как подключить подписку",
-            callback_data="faq:builtin:activation",
-        )],
-        [InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")],
-    ])
+def fulfillment_success_kb(*, happ_url: str | None = None) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if happ_url:
+        rows.append([InlineKeyboardButton(
+            text="📱 Добавить в Happ",
+            url=happ_url,
+        )])
+    rows.append([InlineKeyboardButton(
+        text="📲 Как подключить подписку",
+        callback_data="faq:builtin:activation",
+    )])
+    rows.append([InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)

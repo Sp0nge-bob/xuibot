@@ -25,6 +25,9 @@ class PaymentProcessResult:
     link_message: Optional[str] = None
     already_paid: bool = False
     amount_mismatch: bool = False
+    subscription_id: Optional[int] = None
+    sub_id: Optional[str] = None
+    happ_url: Optional[str] = None
 
 
 # Platega может прислать в callback сумму с комиссией сверх цены заказа (1 ₽ → 1.13 ₽).
@@ -185,6 +188,9 @@ async def handle_platega_status(
                     link_message=fulfillment.link_message,
                     setup_text=fulfillment.setup_text,
                     setup_photos=fulfillment.setup_photos,
+                    subscription_id=fulfillment.subscription_id,
+                    sub_id=fulfillment.sub_id,
+                    happ_url=fulfillment.happ_url,
                 )
             return PaymentProcessResult(handled=True)
         except Exception as e:

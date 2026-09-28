@@ -63,6 +63,15 @@ async def _deliver_result(tx_id: str, result: PaymentProcessResult) -> None:
     delays = _retry_delays()
     attempts = max(1, int(settings.FULFILLMENT_RETRY_ATTEMPTS))
 
+    happ_url = result.happ_url
+    if not happ_url:
+        from services.happ_crypto import build_happ_redirect_url
+        sub_key = result.sub_id or result.subscription_id or order.get("subscription_id")
+        if sub_key:
+            happ_url = build_happ_redirect_url(sub_key)
+
+    success_markup = fulfillment_success_kb(happ_url=happ_url)
+
     for attempt in range(1, attempts + 1):
         try:
             if result.photo:
@@ -72,13 +81,13 @@ async def _deliver_result(tx_id: str, result: PaymentProcessResult) -> None:
                     text=result.user_message,
                     photo=result.photo,
                     link_message=result.link_message,
-                    reply_markup=fulfillment_success_kb(),
+                    reply_markup=success_markup,
                 )
             else:
                 await send_message(
                     order["tg_id"],
                     result.user_message,
-                    reply_markup=fulfillment_success_kb(),
+                    reply_markup=success_markup,
                 )
             return
         except Exception as e:

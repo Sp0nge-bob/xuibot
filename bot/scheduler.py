@@ -92,7 +92,8 @@ async def expiry_reminder_job():
 
 
 async def check_nodes_health_job():
-    results = await check_all_nodes_health()
+    timeout = float(getattr(settings, "STARTUP_NODE_TIMEOUT_SEC", 25.0) or 25.0)
+    results = await check_all_nodes_health(timeout_sec=timeout)
     await apply_primary_health_results(results)
     await process_health_transitions(results)
     if not results:
