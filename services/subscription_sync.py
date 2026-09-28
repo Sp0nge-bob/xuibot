@@ -11,7 +11,6 @@ from services.xui import (
     audit_client_inbounds,
     get_panel_client_for_sync,
     is_bot_client_email,
-    remove_client_from_secondaries,
     repair_client_inbounds,
     get_api,
 )
@@ -110,7 +109,7 @@ async def _deactivate_after_primary_delete(sub: Dict[str, Any]) -> None:
             sub["id"], email,
         )
         return
-    await remove_client_from_secondaries(email)
+    # Клиент удалён на Primary, панель 3x-ui синхронизирует удаление со всеми нодами
     await db.deactivate_subscription(sub["id"])
 
 

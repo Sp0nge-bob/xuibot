@@ -1365,64 +1365,18 @@ async def is_client_present_on_any_node(email: str) -> bool:
 
 
 async def ensure_client_absent_everywhere(email: str) -> list[int]:
-    """Полная очистка на всех нодах: clients/del + settings purge."""
-    from db.xui_nodes import list_nodes
-
+    """Удаление клиента с Primary ноды (3x-ui автоматически удаляет его со всех остальных нод)."""
     _assert_bot_client_email(email)
-    all_purged: list[int] = []
-    nodes = _dedupe_nodes_by_host(await list_nodes(enabled_only=True))
-    targets = nodes or [{"host": settings.XUI_HOST}]
-
-    for node in targets:
-        name = node.get("name") or node.get("host") or node.get("id")
-        try:
-            api = await get_api_for_node(node) if nodes else await get_api()
-            purged = await _remove_client_on_node(api, email, inbound_ids=None)
-            all_purged.extend(purged)
-            logger.info("Очистка {} на {} (settings inbounds {})", email, name, purged or "—")
-        except Exception as e:
-            logger.error("Очистка {} на {} failed: {}", email, name, e)
-
+    api = await get_api()
+    purged = await _remove_client_on_node(api, email, inbound_ids=None)
+    logger.info("Удаление {} с Primary (settings inbounds {})", email, purged or "—")
     panel_cache.invalidate()
-    return sorted(set(all_purged))
+    return sorted(set(purged))
 
 
 async def purge_client_on_secondaries(email: str) -> list[str]:
-    """Удалить клиента с вторичных нод (призраки перед созданием на основной)."""
-    from db.xui_nodes import get_secondary_nodes
-
-    _assert_bot_client_email(email)
-    nodes = [
-        n
-        for n in _dedupe_nodes_by_host(await get_secondary_nodes(healthy_only=False))
-        if n.get("is_enabled", True)
-    ]
-    if not nodes:
-        return []
-
-    purged_nodes: list[str] = []
-    lock = asyncio.Lock()
-    sem = asyncio.Semaphore(settings.XUI_PANEL_CONCURRENCY)
-
-    async def _one(node: dict) -> None:
-        name = node.get("name") or str(node.get("id"))
-        async with sem:
-            try:
-                api = await get_api_for_node(node)
-                # Только unified get — полный scan settings/groups слишком медленный
-                if not await _unified_get_client_info(api, email):
-                    return
-                await remove_bot_client_on_panel(api, email)
-                async with lock:
-                    purged_nodes.append(str(name))
-                logger.info("Призрак {} удалён с вторичной {}", email, name)
-            except Exception as e:
-                logger.error("Не удалось удалить призрак {} с {}: {}", email, name, e)
-
-    await asyncio.gather(*[_one(n) for n in nodes])
-    if purged_nodes:
-        panel_cache.invalidate()
-    return purged_nodes
+    """Ранее требовалось ручное удаление призраков с вторичных нод. Теперь 3x-ui делает это с Primary."""
+    return []
 
 
 async def ensure_client_absent_on_primary(email: str) -> list[int]:
@@ -1719,39 +1673,8 @@ async def remove_client_from_secondaries(
     *,
     skip_hosts: set[str] | None = None,
 ) -> list[int]:
-    """Удаление tg-клиента только на вторичных нодах (без дублей host)."""
-    from db.xui_nodes import get_secondary_nodes
-
-    _assert_bot_client_email(email)
-    try:
-        nodes = _dedupe_nodes_by_host(
-            await get_secondary_nodes(healthy_only=False),
-        )
-    except Exception:
-        nodes = []
-
-    skip = {h.lower() for h in (skip_hosts or set())}
-    all_removed: list[int] = []
-    for node in nodes:
-        if not node.get("is_enabled", True):
-            continue
-        host_key = _node_host_key(node)
-        if host_key in skip:
-            continue
-        try:
-            api = await get_api_for_node(node)
-            removed = await _remove_client_on_node(api, email, inbound_ids=None)
-            all_removed.extend(removed)
-            logger.info(
-                "Removed {} from secondary {} ({}) inbounds {}",
-                email, node.get("name"), node.get("id"), removed,
-            )
-        except Exception as e:
-            logger.error(
-                "Remove {} on secondary node {} failed: {}",
-                email, node.get("id"), e,
-            )
-    return sorted(set(all_removed))
+    """Ранее требовалось ручное удаление со вторичных. Теперь 3x-ui синхронизирует удаление с Primary."""
+    return []
 
 
 async def remove_client_everywhere(email: str) -> list[int]:
