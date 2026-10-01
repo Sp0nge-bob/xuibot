@@ -175,6 +175,8 @@ async def is_support_interaction_allowed(
 
 
 async def is_user_allowed(tg_id: int) -> bool:
+    if tg_id in settings.BOT_ADMINS:
+        return True
     status = await get_lockdown_status()
     if status.draining:
         return True

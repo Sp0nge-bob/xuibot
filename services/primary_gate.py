@@ -1,6 +1,7 @@
 """Гейт ★ Primary: без рабочей основной ноды бот не стартует и не обслуживает пользователей."""
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any, Optional
 
@@ -13,6 +14,7 @@ from services.node_health import check_node_health
 _ready: bool = False
 _error: str = ""
 _checked_at: float = 0.0
+_refresh_task: asyncio.Task[bool] | None = None
 
 SERVICE_UNAVAILABLE_TEXT = (
     "⚠️ <b>Сервис временно недоступен</b>\n"
@@ -70,10 +72,24 @@ async def refresh_primary_ready() -> bool:
     return False
 
 
+def _schedule_background_refresh() -> None:
+    global _refresh_task
+    if _refresh_task is not None and not _refresh_task.done():
+        return
+    try:
+        loop = asyncio.get_running_loop()
+        _refresh_task = loop.create_task(refresh_primary_ready(), name="primary_gate_refresh")
+    except RuntimeError:
+        pass
+
+
 async def is_primary_operational(*, max_age_sec: float = 30.0) -> bool:
-    """Кэш с TTL для middleware (не ддосить панель на каждое нажатие)."""
-    if time.monotonic() - _checked_at > max_age_sec:
+    """Кэш с TTL для middleware (не блокирует нажатия кнопок при фоновом обновлении)."""
+    if _checked_at <= 0.0:
         await refresh_primary_ready()
+        return _ready
+    if time.monotonic() - _checked_at > max_age_sec:
+        _schedule_background_refresh()
     return _ready
 
 

@@ -40,6 +40,7 @@ async def send_photos_with_text(
     reply_markup=None,
     parse_mode: str = "HTML",
     user_id: int | None = None,
+    uploaded_file_ids: list[str] | None = None,
 ) -> list[int]:
     """
     Доставка текста с фото по правилам Telegram.
@@ -77,10 +78,16 @@ async def send_photos_with_text(
             parse_mode=parse_mode if caption else None,
             reply_markup=reply_markup,
         )
+        if uploaded_file_ids is not None and getattr(msg, "photo", None):
+            uploaded_file_ids.append(msg.photo[-1].file_id)
         return [msg.message_id]
 
     media = build_media_group(batch, caption=caption, parse_mode=parse_mode)
     album_messages = await bot.send_media_group(chat_id, media)
+    if uploaded_file_ids is not None:
+        for m in album_messages:
+            if getattr(m, "photo", None):
+                uploaded_file_ids.append(m.photo[-1].file_id)
     message_ids = [msg.message_id for msg in album_messages]
 
     if reply_markup:

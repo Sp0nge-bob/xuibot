@@ -37,6 +37,9 @@ async def send_faq_article(
     )
 
 
+_cached_happ_setup_file_ids: list[str] = []
+
+
 async def send_activation_setup_faq(
     bot: Bot,
     chat_id: int,
@@ -46,6 +49,7 @@ async def send_activation_setup_faq(
     client: str | None = None,
 ) -> list[int]:
     """Встроенная FAQ-статья подключения: выбор приложения, Happ (со скриншотами) или INCY."""
+    global _cached_happ_setup_file_ids
     from services.fulfillment_text import (
         activation_setup_text,
         happ_setup_text,
@@ -53,14 +57,31 @@ async def send_activation_setup_faq(
     )
 
     if client == "happ":
-        return await send_photos_with_text(
+        if _cached_happ_setup_file_ids:
+            try:
+                return await send_photos_with_text(
+                    bot,
+                    chat_id,
+                    happ_setup_text(),
+                    list(_cached_happ_setup_file_ids),
+                    reply_markup=reply_markup,
+                    user_id=chat_id,
+                )
+            except Exception:
+                _cached_happ_setup_file_ids = []
+        uploaded_ids: list[str] = []
+        msg_ids = await send_photos_with_text(
             bot,
             chat_id,
             happ_setup_text(),
             load_happ_setup_photos(),
             reply_markup=reply_markup,
             user_id=chat_id,
+            uploaded_file_ids=uploaded_ids,
         )
+        if uploaded_ids:
+            _cached_happ_setup_file_ids = uploaded_ids
+        return msg_ids
     if client == "incy":
         return await send_photos_with_text(
             bot,

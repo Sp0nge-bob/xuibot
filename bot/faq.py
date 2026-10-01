@@ -26,9 +26,15 @@ async def _open_faq_article(
     article: dict,
     *,
     from_faq: bool = True,
+    fallback_delete_msg: Message | None = None,
 ) -> None:
     photos = await faq_db.list_photos(article["id"])
-    await dismiss_faq_view(bot, chat_id)
+    had_view = await dismiss_faq_view(bot, chat_id)
+    if not had_view and fallback_delete_msg is not None:
+        try:
+            await fallback_delete_msg.delete()
+        except Exception:
+            pass
     if faq_db.is_activation_faq_article(article):
         nav = faq_activation_choice_kb(from_faq=from_faq)
         view_ids = await send_activation_setup_faq(
@@ -59,9 +65,9 @@ async def cmd_faq(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "help_hub")
 async def cb_help_hub(cb: CallbackQuery, state: FSMContext):
-    had_view = await dismiss_faq_view(cb.bot, cb.message.chat.id)
-    await state.set_state(None)
     await safe_cb_answer(cb)
+    await state.set_state(None)
+    had_view = await dismiss_faq_view(cb.message.bot, cb.message.chat.id)
     if had_view:
         await user_cb_message_answer(cb, help_hub_text(), reply_markup=help_hub_kb())
     else:
@@ -70,8 +76,8 @@ async def cb_help_hub(cb: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "faq_menu")
 async def cb_faq_menu(cb: CallbackQuery):
-    had_view = await dismiss_faq_view(cb.bot, cb.message.chat.id)
     await safe_cb_answer(cb)
+    had_view = await dismiss_faq_view(cb.message.bot, cb.message.chat.id)
     articles = await faq_db.list_articles(published_only=True)
     text = faq_empty_text() if not articles else faq_menu_text(len(articles))
     kb = faq_list_kb(articles if articles else [])
@@ -88,18 +94,25 @@ async def cb_faq_builtin_activation(cb: CallbackQuery):
         await safe_cb_answer(cb, "Статья не найдена", show_alert=True)
         return
     await safe_cb_answer(cb, "Выберите приложение")
-    try:
-        await cb.message.delete()
-    except Exception:
-        pass
-    await _open_faq_article(cb.message.bot, cb.message.chat.id, article, from_faq=True)
+    await _open_faq_article(
+        cb.message.bot,
+        cb.message.chat.id,
+        article,
+        from_faq=True,
+        fallback_delete_msg=cb.message,
+    )
 
 
 @router.callback_query(F.data.in_({"faq:activation:happ", "faq:activation:incy"}))
 async def cb_faq_activation_client(cb: CallbackQuery):
     client = cb.data.rsplit(":", 1)[1]
     await safe_cb_answer(cb)
-    await dismiss_faq_view(cb.message.bot, cb.message.chat.id)
+    had_view = await dismiss_faq_view(cb.message.bot, cb.message.chat.id)
+    if not had_view:
+        try:
+            await cb.message.delete()
+        except Exception:
+            pass
     nav = faq_activation_client_nav_kb(client=client)
     view_ids = await send_activation_setup_faq(
         cb.message.bot,
@@ -119,8 +132,10 @@ async def cb_faq_article(cb: CallbackQuery):
         await safe_cb_answer(cb, "Статья не найдена", show_alert=True)
         return
     await safe_cb_answer(cb)
-    try:
-        await cb.message.delete()
-    except Exception:
-        pass
-    await _open_faq_article(cb.message.bot, cb.message.chat.id, article, from_faq=True)
+    await _open_faq_article(
+        cb.message.bot,
+        cb.message.chat.id,
+        article,
+        from_faq=True,
+        fallback_delete_msg=cb.message,
+    )
