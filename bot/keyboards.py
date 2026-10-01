@@ -648,6 +648,26 @@ def grant_promo_extend_picker_kb(promo_id: int, subs: list[dict]) -> InlineKeybo
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def _days_left_label(sub: dict) -> str:
+    """Возвращает строку с оставшимися днями, например '(15 дн.)' или '' если нет даты."""
+    from datetime import datetime, timezone
+    end_date_str = sub.get("end_date") or ""
+    if not end_date_str:
+        return ""
+    try:
+        from utils.utc import parse_utc
+        end_dt = parse_utc(end_date_str)
+        if end_dt is None:
+            return ""
+        now = datetime.now(timezone.utc)
+        if end_dt.tzinfo is None:
+            end_dt = end_dt.replace(tzinfo=timezone.utc)
+        days = max(0, int((end_dt - now).total_seconds() // 86400))
+        return f" ({days} дн.)"
+    except Exception:
+        return ""
+
+
 def extend_sub_picker_kb(
     subs: list[dict],
     *,
@@ -655,7 +675,7 @@ def extend_sub_picker_kb(
 ) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(
-            text=subscription_short_label(sub),
+            text=subscription_short_label(sub) + _days_left_label(sub),
             callback_data=(
                 f"purchase_extend_sub:{plan_id}:{sub['id']}"
                 if plan_id
