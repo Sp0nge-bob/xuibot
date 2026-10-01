@@ -32,3 +32,18 @@ def fixed_now() -> datetime:
 @pytest.fixture
 def plan_1m() -> dict:
     return dict(PLAN_1M)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    import asyncio
+    try:
+        import db.connection as db_conn
+        if db_conn._conn is not None:
+            try:
+                loop = asyncio.new_event_loop()
+                loop.run_until_complete(db_conn.close_connection())
+                loop.close()
+            except Exception:
+                pass
+    except Exception:
+        pass

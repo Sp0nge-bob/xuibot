@@ -42,7 +42,7 @@ def _callback_amount_acceptable(
     tolerance: float = 0.01,
 ) -> bool:
     if callback_amount is None:
-        return True
+        return False
     try:
         order = float(order_amount)
         callback = float(callback_amount)
@@ -102,9 +102,15 @@ async def handle_platega_status(
         return PaymentProcessResult(handled=False)
 
     if callback_body:
+        details = callback_body.get("paymentDetails") or {}
         cb_amount = callback_body.get("amount")
+        if cb_amount is None and isinstance(details, dict):
+            cb_amount = details.get("amount")
         cb_currency = callback_body.get("currency")
-        if cb_amount is not None and not _callback_amount_acceptable(order["amount"], cb_amount):
+        if not cb_currency and isinstance(details, dict):
+            cb_currency = details.get("currency")
+        require_amount = status == "CONFIRMED" and source in ("webhook", "webhook_queue")
+        if (cb_amount is not None or require_amount) and not _callback_amount_acceptable(order["amount"], cb_amount):
             logger.error(
                 "Payment [{}]: amount mismatch tx={} order={} callback={}",
                 source, tx_id, order["amount"], cb_amount,

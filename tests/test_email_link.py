@@ -4,26 +4,21 @@ import pytest
 from unittest.mock import AsyncMock, patch
 
 from bot.keyboards import main_menu_kb, link_email_info_kb, cancel_email_link_kb, unlink_email_confirm_kb
-from ui.theme import BTN_POLICY, BTN_REFERRALS_SHORT, BTN_LINK_EMAIL
+from ui.theme import BTN_POLICY, BTN_REFERRALS_SHORT, BTN_LINK_EMAIL, BTN_HELP_HUB
 
 
 def test_main_menu_kb_structure():
     # 1. Without linked email
     kb = main_menu_kb()
-    # Check rows:
-    # row 0: tariffs, manage_sub
-    # row 1: faq, support
-    # row 2: policy, referrals (single row!)
-    # row 3: link email button
     buttons = [[b.text for b in row] for row in kb.inline_keyboard]
-    assert [BTN_POLICY, BTN_REFERRALS_SHORT] in buttons
-    assert [BTN_LINK_EMAIL] in buttons
+    assert [BTN_HELP_HUB, BTN_REFERRALS_SHORT] in buttons
+    assert [BTN_POLICY, BTN_LINK_EMAIL] in buttons
 
     # 2. With linked email
     kb_with_email = main_menu_kb(user_email="test@caelixflow.com")
     buttons_with_email = [[b.text for b in row] for row in kb_with_email.inline_keyboard]
-    assert [BTN_POLICY, BTN_REFERRALS_SHORT] in buttons_with_email
-    assert ["✉️ test@caelixflow.com"] in buttons_with_email
+    assert [BTN_HELP_HUB, BTN_REFERRALS_SHORT] in buttons_with_email
+    assert [BTN_POLICY, "✉️ test@caelixflow.com"] in buttons_with_email
 
 
 def test_email_link_keyboards():
@@ -264,7 +259,7 @@ def test_candidate_urls_priority():
     from services.website_client import get_candidate_base_urls
     candidates = get_candidate_base_urls()
     assert "http://127.0.0.1:8090" in candidates
-    assert "http://127.0.0.1:8080" in candidates
+    assert "http://127.0.0.1:8080" not in candidates
 
 
 def test_build_happ_redirect_url():

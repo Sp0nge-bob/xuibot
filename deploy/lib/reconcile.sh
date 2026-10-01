@@ -207,11 +207,6 @@ apply_code_tarball() {
     log "Накладываем код на $APP_DIR (без docs/report/*.md; .env/data/.venv сохраняем)"
     # shellcheck source=slim_excludes.sh
     source "$DEPLOY_DIR/lib/slim_excludes.sh"
-    # Prefer excludes from new tree if present
-    if [[ -f "$extract_root/deploy/lib/slim_excludes.sh" ]]; then
-        # shellcheck source=/dev/null
-        source "$extract_root/deploy/lib/slim_excludes.sh"
-    fi
     if command -v rsync >/dev/null 2>&1; then
         # shellcheck disable=SC2046
         rsync -a --delete \
@@ -306,7 +301,7 @@ update_from_latest_release() {
         return 1
     fi
 
-    if [[ -z "$tarball_url" ]]; then
+    if [[ -z "$tarball_url" || ! "$tarball_url" =~ ^https://(api\.github\.com|github\.com|codeload\.github\.com)/ ]]; then
         tarball_url="https://github.com/${slug}/archive/refs/tags/${tag}.tar.gz"
     fi
 

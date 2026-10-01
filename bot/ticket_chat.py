@@ -55,12 +55,13 @@ def user_label(
     tg_id: int,
     is_admin: bool = False,
 ) -> str:
+    import html
     if is_admin:
         return "Администратор"
     if username:
-        return f"@{username}"
+        return f"@{html.escape(username)}"
     if first_name:
-        return first_name
+        return html.escape(first_name)
     return str(tg_id)
 
 
@@ -99,9 +100,11 @@ def extract_message_content(message: Message) -> tuple[str, str | None, str | No
 
 
 def message_preview(content_type: str, body: str | None) -> str:
+    import html
     if content_type == "text" and body:
         text = body.strip()
-        return text[:200] + ("..." if len(text) > 200 else "")
+        raw_preview = text[:200] + ("..." if len(text) > 200 else "")
+        return html.escape(raw_preview)
     return _CONTENT_PREVIEW.get(content_type, "💬 Сообщение")
 
 
@@ -127,15 +130,17 @@ async def _copy_with_prefix(
     message: Message,
     prefix: str,
 ) -> None:
+    import html
     content_type, body, _ = extract_message_content(message)
     supports_caption = content_type in _CAPTION_TYPES
+    safe_body = html.escape(body) if body else ""
 
     if content_type == "text":
-        await bot.send_message(target_chat_id, f"{prefix}\n\n{body or ''}")
+        await bot.send_message(target_chat_id, f"{prefix}\n\n{safe_body}")
         return
 
     if supports_caption:
-        new_caption = f"{prefix}\n\n{body}" if body else prefix
+        new_caption = f"{prefix}\n\n{safe_body}" if safe_body else prefix
         if len(new_caption) > 1024:
             await bot.copy_message(
                 chat_id=target_chat_id,

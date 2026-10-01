@@ -96,11 +96,13 @@ def parse_create_response(data: Dict[str, Any]) -> Dict[str, Any]:
 def parse_status_response(data: Dict[str, Any]) -> Dict[str, Any]:
     status = normalize_platega_status(data.get("status") or "")
     details = data.get("paymentDetails") or {}
+    amount = details.get("amount") if isinstance(details, dict) and details.get("amount") is not None else data.get("amount")
+    currency = (details.get("currency") if isinstance(details, dict) else None) or data.get("currency")
     return {
         "tx_id": data.get("id") or data.get("transactionId"),
         "status": status,
-        "amount": details.get("amount"),
-        "currency": details.get("currency"),
+        "amount": amount,
+        "currency": currency,
         "expires_in": data.get("expiresIn"),
         "raw": data,
     }
@@ -189,6 +191,16 @@ async def get_transaction_status(transaction_id: str) -> Dict[str, Any]:
 
 
 async def verify_callback_headers(headers: Dict[str, str]) -> bool:
-    mid = headers.get("x-merchantid") or headers.get("X-MerchantId")
-    secret = headers.get("x-secret") or headers.get("X-Secret")
-    return mid == settings.PLATEGA_MERCHANT_ID and secret == settings.PLATEGA_SECRET
+    import hmac
+    expected_mid = (settings.PLATEGA_MERCHANT_ID or "").strip()
+    expected_secret = (settings.PLATEGA_SECRET or "").strip()
+    if not expected_mid or not expected_secret:
+        return False
+    mid = (headers.get("x-merchantid") or headers.get("X-MerchantId") or "").strip()
+    secret = (headers.get("x-secret") or headers.get("X-Secret") or "").strip()
+    if not mid or not secret:
+        return False
+    return (
+        hmac.compare_digest(mid.encode("utf-8"), expected_mid.encode("utf-8"))
+        and hmac.compare_digest(secret.encode("utf-8"), expected_secret.encode("utf-8"))
+    )

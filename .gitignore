@@ -67,5 +67,9 @@ htmlcov/
 # Runtime data
 data/
 *.db
+*.db-shm
+*.db-wal
 *.sqlite3
+*.bak
 data/*.db
+.test_tmp/

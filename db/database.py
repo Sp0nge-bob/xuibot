@@ -117,6 +117,8 @@ async def _init_db_impl():
             await db.execute("ALTER TABLE orders ADD COLUMN subscription_id INTEGER")
         if "sub_display_name" not in cols:
             await db.execute("ALTER TABLE orders ADD COLUMN sub_display_name TEXT")
+        if "source" not in cols:
+            await db.execute("ALTER TABLE orders ADD COLUMN source TEXT DEFAULT 'bot'")
         await db.execute("""
             CREATE TABLE IF NOT EXISTS subscriptions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -173,6 +175,17 @@ async def _init_db_impl():
             WHERE origin IS NULL OR origin = ''
         """)
 
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS email_accounts (
+                email TEXT PRIMARY KEY,
+                tg_id INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                is_blocked INTEGER DEFAULT 0,
+                block_reason TEXT DEFAULT '',
+                blocked_at TIMESTAMP
+            )
+        """)
+
         async with db.execute("PRAGMA table_info(users)") as cur:
             user_cols = {row[1] for row in await cur.fetchall()}
         if "email" not in user_cols:
@@ -185,17 +198,6 @@ async def _init_db_impl():
                 SET email_bonus_granted = 1
                 WHERE tg_id IN (SELECT tg_id FROM email_accounts WHERE tg_id IS NOT NULL AND tg_id > 0)
             """)
-
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS email_accounts (
-                email TEXT PRIMARY KEY,
-                tg_id INTEGER,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                is_blocked INTEGER DEFAULT 0,
-                block_reason TEXT DEFAULT '',
-                blocked_at TIMESTAMP
-            )
-        """)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS telegram_link_tokens (
                 token TEXT PRIMARY KEY,

@@ -7,6 +7,16 @@ from typing import Any, Optional
 
 from config.settings import settings
 from db.connection import get_db
+from services.crypto import decrypt_secret, encrypt_secret
+
+
+def _decrypt_node_row(row: Any) -> dict[str, Any]:
+    d = dict(row)
+    if d.get("password"):
+        d["password"] = decrypt_secret(str(d["password"]))
+    if d.get("token"):
+        d["token"] = decrypt_secret(str(d["token"]))
+    return d
 
 _INIT_DONE = False
 _INIT_IN_PROGRESS = False
@@ -151,6 +161,17 @@ async def _init_xui_nodes_impl() -> None:
             await db.execute(
                 "ALTER TABLE xui_nodes ADD COLUMN public_available INTEGER NOT NULL DEFAULT 1",
             )
+        async with db.execute("SELECT id, password, token FROM xui_nodes") as cur:
+            raw_nodes = await cur.fetchall()
+        for rn in raw_nodes:
+            nid, raw_pwd, raw_tok = rn[0], str(rn[1] or ""), str(rn[2] or "")
+            new_pwd = encrypt_secret(raw_pwd) if raw_pwd and not raw_pwd.startswith("enc:") else raw_pwd
+            new_tok = encrypt_secret(raw_tok) if raw_tok and not raw_tok.startswith("enc:") else raw_tok
+            if new_pwd != raw_pwd or new_tok != raw_tok:
+                await db.execute(
+                    "UPDATE xui_nodes SET password = ?, token = ? WHERE id = ?",
+                    (new_pwd, new_tok, nid),
+                )
         await db.commit()
 
     count = await _count_nodes()
@@ -323,7 +344,7 @@ async def list_nodes(*, enabled_only: bool = False) -> list[dict[str, Any]]:
     sql += " ORDER BY is_primary DESC, sort_order ASC, id ASC"
     async with get_db() as db:
         async with db.execute(sql) as cur:
-            return [dict(r) for r in await cur.fetchall()]
+            return [_decrypt_node_row(r) for r in await cur.fetchall()]
 
 
 async def get_node_by_host(host: str) -> Optional[dict[str, Any]]:
@@ -342,7 +363,7 @@ async def get_node(node_id: int) -> Optional[dict[str, Any]]:
     async with get_db() as db:
         async with db.execute("SELECT * FROM xui_nodes WHERE id = ?", (node_id,)) as cur:
             row = await cur.fetchone()
-            return dict(row) if row else None
+            return _decrypt_node_row(row) if row else None
 
 
 async def get_primary_node() -> Optional[dict[str, Any]]:
@@ -353,7 +374,7 @@ async def get_primary_node() -> Optional[dict[str, Any]]:
         ) as cur:
             row = await cur.fetchone()
             if row:
-                return dict(row)
+                return _decrypt_node_row(row)
     if settings.XUI_HOST:
         return {
             "id": 0,
@@ -415,8 +436,8 @@ async def create_node(
                 name.strip(),
                 host.strip(),
                 username,
-                password,
-                token,
+                encrypt_secret(password) if password else "",
+                encrypt_secret(token) if token else "",
                 format_inbound_ids(ids),
                 int(is_primary),
                 int(is_enabled),
@@ -446,6 +467,8 @@ async def update_node(node_id: int, **fields: Any) -> bool:
             continue
         if key == "inbound_ids" and isinstance(val, list):
             val = format_inbound_ids(val)
+        if key in ("password", "token") and val:
+            val = encrypt_secret(str(val))
         parts.append(f"{key} = ?")
         values.append(val)
     if not parts:

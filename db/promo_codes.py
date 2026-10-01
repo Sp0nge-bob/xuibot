@@ -306,8 +306,10 @@ async def record_promo_use(promo_id: int, tg_id: int, order_id: int) -> None:
             """UPDATE promo_codes SET used_count = used_count + 1
                WHERE id = ? AND is_active = 1
                  AND (max_uses IS NULL OR used_count < max_uses)
+                 AND (per_user_limit IS NULL OR per_user_limit <= 0
+                      OR (SELECT COUNT(*) FROM promo_uses WHERE promo_id = ? AND tg_id = ?) < per_user_limit)
                  AND NOT EXISTS (SELECT 1 FROM promo_uses WHERE order_id = ?)""",
-            (promo_id, order_id),
+            (promo_id, promo_id, tg_id, order_id),
         )
         if cur.rowcount == 0:
             return
@@ -350,28 +352,28 @@ async def record_grant_promo_use(
     skip_limit_check: bool = False,
 ) -> None:
     """Учёт grant-промокода. per_user_limit=0 — безлимит (как в _validate_promo_common)."""
-    if promo is None:
-        promo = await get_promo_by_id(promo_id)
+    promo = await get_promo_by_id(promo_id)
     if not promo or not promo.get("is_active"):
         raise ValueError("Промокод недоступен (лимит исчерпан)")
 
-    if not skip_limit_check:
-        max_uses = promo.get("max_uses")
-        if max_uses is not None and (promo.get("used_count") or 0) >= max_uses:
-            raise ValueError("Промокод недоступен (лимит исчерпан)")
+    max_uses = promo.get("max_uses")
+    if max_uses is not None and (promo.get("used_count") or 0) >= max_uses:
+        raise ValueError("Промокод недоступен (лимит исчерпан)")
 
-        per_user = int(promo.get("per_user_limit") or 0)
-        if per_user > 0:
-            user_uses = await count_user_promo_uses(promo_id, tg_id)
-            if user_uses >= per_user:
-                raise ValueError("Лимит промокода для вас исчерпан")
+    per_user = int(promo.get("per_user_limit") or 0)
+    if per_user > 0:
+        user_uses = await count_user_promo_uses(promo_id, tg_id)
+        if user_uses >= per_user:
+            raise ValueError("Лимит промокода для вас исчерпан")
 
     async with get_db() as db:
         cur = await db.execute(
             """UPDATE promo_codes SET used_count = used_count + 1
                WHERE id = ? AND is_active = 1
-                 AND (max_uses IS NULL OR used_count < max_uses)""",
-            (promo_id,),
+                 AND (max_uses IS NULL OR used_count < max_uses)
+                 AND (per_user_limit IS NULL OR per_user_limit <= 0
+                      OR (SELECT COUNT(*) FROM promo_uses WHERE promo_id = ? AND tg_id = ?) < per_user_limit)""",
+            (promo_id, promo_id, tg_id),
         )
         if cur.rowcount == 0:
             raise ValueError("Промокод недоступен (лимит исчерпан)")

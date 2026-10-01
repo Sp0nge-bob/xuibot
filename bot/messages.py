@@ -2040,11 +2040,12 @@ _REFERRAL_PROGRAM_TITLE = "👥 <b>Реферальная программа</b>
 
 
 def _referral_friend_display_name(f: dict, *, max_len: int = 36) -> str:
+    import html
     name = f.get("first_name") or f.get("username") or str(f.get("referred_tg_id"))
     name = str(name).strip()
-    if len(name) <= max_len:
-        return name
-    return name[: max_len - 1] + "…"
+    if len(name) > max_len:
+        name = name[: max_len - 1] + "…"
+    return html.escape(name)
 
 
 def _referral_friend_line(f: dict) -> str:

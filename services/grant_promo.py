@@ -43,6 +43,11 @@ def grant_promo_extend_picker_text(subs: list[dict[str, Any]]) -> str:
     )
 
 
+import asyncio
+
+_grant_promo_lock = asyncio.Lock()
+
+
 async def fulfill_grant_promo(
     tg_id: int,
     promo_id: int,
@@ -53,80 +58,79 @@ async def fulfill_grant_promo(
     skip_revalidate: bool = False,
 ) -> FulfillmentResult:
     """Применить grant-промокод после выбора пользователя (или сразу, если платной подписки нет)."""
-    if promo is None:
-        promo = await promo_db.get_promo_by_id(promo_id)
-    if not promo:
-        raise ValueError("Промокод не найден")
+    async with _grant_promo_lock:
+        promo = await promo_db.get_promo_by_id(promo_id) or promo
+        if not promo:
+            raise ValueError("Промокод не найден")
 
-    if not skip_revalidate:
         _, err = await validate_grant_promo(promo["code"], tg_id=tg_id)
         if err:
             raise ValueError(err)
 
-    plan_id = promo_db.grant_plan_id(promo)
-    plan = get_plan(plan_id or "")
-    if not plan:
-        raise ValueError("Тариф промокода не найден")
+        plan_id = promo_db.grant_plan_id(promo)
+        plan = get_plan(plan_id or "")
+        if not plan:
+            raise ValueError("Тариф промокода не найден")
 
-    from db import database as db
+        from db import database as db
 
-    bonus_sub_id: int | None = None
-    if mode == "new":
-        result = await fulfill_plan_for_tg(
+        bonus_sub_id: int | None = None
+        if mode == "new":
+            result = await fulfill_plan_for_tg(
+                tg_id,
+                plan,
+                order_id=None,
+                order_type="new",
+                subscription_id=None,
+                sub_display_name=None,
+                title_new="Промокод активирован!",
+                title_extend="Промокод применён — подписка продлена!",
+                log_context=f"Grant promo {promo['code']} (new sub)",
+            )
+            bonus_sub_id = result.subscription_id
+        else:
+            target_sub = None
+            if subscription_id:
+                target_sub = await db.get_subscription_by_id(subscription_id)
+                if (
+                    not target_sub
+                    or target_sub["tg_id"] != tg_id
+                    or not target_sub.get("is_active")
+                ):
+                    target_sub = None
+            if not target_sub:
+                target_sub = await db.get_primary_paid_subscription(tg_id)
+            if not target_sub:
+                raise ValueError("Нет активной платной подписки для продления")
+
+            result = await fulfill_plan_for_tg(
+                tg_id,
+                plan,
+                order_id=None,
+                order_type="extend",
+                subscription_id=target_sub["id"],
+                sub_display_name=None,
+                title_new="Промокод активирован!",
+                title_extend="Промокод применён — подписка продлена!",
+                log_context=f"Grant promo {promo['code']} (extend #{target_sub['id']})",
+            )
+            bonus_sub_id = target_sub["id"]
+
+        if bonus_sub_id:
+            await db.add_grant_bonus_days(bonus_sub_id, plan["days"])
+
+        await promo_db.record_grant_promo_use(
+            promo["id"],
             tg_id,
-            plan,
-            order_id=None,
-            order_type="new",
-            subscription_id=None,
-            sub_display_name=None,
-            title_new="Промокод активирован!",
-            title_extend="Промокод применён — подписка продлена!",
-            log_context=f"Grant promo {promo['code']} (new sub)",
+            subscription_id=bonus_sub_id,
+            promo=promo,
+            skip_limit_check=False,
         )
-        bonus_sub_id = result.subscription_id
-    else:
-        target_sub = None
-        if subscription_id:
-            target_sub = await db.get_subscription_by_id(subscription_id)
-            if (
-                not target_sub
-                or target_sub["tg_id"] != tg_id
-                or not target_sub.get("is_active")
-            ):
-                target_sub = None
-        if not target_sub:
-            target_sub = await db.get_primary_paid_subscription(tg_id)
-        if not target_sub:
-            raise ValueError("Нет активной платной подписки для продления")
-
-        result = await fulfill_plan_for_tg(
+        logger.info(
+            "Grant promo {} redeemed by tg_id={} mode={} sub={}",
+            promo["code"],
             tg_id,
-            plan,
-            order_id=None,
-            order_type="extend",
-            subscription_id=target_sub["id"],
-            sub_display_name=None,
-            title_new="Промокод активирован!",
-            title_extend="Промокод применён — подписка продлена!",
-            log_context=f"Grant promo {promo['code']} (extend #{target_sub['id']})",
+            mode,
+            bonus_sub_id,
         )
-        bonus_sub_id = target_sub["id"]
-
-    if bonus_sub_id:
-        await db.add_grant_bonus_days(bonus_sub_id, plan["days"])
-
-    await promo_db.record_grant_promo_use(
-        promo["id"],
-        tg_id,
-        subscription_id=bonus_sub_id,
-        promo=promo,
-        skip_limit_check=skip_revalidate,
-    )
-    logger.info(
-        "Grant promo {} redeemed by tg_id={} mode={} sub={}",
-        promo["code"],
-        tg_id,
-        mode,
-        bonus_sub_id,
-    )
-    return result
+        return result

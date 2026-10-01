@@ -147,8 +147,8 @@ class Settings(BaseSettings):
     ALLOW_DEBUG_ADMIN: bool = False
 
     # Безопасность и расшифровка учетных данных нод (совместимость с веб-панелью)
-    SECRET_KEY: str = ""
     ENCRYPTION_KEY: str = ""
+    OLD_SECRET_KEY: str = ""
 
     # Запускать polling внутри app.py (lifespan).
     # Продакшен: false — отдельно `python run_bot.py` + `python app.py`.

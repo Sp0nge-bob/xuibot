@@ -417,9 +417,11 @@ async def cb_link_email_menu(cb: CallbackQuery, state: FSMContext):
     site_url = _get_website_url()
 
     if user_email:
+        import html
+        safe_email = html.escape(user_email)
         text = screen(
             "✉️ Привязка почты",
-            f"К вашему Telegram привязана почта:\n<b>{user_email}</b>\n\n"
+            f"К вашему Telegram привязана почта:\n<b>{safe_email}</b>\n\n"
             f"🌐 <b>Личный кабинет на сайте:</b> <a href=\"{site_url}\">{site_url}</a>\n"
             "Все ваши подписки объединены с личным кабинетом. Вы можете входить на сайт по этой почте "
             "(через одноразовый код) и управлять своими VPN-ключами даже если Telegram заблокирован или недоступен.",
@@ -454,8 +456,9 @@ async def cb_start_link_email(cb: CallbackQuery, state: FSMContext):
 
 @router.message(UserStates.waiting_email_input)
 async def msg_email_input(message: Message, state: FSMContext):
-    email = (message.text or "").strip().lower()
+    import html
     import re
+    email = (message.text or "").strip().lower()
     if not re.match(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$", email):
         await message.answer(
             "❌ Некорректный формат email.\n\nПожалуйста, проверьте и введите корректный адрес:",
@@ -472,17 +475,17 @@ async def msg_email_input(message: Message, state: FSMContext):
         pass
 
     if res.get("ok"):
-        await state.update_data(link_email=email)
+        await state.update_data(link_email=email, otp_attempts=0)
         await state.set_state(UserStates.waiting_email_otp)
         text = screen(
             "✉️ Введите код из письма",
-            f"Одноразовый проверочный код отправлен на <b>{email}</b>.\n\n"
+            f"Одноразовый проверочный код отправлен на <b>{html.escape(email)}</b>.\n\n"
             "💡 <i>Если письмо не пришло в течение 1–2 минут, обязательно проверьте папку «Спам».</i>",
             "Введите 6-значный код:",
         )
         await message.answer(text, reply_markup=cancel_email_link_kb())
     else:
-        err_detail = res.get("detail", "Не удалось отправить код подтверждения.")
+        err_detail = html.escape(str(res.get("detail", "Не удалось отправить код подтверждения.")))
         await message.answer(
             f"❌ {err_detail}\n\nПопробуйте ввести другой адрес или нажмите отмену:",
             reply_markup=cancel_email_link_kb(),
@@ -491,12 +494,22 @@ async def msg_email_input(message: Message, state: FSMContext):
 
 @router.message(UserStates.waiting_email_otp)
 async def msg_email_otp_input(message: Message, state: FSMContext):
+    import html
     code = (message.text or "").strip().replace(" ", "")
     data = await state.get_data()
     email = data.get("link_email")
     if not email:
         await state.clear()
         await _show_main_menu(message)
+        return
+
+    attempts = int(data.get("otp_attempts") or 0)
+    if attempts >= 5:
+        await state.clear()
+        await message.answer(
+            "❌ Превышено количество попыток ввода кода. Запросите новый код.",
+            reply_markup=back_to_main_kb(),
+        )
         return
 
     wait_msg = await message.answer("⏳ Проверяем код...")
@@ -515,7 +528,7 @@ async def msg_email_otp_input(message: Message, state: FSMContext):
         site_url = _get_website_url()
         text = screen(
             "✅ Почта успешно привязана!",
-            f"Ваш аккаунт привязан к <b>{email}</b>.{bonus_line}\n\n"
+            f"Ваш аккаунт привязан к <b>{html.escape(email)}</b>.{bonus_line}\n\n"
             f"🌐 Теперь вы можете войти в личный кабинет на сайте:\n<a href=\"{site_url}\">{site_url}</a>\n"
             "Все ваши подписки и ключи автоматически объединены и доступны на сайте.",
         )
@@ -528,7 +541,16 @@ async def msg_email_otp_input(message: Message, state: FSMContext):
         await message.answer(text, reply_markup=kb)
 
     else:
-        err_detail = res.get("detail", "Неверный проверочный код.")
+        attempts += 1
+        err_detail = html.escape(str(res.get("detail", "Неверный проверочный код.")))
+        if attempts >= 5:
+            await state.clear()
+            await message.answer(
+                f"❌ {err_detail}\n\nПревышено количество попыток ввода кода. Запросите новый код.",
+                reply_markup=back_to_main_kb(),
+            )
+            return
+        await state.update_data(otp_attempts=attempts)
         await message.answer(
             f"❌ {err_detail}\n\nПопробуйте ввести код ещё раз или нажмите отмену:",
             reply_markup=cancel_email_link_kb(),
@@ -1186,6 +1208,9 @@ async def _start_payment(
 
 @router.callback_query(F.data.startswith("test_scenario:"))
 async def cb_test_scenario(cb: CallbackQuery, state: FSMContext):
+    if not await is_test_mode():
+        await safe_cb_answer(cb, "Доступно только в тестовом режиме", show_alert=True)
+        return
     if await _block_new_payment_cb(cb):
         return
     parts = cb.data.split(":")

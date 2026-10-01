@@ -34,38 +34,54 @@ async def get_trial_button_visible(tg_id: int) -> bool:
     return ok
 
 
+import asyncio
+
+_trial_locks: dict[int, asyncio.Lock] = {}
+
+
+def _get_trial_lock(tg_id: int) -> asyncio.Lock:
+    lock = _trial_locks.get(tg_id)
+    if lock is None:
+        if len(_trial_locks) > 5000:
+            _trial_locks.clear()
+        lock = asyncio.Lock()
+        _trial_locks[tg_id] = lock
+    return lock
+
+
 async def claim_trial(tg_id: int) -> FulfillmentResult:
-    ok, reason = await trial_db.can_claim_trial(tg_id)
-    if not ok:
-        raise ValueError(reason)
+    async with _get_trial_lock(tg_id):
+        ok, reason = await trial_db.can_claim_trial(tg_id)
+        if not ok:
+            raise ValueError(reason)
 
-    email = trial_client_email(tg_id)
-    end_ms = days_from_now_ms(TRIAL_DAYS)
-    end_iso = ms_to_utc_iso(end_ms)
-    import uuid
-    new_client_uuid = str(uuid.uuid4())
-    email, sub_id, sub_link = await provision_client(
-        tg_id=tg_id,
-        plan_days=TRIAL_DAYS,
-        traffic_gb=TRIAL_TRAFFIC_GB,
-        client_email=email,
-        client_uuid=new_client_uuid,
-        target_expiry_ms=end_ms,
-    )
+        email = trial_client_email(tg_id)
+        end_ms = days_from_now_ms(TRIAL_DAYS)
+        end_iso = ms_to_utc_iso(end_ms)
+        import uuid
+        new_client_uuid = str(uuid.uuid4())
+        email, sub_id, sub_link = await provision_client(
+            tg_id=tg_id,
+            plan_days=TRIAL_DAYS,
+            traffic_gb=TRIAL_TRAFFIC_GB,
+            client_email=email,
+            client_uuid=new_client_uuid,
+            target_expiry_ms=end_ms,
+        )
 
-    sub_db_id = await db.create_subscription(
-        tg_id=tg_id,
-        order_id=None,
-        inbound_id=0,
-        client_email=email,
-        client_uuid=new_client_uuid,
-        sub_id=sub_id,
-        days=TRIAL_DAYS,
-        traffic_gb=TRIAL_TRAFFIC_GB,
-        end_date=end_iso,
-    )
-    await trial_db.record_trial_grant(tg_id, sub_db_id)
-    schedule_secondary_sync(sub_db_id)
+        sub_db_id = await db.create_subscription(
+            tg_id=tg_id,
+            order_id=None,
+            inbound_id=0,
+            client_email=email,
+            client_uuid=new_client_uuid,
+            sub_id=sub_id,
+            days=TRIAL_DAYS,
+            traffic_gb=TRIAL_TRAFFIC_GB,
+            end_date=end_iso,
+        )
+        await trial_db.record_trial_grant(tg_id, sub_db_id)
+        schedule_secondary_sync(sub_db_id)
 
     inbound_count = await get_subscription_inbound_count()
     limit_ip = await get_trial_limit_ip()

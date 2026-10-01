@@ -25,7 +25,7 @@ def test_amount_below_order():
 
 
 def test_amount_missing_callback():
-    assert _callback_amount_acceptable(300, None) is True
+    assert _callback_amount_acceptable(300, None) is False
 
 
 def test_amount_garbage():

@@ -30,6 +30,7 @@ class ActionLockMiddleware(BaseMiddleware):
         )
         self._enabled = enabled if enabled is not None else settings.BOT_ACTION_LOCK_ENABLED
         self._processing: set[int] = set()
+        self._processing_since: dict[int, float] = {}
         self._last_callback: dict[int, tuple[str, float]] = {}
 
     @staticmethod
@@ -76,6 +77,7 @@ class ActionLockMiddleware(BaseMiddleware):
     def release_user(self, user_id: int) -> None:
         """Снять блокировку пользователя (для /reboot)."""
         self._processing.discard(user_id)
+        self._processing_since.pop(user_id, None)
 
     async def __call__(
         self,
@@ -93,16 +95,20 @@ class ActionLockMiddleware(BaseMiddleware):
         # /reboot у админа: абсолютный приоритет, снимает зависшую блокировку
         if isinstance(event, Message) and is_priority_reboot_message(event):
             self._processing.discard(user_id)
+            self._processing_since.pop(user_id, None)
             logger.warning("Priority /reboot от user {} — обход ActionLock", user_id)
             return await handler(event, data)
 
-        # Сброс зависшей блокировки при явных навигационных командах
+        # Сброс зависшей блокировки при явных навигационных командах только если предыдущий вызов завис (>45 сек)
         if isinstance(event, Message) and event.text and event.text.startswith("/"):
             cmd = event.text.split()[0].lower()
             if cmd in ("/start", "/menu", "/admin"):
                 if user_id in self._processing:
-                    self._processing.discard(user_id)
-                    logger.debug("Команда {} от user {} — сброс ActionLock", cmd, user_id)
+                    started_at = self._processing_since.get(user_id, 0.0)
+                    if time.monotonic() - started_at > 45.0:
+                        self._processing.discard(user_id)
+                        self._processing_since.pop(user_id, None)
+                        logger.debug("Команда {} от user {} — сброс зависшего ActionLock", cmd, user_id)
 
         if isinstance(event, CallbackQuery):
             cb_data = event.data or ""
@@ -120,7 +126,9 @@ class ActionLockMiddleware(BaseMiddleware):
             return None
 
         self._processing.add(user_id)
+        self._processing_since[user_id] = time.monotonic()
         try:
             return await handler(event, data)
         finally:
             self._processing.discard(user_id)
+            self._processing_since.pop(user_id, None)

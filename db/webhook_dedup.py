@@ -43,6 +43,7 @@ async def try_acquire_webhook(tx_id: str, status: str) -> bool:
 
     ttl = int(settings.WEBHOOK_IDEMPOTENCY_TTL_SEC)
     cutoff = _cutoff_iso(ttl)
+    inflight_cutoff = _cutoff_iso(60)
     now = datetime.utcnow().isoformat()
 
     async with get_db() as db:
@@ -53,8 +54,13 @@ async def try_acquire_webhook(tx_id: str, status: str) -> bool:
         ) as cur:
             row = await cur.fetchone()
 
-        if row and int(row[0]) == 1 and str(row[1]) >= cutoff:
-            return False
+        if row:
+            is_completed = int(row[0]) == 1
+            proc_at = str(row[1])
+            if is_completed and proc_at >= cutoff:
+                return False
+            if not is_completed and proc_at >= inflight_cutoff:
+                return False
 
         await db.execute(
             """

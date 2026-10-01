@@ -17,6 +17,13 @@ ExecStartPre=/bin/sleep 8
 ExecStart=@APP_DIR@/.venv/bin/python @APP_DIR@/app.py
 Restart=always
 RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+UMask=0077
 
 [Install]
 WantedBy=multi-user.target

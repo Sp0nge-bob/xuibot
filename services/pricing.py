@@ -127,7 +127,8 @@ async def get_plan_quote(
         promo = await promo_db.get_promo_by_code(effective_code)
         if promo and not is_grant_promo(promo):
             if from_pending:
-                if _promo_plan_allowed(promo, plan_id):
+                err = await _validate_promo_common(promo, tg_id=tg_id)
+                if err is None and _promo_plan_allowed(promo, plan_id):
                     promo_discount = calc_discount(
                         base_price, promo["discount_type"], promo["discount_value"],
                     )
@@ -235,3 +236,6 @@ async def apply_promo_on_paid_order(order: dict) -> None:
     await pending_db.consume_pending_discount(
         order["tg_id"], order["id"], promo_code,
     )
+    promo = await promo_db.get_promo_by_code(promo_code)
+    if promo and order.get("tg_id") is not None:
+        await promo_db.record_promo_use(promo["id"], order["tg_id"], order["id"])

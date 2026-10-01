@@ -120,16 +120,20 @@ async def platega_webhook(
 ):
     """Webhook от Platega — быстрый ответ, тяжёлая работа в очереди."""
     client_ip = request.client.host if request.client else "unknown"
+    headers = dict(request.headers)
+
+    if not await verify_callback_headers(headers):
+        if webhook_rate_limited(f"unauth:{client_ip}"):
+            logger.warning("Unauthorized webhook rate limited from {}", client_ip)
+            raise HTTPException(status_code=429, detail="Too many requests")
+        logger.warning("Invalid Platega callback headers from {}", client_ip)
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
     if webhook_rate_limited(client_ip):
         logger.warning("Webhook rate limited from {}", client_ip)
         raise HTTPException(status_code=429, detail="Too many requests")
 
     body = await request.json()
-    headers = dict(request.headers)
-
-    if not await verify_callback_headers(headers):
-        logger.warning("Invalid Platega callback headers")
-        raise HTTPException(status_code=401, detail="Unauthorized")
 
     tx_id = body.get("id")
     status = normalize_platega_status(body.get("status") or "")
@@ -158,9 +162,6 @@ async def platega_webhook(
                 fwd_candidates.append(cfg_web_url)
             for default_fwd in (
                 "http://127.0.0.1:8090/api/webhook/platega",
-                "http://127.0.0.1:8080/api/webhook/platega",
-                "http://127.0.0.1:8000/api/webhook/platega",
-                "http://127.0.0.1:8081/api/webhook/platega",
             ):
                 if default_fwd not in fwd_candidates:
                     fwd_candidates.append(default_fwd)

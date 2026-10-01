@@ -39,7 +39,7 @@ fix_permissions() {
         chmod -R u+rwX,go+rX "$APP_DIR/.venv"
     fi
     chown -R "$SERVICE_USER:$SERVICE_USER" "$APP_DIR/data" "$APP_DIR/.cache"
-    chmod -R u+rwX,go+rX "$APP_DIR/data" "$APP_DIR/.cache" 2>/dev/null || true
+    chmod -R u+rwX,go-rwx "$APP_DIR/data" "$APP_DIR/.cache" 2>/dev/null || true
 
     if [[ -f "$APP_DIR/.env" ]]; then
         chown "$SERVICE_USER:$SERVICE_USER" "$APP_DIR/.env"
