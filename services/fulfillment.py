@@ -303,20 +303,30 @@ def _success_text(
     inbound_count: int,
     limit_ip: int,
 ) -> str:
-    from ui.theme import screen, traffic_label
+    from services.fulfillment_text import IOS_REGION_GUIDE_URL
+    from ui.theme import quote_block, screen, traffic_label
 
-    details = [
+    spec_block = quote_block(
         f"📱 Подписка: <b>{display_name}</b>",
         f"📦 Тариф: <b>{plan['name']}</b>",
         f"📅 Действует до: <b>{end_date}</b>",
         f"📊 Трафик: {traffic_label(plan['traffic_gb'])}",
         format_connections_limit_line(limit_ip),
         f"👤 Клиент: <code>{client_email}</code>",
-        "",
-        panel_sync_notice_text(inbound_count),
-    ]
+    )
+    ios_note = (
+        f'🍏 <i>На iPhone Happ недоступен в РФ App Store — '
+        f'<a href="{IOS_REGION_GUIDE_URL}">инструкция по смене региона</a> '
+        f'или используйте <b>INCY</b>.</i>'
+    )
     footer = "⚠️ <i>Тестовый режим — оплата симулирована</i>" if is_test else None
-    return screen(f"✅ <b>{title}</b>", "\n".join(details), footer=footer)
+    return screen(
+        f"✅ <b>{title}</b>",
+        spec_block,
+        ios_note,
+        panel_sync_notice_text(inbound_count),
+        footer=footer,
+    )
 
 
 def load_happ_setup_photos() -> List[FSInputFile]:

@@ -187,6 +187,8 @@ def faq_article_nav_kb() -> InlineKeyboardMarkup:
 
 
 def faq_activation_choice_kb(*, from_faq: bool = True) -> InlineKeyboardMarkup:
+    from services.fulfillment_text import IOS_REGION_GUIDE_URL
+
     rows: list[list[InlineKeyboardButton]] = [
         [InlineKeyboardButton(
             text="📱 Инструкция Happ (со скриншотами)",
@@ -195,6 +197,10 @@ def faq_activation_choice_kb(*, from_faq: bool = True) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(
             text="🛡 Инструкция INCY (без смены региона РФ)",
             callback_data="faq:activation:incy",
+        )],
+        [InlineKeyboardButton(
+            text="🍏 Смена региона App Store (iOS)",
+            url=IOS_REGION_GUIDE_URL,
         )],
     ]
     if from_faq:
@@ -205,22 +211,26 @@ def faq_activation_choice_kb(*, from_faq: bool = True) -> InlineKeyboardMarkup:
 
 
 def faq_activation_client_nav_kb(*, client: str) -> InlineKeyboardMarkup:
-    other_btn = (
-        InlineKeyboardButton(
+    from services.fulfillment_text import IOS_REGION_GUIDE_URL
+
+    rows: list[list[InlineKeyboardButton]] = []
+    if client == "happ":
+        rows.append([InlineKeyboardButton(
+            text="🍏 Смена региона App Store (iOS)",
+            url=IOS_REGION_GUIDE_URL,
+        )])
+        rows.append([InlineKeyboardButton(
             text="🛡 Инструкция INCY",
             callback_data="faq:activation:incy",
-        )
-        if client == "happ"
-        else InlineKeyboardButton(
+        )])
+    else:
+        rows.append([InlineKeyboardButton(
             text="📱 Инструкция Happ",
             callback_data="faq:activation:happ",
-        )
-    )
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [other_btn],
-        [InlineKeyboardButton(text="◀️ Выбор приложения", callback_data="faq:builtin:activation")],
-        [InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")],
-    ])
+        )])
+    rows.append([InlineKeyboardButton(text="◀️ Выбор приложения", callback_data="faq:builtin:activation")])
+    rows.append([InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def plans_kb(

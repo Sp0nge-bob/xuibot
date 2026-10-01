@@ -438,10 +438,18 @@ def subscription_manage_text(
     *,
     limit_ip: int | None = None,
 ) -> str:
+    from services.fulfillment_text import IOS_REGION_GUIDE_URL
+
     title = subscription_display_name(sub)
+    ios_note = (
+        f'🍏 <i>На iPhone Happ недоступен в РФ App Store — '
+        f'<a href="{IOS_REGION_GUIDE_URL}">инструкция по смене региона</a> '
+        f'или используйте <b>INCY</b>.</i>'
+    )
     return screen(
         f"⚙️ <b>{title}</b>",
         _subscription_detail_block(sub, sub_link, limit_ip=limit_ip),
+        ios_note,
         hint="Что хотите сделать?",
     )
 
