@@ -135,3 +135,39 @@ def test_subscription_manage_text_omits_raw_link():
     txt = subscription_manage_text(sub, raw_link)
     assert raw_link not in txt
     assert "My Phone" in txt
+    assert "<blockquote>" in txt
+
+
+def test_help_hub_and_main_menu_3x2_layout():
+    from bot.keyboards import help_hub_kb, main_menu_kb
+    from ui.theme import format_email_button_label
+
+    main_kb = main_menu_kb(user_email="verylongemailaddress12345@gmail.com")
+    assert len(main_kb.inline_keyboard) == 3
+    assert all(len(row) == 2 for row in main_kb.inline_keyboard)
+    assert main_kb.inline_keyboard[1][0].callback_data == "help_hub"
+
+    hub = help_hub_kb()
+    hub_cbs = [btn.callback_data for row in hub.inline_keyboard for btn in row]
+    assert hub_cbs == ["faq:builtin:activation", "faq_menu", "support", "main_menu"]
+
+    short_lbl = format_email_button_label("a@b.ru")
+    assert short_lbl == "✉️ a@b.ru"
+    long_lbl = format_email_button_label("verylongemailaddress12345@gmail.com")
+    assert "…" in long_lbl
+    assert len(long_lbl) <= 24
+
+
+def test_match_subscription_by_name_and_email():
+    from services.subscription_search import match_subscription_by_email
+
+    subs = [
+        {"id": 1, "client_email": "tg111", "display_name": "брат"},
+        {"id": 2, "client_email": "tg222_2", "display_name": "мама"},
+        {"id": 3, "client_email": "tgfree333", "display_name": None},
+    ]
+    assert match_subscription_by_email(subs, "Брат")["id"] == 1
+    assert match_subscription_by_email(subs, "мам")["id"] == 2
+    assert match_subscription_by_email(subs, "пробная")["id"] == 3
+    assert match_subscription_by_email(subs, "tg222_2")["id"] == 2
+

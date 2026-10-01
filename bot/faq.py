@@ -12,9 +12,10 @@ from .keyboards import (
     faq_activation_client_nav_kb,
     faq_article_nav_kb,
     faq_list_kb,
+    help_hub_kb,
 )
-from .messages import faq_empty_text, faq_menu_text
-from .ui_helpers import safe_cb_answer, user_answer, user_cb_message_answer
+from .messages import faq_empty_text, faq_menu_text, help_hub_text
+from .ui_helpers import safe_cb_answer, send_or_edit, user_answer, user_cb_message_answer
 
 router = Router()
 
@@ -56,14 +57,28 @@ async def cmd_faq(message: Message, state: FSMContext):
     await show_faq_menu_message(message)
 
 
+@router.callback_query(F.data == "help_hub")
+async def cb_help_hub(cb: CallbackQuery, state: FSMContext):
+    had_view = await dismiss_faq_view(cb.bot, cb.message.chat.id)
+    await state.set_state(None)
+    await safe_cb_answer(cb)
+    if had_view:
+        await user_cb_message_answer(cb, help_hub_text(), reply_markup=help_hub_kb())
+    else:
+        await send_or_edit(cb, help_hub_text(), help_hub_kb())
+
+
 @router.callback_query(F.data == "faq_menu")
 async def cb_faq_menu(cb: CallbackQuery):
-    await dismiss_faq_view(cb.bot, cb.message.chat.id)
+    had_view = await dismiss_faq_view(cb.bot, cb.message.chat.id)
     await safe_cb_answer(cb)
     articles = await faq_db.list_articles(published_only=True)
     text = faq_empty_text() if not articles else faq_menu_text(len(articles))
     kb = faq_list_kb(articles if articles else [])
-    await user_cb_message_answer(cb, text, reply_markup=kb)
+    if had_view:
+        await user_cb_message_answer(cb, text, reply_markup=kb)
+    else:
+        await send_or_edit(cb, text, kb)
 
 
 @router.callback_query(F.data == "faq:builtin:activation")
@@ -73,7 +88,11 @@ async def cb_faq_builtin_activation(cb: CallbackQuery):
         await safe_cb_answer(cb, "Статья не найдена", show_alert=True)
         return
     await safe_cb_answer(cb, "Выберите приложение")
-    await _open_faq_article(cb.message.bot, cb.message.chat.id, article, from_faq=False)
+    try:
+        await cb.message.delete()
+    except Exception:
+        pass
+    await _open_faq_article(cb.message.bot, cb.message.chat.id, article, from_faq=True)
 
 
 @router.callback_query(F.data.in_({"faq:activation:happ", "faq:activation:incy"}))

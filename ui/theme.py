@@ -38,10 +38,37 @@ BTN_PURCHASE_PLANS = "📦 Выбрать тариф"
 BTN_EXIT = "🚪 Выход"
 BTN_SUPPORT_SHORT = "💬 Поддержка"
 BTN_FAQ = "❓ FAQ"
+BTN_HELP_HUB = "💬 Помощь и FAQ"
 BTN_POLICY = "📄 Документы"
 BTN_PRIVACY_POLICY = "📄 Политика конфиденциальности"
 BTN_TERMS_OF_SERVICE = "📜 Пользовательское соглашение"
 BTN_RESUME_PAY = "💳 Вернуться к оплате"
+
+
+def quote_block(*lines: str) -> str:
+    """Обернуть непустые строки в нативную плашку-цитату Telegram <blockquote>."""
+    cleaned = [str(line).strip() for line in lines if line is not None and str(line).strip()]
+    if not cleaned:
+        return ""
+    body = "\n".join(cleaned)
+    return f"<blockquote>{body}</blockquote>"
+
+
+def format_email_button_label(email: str | None, *, max_len: int = 20) -> str:
+    """Форматирует подпись кнопки почты так, чтобы длинный email не обрезался в 2-колоночной сетке."""
+    clean = (email or "").strip()
+    if not clean:
+        return BTN_LINK_EMAIL
+    if len(clean) <= max_len:
+        return f"✉️ {clean}"
+    if "@" in clean:
+        local, domain = clean.split("@", 1)
+        avail = max(3, max_len - len(domain) - 2)
+        if len(local) > avail:
+            short = f"{local[:avail]}…@{domain}"
+            if len(short) <= max_len + 2:
+                return f"✉️ {short}"
+    return f"✉️ {clean[: max_len - 1]}…"
 
 
 def screen(

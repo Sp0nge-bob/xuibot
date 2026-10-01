@@ -153,13 +153,7 @@ async def msg_sub_email_search(message: Message, state: FSMContext):
     query = raw.strip()
     if not query:
         await user_answer(message,
-            "❌ Введите email, например <code>tg123456789_2</code>",
-            reply_markup=sub_email_search_kb(),
-        )
-        return
-    if not normalize_email_query(query):
-        await user_answer(message,
-            "❌ Формат: <code>tg123456789</code> или <code>tg123456789_2</code>",
+            "❌ Введите название подписки, например <b>брат</b> или <b>Подписка 2</b>",
             reply_markup=sub_email_search_kb(),
         )
         return
@@ -168,8 +162,9 @@ async def msg_sub_email_search(message: Message, state: FSMContext):
     sub = match_subscription_by_email(subs, query)
     await state.set_state(None)
     if not sub:
+        import html
         await user_answer(message,
-            f"🔍 Подписка <code>{query}</code> не найдена среди ваших активных.",
+            f"🔍 Подписка <b>{html.escape(query)}</b> не найдена среди ваших активных.",
             reply_markup=sub_email_search_kb(),
         )
         return
@@ -462,9 +457,13 @@ async def show_subscription_detail(
     tg_id: int,
     sub_id: int,
 ) -> None:
+    from .faq_view import dismiss_faq_view
     from .messages import subscription_manage_text
     from services.limit_ip import resolve_limit_ip_for_email
     from services.xui import build_sub_link
+
+    if isinstance(target, CallbackQuery) and target.message:
+        await dismiss_faq_view(target.bot, target.message.chat.id)
 
     sub = await db.get_subscription_by_id(sub_id)
     if not sub or sub["tg_id"] != tg_id or not sub.get("is_active"):
@@ -516,12 +515,15 @@ async def show_subscriptions_manage(
     tg_id: int,
 ) -> None:
     """Экспорт для handlers.py — главное меню «Подписка» и /subscription."""
+    from .faq_view import dismiss_faq_view
     from .messages import subscription_manage_text, subscriptions_picker_text
     from .keyboards import subscriptions_picker_kb
     from services.limit_ip import resolve_limit_ip_for_email
 
     if isinstance(target, CallbackQuery):
         await safe_cb_answer(target)
+        if target.message:
+            await dismiss_faq_view(target.bot, target.message.chat.id)
 
     subs = await get_active_subscriptions_for_ui(tg_id)
     if not subs:

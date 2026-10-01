@@ -61,10 +61,14 @@ async def send_or_edit(
     text: str,
     reply_markup: InlineKeyboardMarkup | None = None,
 ) -> None:
-    """Редактирует текст или отправляет новое сообщение (если текущее — фото/без текста)."""
+    """Редактирует текст или отправляет новое сообщение (удаляя текущее фото/без текста)."""
     user_id = cb.from_user.id if cb.from_user else None
     text = clamp_telegram_text(await prepare_user_text(text, user_id))
     if cb.message.photo or cb.message.document or not cb.message.text:
+        try:
+            await cb.message.delete()
+        except Exception:
+            pass
         await cb.message.answer(text, reply_markup=reply_markup)
         return
     try:

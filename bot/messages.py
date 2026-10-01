@@ -9,6 +9,7 @@ from ui.theme import (
     format_date,
     money,
     price_per_month,
+    quote_block,
     renewal_hint,
     screen,
     traffic_label,
@@ -37,8 +38,8 @@ def _quote_discount_line(quote: PriceQuote, *, with_amount: bool = True) -> str:
 
 def _sub_kind_label(sub: Dict[str, Any]) -> str:
     if is_trial_email(sub.get("client_email")):
-        return "🎁 Пробная"
-    return f"📱 {subscription_display_name(sub)}"
+        return "🎁 <b>Пробная</b>"
+    return f"📱 <b>{subscription_display_name(sub)}</b>"
 
 
 def _sub_menu_line(sub: Dict[str, Any]) -> str:
@@ -63,18 +64,18 @@ def _pending_discount_menu_lines(promo: Dict[str, Any], expires_at: str) -> List
     plans_hint = f"<code>{allowed}</code>" if allowed else "любой тариф"
     return [
         "🎟 <b>Активная скидка</b>",
-        f"   └ Код: <code>{promo['code']}</code> · <b>−{_promo_discount_label(promo)}</b>",
-        f"   └ Тарифы: {plans_hint}",
-        f"   └ Действует до: <b>{expires} UTC</b>",
-        "   └ Применится при оплате в «Покупка»",
+        f"• Код: <code>{promo['code']}</code> · <b>−{_promo_discount_label(promo)}</b>",
+        f"• Тарифы: {plans_hint}",
+        f"• Действует до: <b>{expires} UTC</b>",
+        "• Применится при оплате в «Покупка»",
     ]
 
 
 def refund_pending_chargeback_notice() -> str:
-    return (
-        "💸 <b>Возврат средств в обработке</b>\n"
+    return quote_block(
+        "💸 <b>Возврат средств в обработке</b>",
         "Ваша подписка находится в состоянии возврата средств. "
-        "Она будет деактивирована, когда возврат подтвердится."
+        "Она будет деактивирована, когда возврат подтвердится.",
     )
 
 
@@ -105,26 +106,32 @@ def main_menu_text(
         blocks.append(refund_pending_chargeback_notice())
 
     if not subscriptions:
-        blocks.append(
-            "📊 Подписка: пока нет активной.\n"
-            "Можно начать с пробного периода или выбрать тариф."
-        )
+        blocks.append(quote_block(
+            "📊 <b>Подписка:</b> пока нет активной.",
+            "Можно начать с пробного периода или выбрать тариф.",
+        ))
     elif len(subscriptions) == 1:
-        blocks.append(f"📊 Ваша подписка:\n{_sub_menu_line(subscriptions[0])}")
+        blocks.append(quote_block(
+            "📊 <b>Ваша подписка:</b>",
+            _sub_menu_line(subscriptions[0]),
+        ))
     else:
-        lines = [f"   └ {_sub_menu_line(sub)}" for sub in subscriptions]
-        blocks.append("📊 Ваши подписки:\n" + "\n".join(lines))
+        lines = [_sub_menu_line(sub) for sub in subscriptions]
+        blocks.append(quote_block(
+            "📊 <b>Ваши подписки:</b>",
+            *lines,
+        ))
 
     if pending_discount_promo and pending_discount_expires_at:
-        blocks.append("\n".join(_pending_discount_menu_lines(
+        blocks.append(quote_block(*_pending_discount_menu_lines(
             pending_discount_promo, pending_discount_expires_at,
         )))
 
     if pending_payment_plan_name:
-        blocks.append(
-            f"⏳ <b>Незавершённая оплата</b>\n"
-            f"   └ Тариф: <b>{pending_payment_plan_name}</b> — нажмите «Вернуться к оплате»"
-        )
+        blocks.append(quote_block(
+            "⏳ <b>Незавершённая оплата</b>",
+            f"Тариф: <b>{pending_payment_plan_name}</b> — нажмите «Вернуться к оплате»",
+        ))
 
     footer = "⚠️ <i>Тестовый режим включён</i>" if test_mode else None
     return screen(
@@ -132,6 +139,14 @@ def main_menu_text(
         *blocks,
         hint="Выберите действие ниже 👇",
         footer=footer,
+    )
+
+
+def help_hub_text() -> str:
+    return screen(
+        "💬 <b>Помощь и FAQ</b>",
+        "Здесь собраны пошаговые инструкции по подключению, ответы на частые вопросы и связь с поддержкой.",
+        hint="Выберите нужный раздел ниже 👇",
     )
 
 
@@ -158,11 +173,13 @@ def project_policy_text() -> str:
         "\n".join([
             f"Официальные документы сервиса <b>{brand_name()}</b>:",
             "",
-            "📄 <b>Политика конфиденциальности</b>",
-            "   Какие данные собираем, как храним и защищаем.",
-            "",
-            "📜 <b>Пользовательское соглашение</b>",
-            "   Правила использования сервиса и оформления подписки.",
+            quote_block(
+                "📄 <b>Политика конфиденциальности</b>",
+                "Какие данные собираем, как храним и защищаем.",
+                "",
+                "📜 <b>Пользовательское соглашение</b>",
+                "Правила использования сервиса и оформления подписки.",
+            ),
         ]),
         hint="Нажмите кнопку ниже — документ откроется в браузере 👇",
     )
@@ -217,23 +234,34 @@ def purchase_hub_text(*, referral_welcome: bool = False) -> str:
             REFERRAL_WELCOME_BONUS_DAYS,
             REFERRAL_WELCOME_DISCOUNT_PERCENT,
         )
-        extra = (
+        extra = quote_block(
             f"🎁 По реферальной ссылке: <b>−{REFERRAL_WELCOME_DISCOUNT_PERCENT}%</b> "
             f"и <b>+{REFERRAL_WELCOME_BONUS_DAYS} дн.</b> на первую оплату."
         )
     return screen(
         "🛒 <b>Покупка</b>",
         "Сначала можно применить промокод или сразу выбрать тариф.",
-        extra,
+        extra or "",
         hint="Выберите действие ниже 👇",
     )
 
 
-def plans_menu_text(*, has_active_sub: bool = False) -> str:
-    hint = renewal_hint(has_active_sub=has_active_sub) or None
+def plans_menu_text(*, has_active_sub: bool = False, referral_welcome: bool = False) -> str:
+    extra = ""
+    if referral_welcome:
+        from config.referral import (
+            REFERRAL_WELCOME_BONUS_DAYS,
+            REFERRAL_WELCOME_DISCOUNT_PERCENT,
+        )
+        extra = quote_block(
+            f"🎁 По реферальной ссылке: <b>−{REFERRAL_WELCOME_DISCOUNT_PERCENT}%</b> "
+            f"и <b>+{REFERRAL_WELCOME_BONUS_DAYS} дн.</b> на первую оплату."
+        )
+    hint = renewal_hint(has_active_sub=has_active_sub) or "Выберите подходящий план или примените промокод 👇"
     return screen(
         "📦 <b>Тарифы</b>",
         "Выберите подходящий план.",
+        extra,
         hint=hint,
     )
 
@@ -250,7 +278,7 @@ def sub_name_prompt_text(default_name: str) -> str:
     return screen(
         "📱 <b>Название подписки</b>",
         "Как назвать новую подписку? Так будет проще отличать её в списке.",
-        f"По умолчанию: <b>{default_name}</b>",
+        quote_block(f"По умолчанию: <b>{default_name}</b>"),
         hint="Отправьте своё название (до 32 символов) или нажмите «Продолжить».",
     )
 
@@ -258,7 +286,7 @@ def sub_name_prompt_text(default_name: str) -> str:
 def sub_rename_prompt_text(current_name: str) -> str:
     return screen(
         "✏️ <b>Переименование</b>",
-        f"Текущее название: <b>{current_name}</b>",
+        quote_block(f"Текущее название: <b>{current_name}</b>"),
         hint="Отправьте новое название (до 32 символов).",
     )
 
@@ -268,7 +296,7 @@ def extend_sub_picker_text(subs: List[Dict[str, Any]]) -> str:
     return screen(
         "🔄 <b>Продление подписки</b>",
         "Выберите, какую подписку продлить:",
-        "\n".join(lines),
+        quote_block(*lines),
     )
 
 
@@ -286,7 +314,7 @@ def _price_block(quote: PriceQuote | None, plan: Plan) -> str:
         ]
     else:
         lines.append(f"💰 Цена: {money(plan['price'])} · ~{ppm} ₽/мес")
-    return "\n".join(lines)
+    return quote_block(*lines)
 
 
 def plan_card_text(
@@ -316,8 +344,10 @@ def plan_card_text(
 def payment_method_text(plan: Plan, method_name: str, method_emoji: str) -> str:
     return screen(
         "💳 <b>Оплата</b>",
-        f"📦 Тариф: <b>{plan['name']}</b> — {money(plan['price'])}",
-        f"💰 Способ: {method_emoji} <b>{method_name}</b>",
+        quote_block(
+            f"📦 Тариф: <b>{plan['name']}</b> — {money(plan['price'])}",
+            f"💰 Способ: {method_emoji} <b>{method_name}</b>",
+        ),
         hint="Нажмите кнопку ниже — откроется страница оплаты.",
     )
 
@@ -393,14 +423,13 @@ def _subscription_detail_block(
     left = days_left(sub["end_date"])
     traffic = traffic_label(sub.get("traffic_limit_gb", 0))
     lines = [
-        f"📱 <b>{subscription_display_name(sub)}</b>",
         f"📅 Действует до: <b>{end}</b> ({left} дн.)",
         f"📊 Трафик: {traffic}",
     ]
     if limit_ip is not None:
         lines.append(format_connections_limit_line(limit_ip))
     lines.append(f"👤 Клиент: <code>{sub['client_email']}</code>")
-    return "\n".join(lines)
+    return quote_block(*lines)
 
 
 def subscription_manage_text(
@@ -418,23 +447,25 @@ def subscription_manage_text(
 
 
 def subscriptions_picker_text(subs: List[Dict[str, Any]]) -> str:
-    lines = [f"• {_sub_menu_line(sub)}" for sub in subs]
+    lines = [_sub_menu_line(sub) for sub in subs]
     return screen(
         "⚙️ <b>Подписки</b>",
         f"Активных: <b>{len(subs)}</b>",
-        "\n".join(lines),
-        hint="Выберите подписку или найдите по email клиента (tg…).",
+        quote_block(*lines),
+        hint="Выберите подписку или найдите её по названию 👇",
     )
 
 
 def sub_email_search_prompt_text() -> str:
     return screen(
         "🔍 <b>Поиск подписки</b>",
-        "Отправьте email клиента с панели, например:",
-        "• <code>tg123456789</code>\n"
-        "• <code>tg123456789_2</code>\n"
-        "• <code>tgfree123456789</code>",
-        hint="Можно ввести только цифры — бот подставит префикс tg.",
+        "Отправьте название подписки, например:",
+        quote_block(
+            "• <b>брат</b>",
+            "• <b>мама</b>",
+            "• <b>Подписка 3</b>",
+        ),
+        hint="Также можно ввести ID клиента (tg…).",
     )
 
 
@@ -451,12 +482,12 @@ def trial_offer_text(*, limit_ip: int) -> str:
 
     return screen(
         "🎁 <b>Пробный период</b>",
-        "\n".join([
+        quote_block(
             f"⏱ Срок: <b>{TRIAL_DAYS} дн.</b>",
             f"📊 Трафик: <b>{TRIAL_TRAFFIC_GB} ГБ</b>",
             format_connections_limit_line(limit_ip),
-            f"👤 Клиент: <code>tgfree…</code>",
-        ]),
+            "👤 Клиент: <code>tgfree…</code>",
+        ),
         f"Доступен <b>1 раз в {TRIAL_COOLDOWN_DAYS} дн.</b> на аккаунт Telegram.\n"
         "После окончания можно оформить платный тариф.",
         hint="Активировать пробный период?",
@@ -2016,7 +2047,7 @@ def _referral_friend_line(f: dict) -> str:
         status = "⏸ истёк"
     else:
         status = "— без оплаты"
-    return f"   └ {_referral_friend_display_name(f)} · {status}"
+    return f"• {_referral_friend_display_name(f)} · {status}"
 
 
 def _referral_list_notice(shown_count: int) -> str:
@@ -2033,10 +2064,10 @@ def _referral_program_screen(
     lines = list(base_lines)
     if friend_lines:
         lines.append("")
-        lines.append("<b>Приглашённые:</b>")
-        lines.extend(friend_lines)
+        friend_block = ["<b>Приглашённые:</b>", *friend_lines]
         if invited > shown_count:
-            lines.append(_referral_list_notice(shown_count))
+            friend_block.append(_referral_list_notice(shown_count))
+        lines.append(quote_block(*friend_block))
     return screen(_REFERRAL_PROGRAM_TITLE, "\n".join(lines))
 
 
@@ -2098,23 +2129,29 @@ def referral_program_text(
         REFERRAL_WELCOME_DISCOUNT_PERCENT,
     )
 
-    base_lines = [
-        f"🔗 <b>Ваша ссылка:</b>\n<code>{link}</code>",
-        "",
-        "<b>Для друга</b> (первая оплата по ссылке):",
-        f"   └ скидка <b>{REFERRAL_WELCOME_DISCOUNT_PERCENT}%</b> + <b>{REFERRAL_WELCOME_BONUS_DAYS} дн.</b>",
-        "",
-        "<b>Для вас:</b>",
-        f"   └ скидка <b>{tier_percent}%</b> на тарифы (макс. {REFERRAL_TIER_MAX_PERCENT}%), пока у приглашённых активна подписка",
-        f"   └ <b>+{REFERRAL_PAYMENT_BONUS_DAYS} дн.</b> за каждую оплату друга",
-        "",
+    stats_lines = [
         f"📊 Приглашено: <b>{invited}</b> · оплатили: <b>{paid}</b> · активны: <b>{active}</b>",
         f"🎁 Заработано дней: <b>{earned_days}</b>",
     ]
     if pending_days > 0:
-        base_lines.append(
+        stats_lines.append(
             f"⏳ В очереди: <b>{pending_days}</b> дн. (применятся к вашей подписке)"
         )
+
+    base_lines = [
+        f"🔗 <b>Ваша ссылка:</b>\n<code>{link}</code>",
+        "",
+        quote_block(
+            "<b>Для друга</b> (первая оплата по ссылке):",
+            f"• скидка <b>{REFERRAL_WELCOME_DISCOUNT_PERCENT}%</b> + <b>{REFERRAL_WELCOME_BONUS_DAYS} дн.</b>",
+            "",
+            "<b>Для вас:</b>",
+            f"• скидка <b>{tier_percent}%</b> на тарифы (макс. {REFERRAL_TIER_MAX_PERCENT}%), пока у приглашённых активна подписка",
+            f"• <b>+{REFERRAL_PAYMENT_BONUS_DAYS} дн.</b> за каждую оплату друга",
+        ),
+        "",
+        quote_block(*stats_lines),
+    ]
     if not friends:
         return _referral_program_screen(base_lines, [], shown_count=0, invited=invited)
     return _fit_referral_friend_lines(

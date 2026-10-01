@@ -12,6 +12,7 @@ from ui.theme import (
     BTN_HOME,
     BTN_PAY,
     BTN_FAQ,
+    BTN_HELP_HUB,
     BTN_POLICY,
     BTN_PRIVACY_POLICY,
     BTN_PROMO,
@@ -29,6 +30,7 @@ from ui.theme import (
     BTN_TARIFFS,
     BTN_TERMS_OF_SERVICE,
     BTN_TRIAL,
+    format_email_button_label,
     plan_button_label,
 )
 
@@ -73,21 +75,37 @@ def main_menu_kb(
             InlineKeyboardButton(text=BTN_SUBSCRIPTION, callback_data="manage_sub"),
         ],
         [
-            InlineKeyboardButton(text=BTN_FAQ, callback_data="faq_menu"),
-            InlineKeyboardButton(text=BTN_SUPPORT_SHORT, callback_data="support"),
-        ],
-        [
-            InlineKeyboardButton(text=BTN_POLICY, callback_data="project_policy"),
+            InlineKeyboardButton(text=BTN_HELP_HUB, callback_data="help_hub"),
             InlineKeyboardButton(text=BTN_REFERRALS_SHORT, callback_data="referral_program"),
         ],
         [
+            InlineKeyboardButton(text=BTN_POLICY, callback_data="project_policy"),
             InlineKeyboardButton(
-                text=f"✉️ {user_email}" if user_email else BTN_LINK_EMAIL,
+                text=format_email_button_label(user_email),
                 callback_data="link_email_menu",
-            )
+            ),
         ],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def help_hub_kb() -> InlineKeyboardMarkup:
+    """Объединённый хаб «Помощь и FAQ» с 3 отдельными кнопками."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="📲 Как подключить подписку",
+            callback_data="faq:builtin:activation",
+        )],
+        [InlineKeyboardButton(
+            text=BTN_FAQ,
+            callback_data="faq_menu",
+        )],
+        [InlineKeyboardButton(
+            text=BTN_SUPPORT_SHORT,
+            callback_data="support",
+        )],
+        [InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")],
+    ])
 
 
 def link_email_info_kb(*, user_email: str | None = None, website_url: str | None = None) -> InlineKeyboardMarkup:
@@ -120,7 +138,7 @@ def purchase_hub_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=BTN_PURCHASE_PROMO, callback_data="purchase_promo")],
         [InlineKeyboardButton(text=BTN_PURCHASE_PLANS, callback_data="purchase_plans")],
-        [InlineKeyboardButton(text=BTN_EXIT, callback_data="main_menu")],
+        [InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")],
     ])
 
 
@@ -157,7 +175,7 @@ def faq_list_kb(articles: list[dict]) -> InlineKeyboardMarkup:
         )]
         for a in articles
     ]
-    rows.append([InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")])
+    rows.append(nav_row("help_hub"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -180,8 +198,9 @@ def faq_activation_choice_kb(*, from_faq: bool = True) -> InlineKeyboardMarkup:
         )],
     ]
     if from_faq:
-        rows.append([InlineKeyboardButton(text="◀️ К списку FAQ", callback_data="faq_menu")])
-    rows.append([InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")])
+        rows.append(nav_row("help_hub"))
+    else:
+        rows.append([InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -222,7 +241,11 @@ def plans_kb(
     if extend:
         rows.append(nav_row("manage_sub"))
     else:
-        rows.append(nav_row("tariffs", back_text=BTN_BACK_TARIFFS))
+        rows.append([InlineKeyboardButton(
+            text=BTN_PURCHASE_PROMO,
+            callback_data="purchase_promo",
+        )])
+        rows.append([InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -359,7 +382,7 @@ def subscriptions_picker_kb(subs: list[dict]) -> InlineKeyboardMarkup:
     ]
     if len(subs) > 1:
         rows.append([InlineKeyboardButton(
-            text="🔍 Поиск по email",
+            text="🔍 Поиск по названию",
             callback_data="sub_search_email",
         )])
     if any(not is_trial_email(sub.get("client_email")) for sub in subs):
@@ -391,7 +414,7 @@ def subscription_manage_kb(
     refund_tickets = refund_tickets or []
     rows: list[list[InlineKeyboardButton]] = []
 
-    # 1 строка - в один ряд: [📱 Добавить в Happ] [🛡 Добавить в INCY]
+    # 1 строка: [📱 Добавить в Happ] [🛡 Добавить в INCY]
     client_row: list[InlineKeyboardButton] = []
     if happ_url:
         client_row.append(InlineKeyboardButton(
@@ -406,33 +429,35 @@ def subscription_manage_kb(
     if client_row:
         rows.append(client_row)
 
-    # 2 строка - две кнопки, Ссылка и QR и Переименовать
-    row_2 = [
-        InlineKeyboardButton(text="🔗 Ссылка и QR", callback_data=f"sub_link:{sub_id}"),
-    ]
-    if not is_trial:
-        row_2.append(InlineKeyboardButton(
-            text="✏️ Переименовать",
-            callback_data=f"sub_rename:{sub_id}",
-        ))
-    rows.append(row_2)
-
-    # 3 строка - Продлить подписку и купить еще одну
-    purchase_extend_row: list[InlineKeyboardButton] = []
+    # 2 строка: [🔄 Продлить подписку] [🔗 QR и инструкция]
+    row_2: list[InlineKeyboardButton] = []
     if not is_trial and can_extend:
-        purchase_extend_row.append(InlineKeyboardButton(
+        row_2.append(InlineKeyboardButton(
             text="🔄 Продлить подписку",
             callback_data=f"extend_sub:{sub_id}",
         ))
-    if not is_trial:
-        purchase_extend_row.append(InlineKeyboardButton(
-            text="➕ Купить еще одну",
-            callback_data="tariffs",
-        ))
-    if purchase_extend_row:
-        rows.append(purchase_extend_row)
+    row_2.append(InlineKeyboardButton(
+        text="🔗 QR и инструкция",
+        callback_data=f"sub_link:{sub_id}",
+    ))
+    rows.append(row_2)
 
-    # 4 строка - тикеты возврата (если есть) и большая кнопка запросить возврат
+    # 3 строка: [✏️ Переименовать] [💸 Запросить возврат]
+    if not is_trial:
+        row_3: list[InlineKeyboardButton] = [
+            InlineKeyboardButton(
+                text="✏️ Переименовать",
+                callback_data=f"sub_rename:{sub_id}",
+            ),
+        ]
+        if can_request_refund:
+            row_3.append(InlineKeyboardButton(
+                text="💸 Запросить возврат",
+                callback_data=f"refund:{sub_id}",
+            ))
+        rows.append(row_3)
+
+    # Открытые тикеты возврата (если есть)
     for ticket in refund_tickets:
         order_id = ticket.get("order_id")
         label = f"💬 Возврат заказа #{order_id}" if order_id else f"💬 Возврат #{ticket['id']}"
@@ -440,13 +465,8 @@ def subscription_manage_kb(
             text=label,
             callback_data=f"ticket_view:{ticket['id']}",
         )])
-    if can_request_refund and not is_trial:
-        rows.append([InlineKeyboardButton(
-            text="💸 Запросить возврат",
-            callback_data=f"refund:{sub_id}",
-        )])
 
-    # 5 строка - назад и главное меню
+    # Нижняя строка: [◀️ Назад] [🏠 Главное меню]
     rows.append(nav_row(back_callback))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -456,6 +476,12 @@ def sub_link_client_picker_kb(sub_id: int) -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton(text="📱 Happ", callback_data=f"sub_link:{sub_id}:happ"),
             InlineKeyboardButton(text="🛡 INCY", callback_data=f"sub_link:{sub_id}:incy"),
+        ],
+        [
+            InlineKeyboardButton(
+                text="📲 Инструкция по подключению",
+                callback_data="faq:builtin:activation",
+            ),
         ],
         nav_row(f"manage_sub:{sub_id}"),
     ])
@@ -469,6 +495,10 @@ def sub_link_result_kb(sub_id: int, *, active_client: str = "happ") -> InlineKey
     )
     return InlineKeyboardMarkup(inline_keyboard=[
         [other_btn],
+        [InlineKeyboardButton(
+            text="📲 Инструкция по подключению",
+            callback_data="faq:builtin:activation",
+        )],
         nav_row(f"manage_sub:{sub_id}"),
     ])
 
@@ -487,7 +517,7 @@ def support_menu_kb(tickets: list) -> InlineKeyboardMarkup:
         text="➕ Создать обращение",
         callback_data="ticket_create",
     )])
-    rows.append([InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")])
+    rows.append(nav_row("help_hub"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

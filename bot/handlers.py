@@ -624,35 +624,34 @@ async def _purchase_hub_referral_welcome(tg_id: int) -> bool:
     return await ref_db.count_paid_orders(tg_id) == 0
 
 
-@router.callback_query(F.data == "tariffs")
-async def cb_tariffs(cb: CallbackQuery, state: FSMContext):
-    if await _block_new_payment_cb(cb):
-        return
-    await _clear_promo_input_state(state)
-    await safe_cb_answer(cb)
-    welcome = await _purchase_hub_referral_welcome(cb.from_user.id)
-    await send_or_edit(
-        cb,
-        purchase_hub_text(referral_welcome=welcome),
-        purchase_hub_kb(),
-    )
-
-
-@router.callback_query(F.data == "purchase_plans")
-async def cb_purchase_plans(cb: CallbackQuery, state: FSMContext):
+async def _show_tariffs_list(cb: CallbackQuery, state: FSMContext) -> None:
     if await _block_new_payment_cb(cb):
         return
     await _clear_promo_input_state(state)
     has_paid = await _user_has_paid_subs(cb.from_user.id)
     extend_blocked = await tickets_db.is_extend_blocked_by_pending_refund(cb.from_user.id)
+    welcome = await _purchase_hub_referral_welcome(cb.from_user.id)
     plans = await list_plans()
     quotes = await quotes_for_plans(plans, tg_id=cb.from_user.id)
     await safe_cb_answer(cb)
     await send_or_edit(
         cb,
-        plans_menu_text(has_active_sub=has_paid and not extend_blocked),
+        plans_menu_text(
+            has_active_sub=has_paid and not extend_blocked,
+            referral_welcome=welcome,
+        ),
         plans_kb(plans, quotes=quotes),
     )
+
+
+@router.callback_query(F.data == "tariffs")
+async def cb_tariffs(cb: CallbackQuery, state: FSMContext):
+    await _show_tariffs_list(cb, state)
+
+
+@router.callback_query(F.data == "purchase_plans")
+async def cb_purchase_plans(cb: CallbackQuery, state: FSMContext):
+    await _show_tariffs_list(cb, state)
 
 
 @router.callback_query(F.data.startswith("select_plan:"))
@@ -1953,6 +1952,9 @@ async def cb_grant_promo_new(cb: CallbackQuery):
 
 @router.callback_query(F.data.startswith("sub_link:"))
 async def cb_sub_link(cb: CallbackQuery):
+    from aiogram.exceptions import TelegramBadRequest
+    from .faq_view import dismiss_faq_view, set_faq_view_message_ids
+
     parts = (cb.data or "").split(":")
     sub_id = int(parts[1])
     client = parts[2] if len(parts) > 2 else None
@@ -1970,12 +1972,14 @@ async def cb_sub_link(cb: CallbackQuery):
         await safe_cb_answer(cb, "Ссылка недоступна", show_alert=True)
         return
 
+    if cb.message:
+        await dismiss_faq_view(cb.bot, cb.message.chat.id)
+
     disp_name = subscription_display_name(sub)
     if client not in ("happ", "incy"):
         await safe_cb_answer(cb)
         prompt_text = screen(
-            "🔗",
-            f"Ссылка и QR — {disp_name}",
+            f"🔗 <b>QR и инструкция — {disp_name}</b>",
             "Выберите приложение, для которого нужно показать QR-код и ключ подключения:\n\n"
             "📱 <b>Happ</b> — классический клиент (iOS / Android / ПК)\n"
             "🛡 <b>INCY</b> — новый клиент (доступен в РФ App Store без смены региона)",
@@ -2000,29 +2004,56 @@ async def cb_sub_link(cb: CallbackQuery):
         return
 
     from services.fulfillment import make_qr_photo_async
-    from services.fulfillment_text import (
-        sub_link_needs_separate_message,
-        sub_link_standalone_message,
-    )
+    from services.fulfillment_text import sub_link_standalone_message
 
     kind = "🎁 Пробная" if is_trial_email(sub.get("client_email")) else "✅ Платная"
-    photo = await make_qr_photo_async(link, f"vpn_link_{client}.png")
-    await safe_cb_answer(cb)
     kb = sub_link_result_kb(sub_id, active_client=client)
-    if sub_link_needs_separate_message(link):
-        await cb.message.answer_photo(
-            photo,
-            caption=f"🔗 <b>{kind} подписка ({disp_name}) — {client_label}</b>\n\nОтсканируйте QR или скопируйте ключ ниже 👇",
+    await safe_cb_answer(cb)
+
+    try:
+        photo = await make_qr_photo_async(link, f"vpn_link_{client}.png")
+    except Exception as e:
+        logger.warning("QR generation failed for {} (len={}): {}", client, len(link), e)
+        photo = None
+
+    if photo is None:
+        fallback_text = (
+            f"🔗 <b>{kind} подписка ({disp_name}) — {client_label}</b>\n\n"
+            f"Скопируйте ключ подключения ниже 👇\n\n<code>{link}</code>"
         )
-        followup = sub_link_standalone_message(link)
-        if followup:
-            await user_cb_message_answer(cb, followup, reply_markup=kb)
-    else:
-        await cb.message.answer_photo(
-            photo,
-            caption=f"🔗 <b>{kind} подписка ({disp_name}) — {client_label}</b>\n\n<code>{link}</code>",
-            reply_markup=kb,
-        )
+        await send_or_edit(cb, fallback_text, kb)
+        return
+
+    try:
+        await cb.message.delete()
+    except Exception:
+        pass
+
+    full_caption = (
+        f"🔗 <b>{kind} подписка ({disp_name}) — {client_label}</b>\n\n"
+        f"Отсканируйте QR или скопируйте ключ:\n<code>{link}</code>"
+    )
+    if len(full_caption) <= 950:
+        try:
+            await cb.message.answer_photo(
+                photo,
+                caption=full_caption,
+                reply_markup=kb,
+            )
+            return
+        except TelegramBadRequest as e:
+            logger.warning("Single-message QR caption rejected ({}), falling back to 2 messages", e)
+            photo = await make_qr_photo_async(link, f"vpn_link_{client}.png")
+
+    photo_msg = await cb.message.answer_photo(
+        photo,
+        caption=f"🔗 <b>{kind} подписка ({disp_name}) — {client_label}</b>\n\nОтсканируйте QR или скопируйте ключ ниже 👇",
+    )
+    set_faq_view_message_ids(cb.message.chat.id, [photo_msg.message_id])
+    followup = sub_link_standalone_message(link) or (
+        f"🔗 <b>Скопируйте ссылку</b> (или отсканируйте QR выше):\n\n<code>{link}</code>"
+    )
+    await user_cb_message_answer(cb, followup, reply_markup=kb)
 
 
 @router.callback_query(F.data.startswith("sub_info:"))

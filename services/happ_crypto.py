@@ -140,6 +140,11 @@ async def encrypt_happ_subscription_link(plain_url: str, *, mode: str | None = N
                 url[:80],
                 e,
             )
+            if resolved_mode == HAPP_CRYPTO_CRYPT5_API:
+                try:
+                    return await _encrypt_crypt3_local(url)
+                except Exception as fallback_err:
+                    logger.warning("Happ crypt3 fallback also failed: {}", fallback_err)
             return url
         if len(_cache) >= _CACHE_MAX_ENTRIES:
             _cache.pop(next(iter(_cache)))
