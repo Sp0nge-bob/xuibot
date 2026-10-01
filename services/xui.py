@@ -15,6 +15,7 @@ Unified client API 3x-ui 3.2+ (report/api.txt).
 import asyncio
 import re
 import secrets
+import uuid
 from datetime import datetime, timedelta
 from typing import Any, Optional, Tuple
 
@@ -354,17 +355,31 @@ async def _unified_get_client_info(
     return None
 
 
+def _resolve_valid_uuid4(val: str | None = None, sub_id: str | None = None) -> str:
+    s = str(val or "").strip()
+    if s and not s.isdigit() and (not sub_id or s != str(sub_id).strip()):
+        try:
+            uuid.UUID(s)
+            return s
+        except Exception:
+            pass
+    return str(uuid.uuid4())
+
+
 def _unified_add_client_body(
     *,
     email: str,
     expiry_time: int,
     total_gb: int = 0,
     sub_id: str = "",
+    client_uuid: str = "",
     enable: bool = True,
     limit_ip: int = 0,
     group: str | None = None,
 ) -> dict[str, Any]:
+    resolved_uuid = _resolve_valid_uuid4(client_uuid, sub_id)
     body: dict[str, Any] = {
+        "id": resolved_uuid,
         "email": email,
         "totalGB": total_gb,
         "expiryTime": expiry_time,
@@ -387,6 +402,7 @@ async def _unified_add_client(
     expiry_time: int,
     total_gb: int,
     inbound_ids: list[int],
+    client_uuid: str = "",
     enable: bool = True,
     limit_ip: int = 0,
 ) -> Client:
@@ -397,6 +413,7 @@ async def _unified_add_client(
         expiry_time=expiry_time,
         total_gb=total_gb,
         sub_id=sub_id,
+        client_uuid=client_uuid,
         enable=enable,
         limit_ip=limit_ip,
         group=target_group,
@@ -1434,6 +1451,7 @@ async def provision_client(
     traffic_gb: int = 0,
     *,
     sub_id: Optional[str] = None,
+    client_uuid: Optional[str] = None,
     target_expiry_ms: Optional[int] = None,
     client_email: Optional[str] = None,
     skip_preclean: bool = False,
@@ -1480,12 +1498,14 @@ async def provision_client(
             return email, resolved_sub_id, sub_link
 
     resolved_sub_id = sub_id or secrets.token_urlsafe(12)[:16]
+    resolved_client_uuid = _resolve_valid_uuid4(client_uuid, resolved_sub_id)
 
     async def _add() -> None:
         await _unified_add_client(
             api,
             email=email,
             sub_id=resolved_sub_id,
+            client_uuid=resolved_client_uuid,
             expiry_time=expiry_time,
             total_gb=total_gb,
             inbound_ids=inbound_ids,

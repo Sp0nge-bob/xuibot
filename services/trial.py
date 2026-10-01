@@ -42,11 +42,14 @@ async def claim_trial(tg_id: int) -> FulfillmentResult:
     email = trial_client_email(tg_id)
     end_ms = days_from_now_ms(TRIAL_DAYS)
     end_iso = ms_to_utc_iso(end_ms)
+    import uuid
+    new_client_uuid = str(uuid.uuid4())
     email, sub_id, sub_link = await provision_client(
         tg_id=tg_id,
         plan_days=TRIAL_DAYS,
         traffic_gb=TRIAL_TRAFFIC_GB,
         client_email=email,
+        client_uuid=new_client_uuid,
         target_expiry_ms=end_ms,
     )
 
@@ -55,7 +58,7 @@ async def claim_trial(tg_id: int) -> FulfillmentResult:
         order_id=None,
         inbound_id=0,
         client_email=email,
-        client_uuid=sub_id,
+        client_uuid=new_client_uuid,
         sub_id=sub_id,
         days=TRIAL_DAYS,
         traffic_gb=TRIAL_TRAFFIC_GB,

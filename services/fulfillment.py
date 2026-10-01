@@ -239,11 +239,14 @@ async def _fulfill_new(
     email = await db.allocate_client_email(tg_id)
     end_ms = days_from_now_ms(plan["days"])
     end_date = ms_to_utc_iso(end_ms)
+    import uuid
+    new_client_uuid = str(uuid.uuid4())
     email, sub_id, sub_link = await provision_client(
         tg_id=tg_id,
         plan_days=plan["days"],
         traffic_gb=plan["traffic_gb"],
         client_email=email,
+        client_uuid=new_client_uuid,
         target_expiry_ms=end_ms,
     )
     display_name = (sub_display_name or "").strip() or await db.suggest_subscription_display_name(tg_id)
@@ -252,7 +255,7 @@ async def _fulfill_new(
         order_id=order_id,
         inbound_id=0,
         client_email=email,
-        client_uuid=sub_id,
+        client_uuid=new_client_uuid,
         sub_id=sub_id,
         days=plan["days"],
         traffic_gb=plan["traffic_gb"],

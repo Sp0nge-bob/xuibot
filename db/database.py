@@ -528,7 +528,17 @@ async def create_subscription(
     display_name: Optional[str] = None,
     end_date: Optional[str] = None,
 ) -> int:
+    import uuid
     from utils.utc import add_days_utc, parse_utc, utc_now
+
+    raw_uuid = (client_uuid or "").strip()
+    if not raw_uuid or raw_uuid == (sub_id or "").strip():
+        raw_uuid = str(uuid.uuid4())
+    else:
+        try:
+            uuid.UUID(raw_uuid)
+        except Exception:
+            raw_uuid = str(uuid.uuid4())
 
     now = utc_now()
     end = parse_utc(end_date) if end_date else add_days_utc(now, days)
@@ -538,7 +548,7 @@ async def create_subscription(
                (tg_id, order_id, inbound_id, client_email, client_uuid, sub_id, 
                 start_date, end_date, traffic_limit_gb, is_active, display_name, origin)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'bot')""",
-            (tg_id, order_id, inbound_id, client_email, client_uuid, sub_id,
+            (tg_id, order_id, inbound_id, client_email, raw_uuid, sub_id,
              now.isoformat(), end.isoformat(), traffic_gb, display_name)
         )
         await db.commit()
@@ -1151,17 +1161,17 @@ async def update_subscription_from_panel(
         if sub_id and traffic_limit_gb is not None:
             await db.execute(
                 f"""UPDATE subscriptions
-                   SET end_date = ?, sub_id = ?, client_uuid = ?, is_active = ?,
+                   SET end_date = ?, sub_id = ?, is_active = ?,
                        traffic_limit_gb = ?{reminder_sql}
                    WHERE id = ?""",
-                (end_date, sub_id, sub_id, int(is_active), traffic_limit_gb, subscription_id),
+                (end_date, sub_id, int(is_active), traffic_limit_gb, subscription_id),
             )
         elif sub_id:
             await db.execute(
                 f"""UPDATE subscriptions
-                   SET end_date = ?, sub_id = ?, client_uuid = ?, is_active = ?{reminder_sql}
+                   SET end_date = ?, sub_id = ?, is_active = ?{reminder_sql}
                    WHERE id = ?""",
-                (end_date, sub_id, sub_id, int(is_active), subscription_id),
+                (end_date, sub_id, int(is_active), subscription_id),
             )
         elif traffic_limit_gb is not None:
             await db.execute(
@@ -1181,16 +1191,16 @@ async def update_subscription_from_panel(
 
 
 async def update_subscription_sub_id(subscription_id: int, new_sub_id: str) -> None:
-    """Сменить subId ссылки. client_uuid в БД хранится тем же токеном, что и sub_id."""
+    """Сменить subId ссылки без перезаписи client_uuid."""
     token = (new_sub_id or "").strip()
     if not token:
         raise ValueError("Пустой subId")
     async with get_db() as db:
         await db.execute(
             """UPDATE subscriptions
-               SET sub_id = ?, client_uuid = ?
+               SET sub_id = ?
                WHERE id = ?""",
-            (token, token, subscription_id),
+            (token, subscription_id),
         )
         await db.commit()
 
