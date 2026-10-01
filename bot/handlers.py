@@ -329,7 +329,7 @@ async def cmd_subscription(message: Message, state: FSMContext):
 async def cb_promo_enter(cb: CallbackQuery, state: FSMContext):
     await _clear_promo_input_state(state)
     await state.set_state(UserStates.waiting_promo_code)
-    await state.update_data(promo_from_purchase=False)
+    await state.update_data(promo_from_purchase=False, promo_from_extend=False)
     await safe_cb_answer(cb)
     await send_or_edit(cb, promo_enter_text(), back_to_main_kb())
 
@@ -338,12 +338,28 @@ async def cb_promo_enter(cb: CallbackQuery, state: FSMContext):
 async def cb_purchase_promo(cb: CallbackQuery, state: FSMContext):
     await _clear_promo_input_state(state)
     await state.set_state(UserStates.waiting_promo_code)
-    await state.update_data(promo_from_purchase=True)
+    await state.update_data(promo_from_purchase=True, promo_from_extend=False)
     await safe_cb_answer(cb)
     await send_or_edit(
         cb,
         promo_enter_text(from_purchase=True),
         back_to_purchase_hub_kb(),
+    )
+
+
+@router.callback_query(F.data == "extend_promo")
+async def cb_extend_promo(cb: CallbackQuery, state: FSMContext):
+    await _clear_promo_input_state(state)
+    data = await state.get_data()
+    extend_sub_id = data.get("extend_subscription_id")
+    back_cb = f"extend_sub:{extend_sub_id}" if extend_sub_id else "extend_menu"
+    await state.set_state(UserStates.waiting_promo_code)
+    await state.update_data(promo_from_purchase=True, promo_from_extend=True)
+    await safe_cb_answer(cb)
+    await send_or_edit(
+        cb,
+        promo_enter_text(from_purchase=True),
+        back_to_purchase_hub_kb(back_callback=back_cb),
     )
 
 
@@ -1609,6 +1625,7 @@ async def cb_manage_sub(cb: CallbackQuery):
 
 @router.callback_query(F.data == "extend_menu")
 async def cb_extend_menu(cb: CallbackQuery, state: FSMContext):
+    await _clear_promo_input_state(state)
     if await tickets_db.is_extend_blocked_by_pending_refund(cb.from_user.id):
         await safe_cb_answer(cb, EXTEND_BLOCKED_REFUND_PENDING_MSG, show_alert=True)
         return
@@ -1634,6 +1651,7 @@ async def cb_extend_menu(cb: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("extend_sub:"))
 async def cb_extend_sub(cb: CallbackQuery, state: FSMContext):
+    await _clear_promo_input_state(state)
     if await tickets_db.is_extend_blocked_by_pending_refund(cb.from_user.id):
         await safe_cb_answer(cb, EXTEND_BLOCKED_REFUND_PENDING_MSG, show_alert=True)
         return
@@ -1709,7 +1727,15 @@ async def msg_sub_rename(message: Message, state: FSMContext):
     await show_subscription_detail(message, message.from_user.id, int(sub_id))
 
 
-def _promo_reply_kb(*, from_purchase: bool):
+def _promo_reply_kb(
+    *,
+    from_purchase: bool,
+    from_extend: bool = False,
+    extend_sub_id: int | None = None,
+):
+    if from_extend:
+        back_cb = f"extend_sub:{extend_sub_id}" if extend_sub_id else "extend_menu"
+        return back_to_purchase_hub_kb(back_callback=back_cb)
     if from_purchase:
         return back_to_purchase_hub_kb()
     return back_to_main_kb()
@@ -1719,7 +1745,13 @@ def _promo_reply_kb(*, from_purchase: bool):
 async def msg_promo_code(message: Message, state: FSMContext):
     data = await state.get_data()
     from_purchase = bool(data.get("promo_from_purchase"))
-    promo_kb = _promo_reply_kb(from_purchase=from_purchase)
+    from_extend = bool(data.get("promo_from_extend"))
+    extend_sub_id = data.get("extend_subscription_id")
+    promo_kb = _promo_reply_kb(
+        from_purchase=from_purchase,
+        from_extend=from_extend,
+        extend_sub_id=int(extend_sub_id) if extend_sub_id else None,
+    )
 
     cmd = _message_command(message.text or "")
     if cmd == "/admin":

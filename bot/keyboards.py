@@ -142,9 +142,9 @@ def purchase_hub_kb() -> InlineKeyboardMarkup:
     ])
 
 
-def back_to_purchase_hub_kb() -> InlineKeyboardMarkup:
+def back_to_purchase_hub_kb(*, back_callback: str = "tariffs") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        nav_row("tariffs", back_text=BTN_BACK_TARIFFS),
+        nav_row(back_callback, back_text=BTN_BACK_TARIFFS),
     ])
 
 
@@ -248,13 +248,13 @@ def plans_kb(
             text=plan_button_label(plan, final_price=final_price),
             callback_data=f"{prefix}:{plan['id']}",
         )])
+    rows.append([InlineKeyboardButton(
+        text=BTN_PURCHASE_PROMO,
+        callback_data="extend_promo" if extend else "purchase_promo",
+    )])
     if extend:
         rows.append(nav_row("manage_sub"))
     else:
-        rows.append([InlineKeyboardButton(
-            text=BTN_PURCHASE_PROMO,
-            callback_data="purchase_promo",
-        )])
         rows.append([InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
