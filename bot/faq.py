@@ -7,7 +7,12 @@ from aiogram.types import CallbackQuery, Message
 from db import faq as faq_db
 from .faq_view import dismiss_faq_view, set_faq_view_message_ids
 from .faq_delivery import send_activation_setup_faq, send_faq_article
-from .keyboards import faq_article_nav_kb, faq_list_kb
+from .keyboards import (
+    faq_activation_choice_kb,
+    faq_activation_client_nav_kb,
+    faq_article_nav_kb,
+    faq_list_kb,
+)
 from .messages import faq_empty_text, faq_menu_text
 from .ui_helpers import safe_cb_answer, user_answer, user_cb_message_answer
 
@@ -18,15 +23,18 @@ async def _open_faq_article(
     bot,
     chat_id: int,
     article: dict,
+    *,
+    from_faq: bool = True,
 ) -> None:
     photos = await faq_db.list_photos(article["id"])
     await dismiss_faq_view(bot, chat_id)
-    nav = faq_article_nav_kb()
     if faq_db.is_activation_faq_article(article):
+        nav = faq_activation_choice_kb(from_faq=from_faq)
         view_ids = await send_activation_setup_faq(
-            bot, chat_id, article, reply_markup=nav,
+            bot, chat_id, article, reply_markup=nav, client=None,
         )
     else:
+        nav = faq_article_nav_kb()
         view_ids = await send_faq_article(
             bot, chat_id, article, photos, reply_markup=nav,
         )
@@ -64,8 +72,24 @@ async def cb_faq_builtin_activation(cb: CallbackQuery):
     if not article:
         await safe_cb_answer(cb, "Статья не найдена", show_alert=True)
         return
-    await safe_cb_answer(cb, "Инструкция ниже")
-    await _open_faq_article(cb.message.bot, cb.message.chat.id, article)
+    await safe_cb_answer(cb, "Выберите приложение")
+    await _open_faq_article(cb.message.bot, cb.message.chat.id, article, from_faq=False)
+
+
+@router.callback_query(F.data.in_({"faq:activation:happ", "faq:activation:incy"}))
+async def cb_faq_activation_client(cb: CallbackQuery):
+    client = cb.data.rsplit(":", 1)[1]
+    await safe_cb_answer(cb)
+    await dismiss_faq_view(cb.message.bot, cb.message.chat.id)
+    nav = faq_activation_client_nav_kb(client=client)
+    view_ids = await send_activation_setup_faq(
+        cb.message.bot,
+        cb.message.chat.id,
+        None,
+        reply_markup=nav,
+        client=client,
+    )
+    set_faq_view_message_ids(cb.message.chat.id, view_ids)
 
 
 @router.callback_query(F.data.startswith("faq:article:"))
@@ -80,4 +104,4 @@ async def cb_faq_article(cb: CallbackQuery):
         await cb.message.delete()
     except Exception:
         pass
-    await _open_faq_article(cb.message.bot, cb.message.chat.id, article)
+    await _open_faq_article(cb.message.bot, cb.message.chat.id, article, from_faq=True)

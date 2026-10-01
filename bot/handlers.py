@@ -45,7 +45,7 @@ from services.subscription_sync import get_active_subscriptions_for_ui
 from services.promo_redeem import redeem_promo_code
 from services.test_mode import is_test_mode
 from services.trial import claim_trial, get_trial_button_visible
-from services.xui import build_sub_link
+from services.xui import build_plain_sub_link, build_sub_link
 from .fulfillment_delivery import deliver_fulfillment
 from .ui_helpers import safe_cb_answer, send_or_edit, user_answer, user_cb_message_answer
 from .keyboards import (
@@ -58,6 +58,8 @@ from .keyboards import (
     test_scenario_kb,
     payment_kb,
     subscription_manage_kb,
+    sub_link_client_picker_kb,
+    sub_link_result_kb,
     no_subscription_kb,
     back_to_main_kb,
     fulfillment_success_kb,
@@ -605,7 +607,11 @@ async def cb_trial_confirm(cb: CallbackQuery):
         link_message=result.link_message,
         setup_text=result.setup_text,
         setup_photos=result.setup_photos or None,
-        reply_markup=fulfillment_success_kb(happ_url=result.happ_url),
+        reply_markup=fulfillment_success_kb(
+            happ_url=result.happ_url,
+            incy_url=getattr(result, "incy_url", None),
+            sub_id=getattr(result, "subscription_id", None),
+        ),
     )
 
 
@@ -1355,7 +1361,7 @@ async def _apply_test_scenario(
         notify=True,
     )
 
-    if result.photo and result.user_message:
+    if (result.subscription_id or result.happ_url or result.photo) and result.user_message:
         await cb.message.delete()
         await deliver_fulfillment(
             cb.message.bot,
@@ -1363,7 +1369,11 @@ async def _apply_test_scenario(
             text=result.user_message,
             photo=result.photo,
             link_message=result.link_message,
-            reply_markup=fulfillment_success_kb(happ_url=result.happ_url),
+            reply_markup=fulfillment_success_kb(
+                happ_url=result.happ_url,
+                incy_url=getattr(result, "incy_url", None),
+                sub_id=result.subscription_id,
+            ),
         )
         return
 
@@ -1444,14 +1454,18 @@ async def _respond_payment_flow(cb: CallbackQuery, order: dict, tx_id: str, flow
             reply_markup=_payment_failure_kb(order, result),
         )
         return
-    if result.photo and result.user_message:
+    if (result.subscription_id or result.happ_url or result.photo) and result.user_message:
         await deliver_fulfillment(
             cb.message.bot,
             cb.message.chat.id,
             text=result.user_message,
             photo=result.photo,
             link_message=result.link_message,
-            reply_markup=fulfillment_success_kb(happ_url=result.happ_url),
+            reply_markup=fulfillment_success_kb(
+                happ_url=result.happ_url,
+                incy_url=getattr(result, "incy_url", None),
+                sub_id=result.subscription_id,
+            ),
         )
         return
     if status == "PENDING":
@@ -1767,7 +1781,11 @@ async def msg_promo_code(message: Message, state: FSMContext):
             text=result.fulfillment.text,
             photo=result.fulfillment.photo,
             link_message=result.fulfillment.link_message,
-            reply_markup=fulfillment_success_kb(happ_url=getattr(result.fulfillment, "happ_url", None)),
+            reply_markup=fulfillment_success_kb(
+                happ_url=getattr(result.fulfillment, "happ_url", None),
+                incy_url=getattr(result.fulfillment, "incy_url", None),
+                sub_id=getattr(result.fulfillment, "subscription_id", None),
+            ),
         )
         return
 
@@ -1793,7 +1811,11 @@ async def _deliver_grant_fulfillment(cb: CallbackQuery, fulfillment) -> None:
         text=fulfillment.text,
         photo=fulfillment.photo,
         link_message=fulfillment.link_message,
-        reply_markup=fulfillment_success_kb(happ_url=getattr(fulfillment, "happ_url", None)),
+        reply_markup=fulfillment_success_kb(
+            happ_url=getattr(fulfillment, "happ_url", None),
+            incy_url=getattr(fulfillment, "incy_url", None),
+            sub_id=getattr(fulfillment, "subscription_id", None),
+        ),
     )
 
 
@@ -1835,7 +1857,7 @@ async def _run_grant_promo_cb(
             back_to_main_kb(),
         )
         return
-    # Сразу убираем «Выдаём…», затем deliver (текст → QR → ссылка)
+    # Сразу убираем «Выдаём…», затем deliver
     try:
         await send_or_edit(cb, "✅ Промокод применён!\nОтправляю данные подписки…")
     except Exception:
@@ -1931,7 +1953,10 @@ async def cb_grant_promo_new(cb: CallbackQuery):
 
 @router.callback_query(F.data.startswith("sub_link:"))
 async def cb_sub_link(cb: CallbackQuery):
-    sub_id = int(cb.data.split(":", 1)[1])
+    parts = (cb.data or "").split(":")
+    sub_id = int(parts[1])
+    client = parts[2] if len(parts) > 2 else None
+
     sub = await db.get_subscription_by_id(sub_id)
     if not sub or sub["tg_id"] != cb.from_user.id:
         await safe_cb_answer(cb, "Подписка не найдена", show_alert=True)
@@ -1941,7 +1966,35 @@ async def cb_sub_link(cb: CallbackQuery):
         await safe_cb_answer(cb, "Подписка неактивна", show_alert=True)
         return
 
-    link = await build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
+    if not sub.get("sub_id"):
+        await safe_cb_answer(cb, "Ссылка недоступна", show_alert=True)
+        return
+
+    disp_name = subscription_display_name(sub)
+    if client not in ("happ", "incy"):
+        await safe_cb_answer(cb)
+        prompt_text = screen(
+            "🔗",
+            f"Ссылка и QR — {disp_name}",
+            "Выберите приложение, для которого нужно показать QR-код и ключ подключения:\n\n"
+            "📱 <b>Happ</b> — классический клиент (iOS / Android / ПК)\n"
+            "🛡 <b>INCY</b> — новый клиент (доступен в РФ App Store без смены региона)",
+        )
+        await send_or_edit(cb, prompt_text, sub_link_client_picker_kb(sub_id))
+        return
+
+    if client == "incy":
+        from services.incy_crypto import encrypt_incy_crypt1
+
+        plain_link = await build_plain_sub_link(sub["sub_id"])
+        raw_name = (sub.get("display_name") or "").strip()
+        custom_name = raw_name if raw_name and not raw_name.startswith("Web #") else None
+        link = encrypt_incy_crypt1(plain_link, name=custom_name) if plain_link else None
+        client_label = "INCY"
+    else:
+        link = await build_sub_link(sub["sub_id"])
+        client_label = "Happ"
+
     if not link:
         await safe_cb_answer(cb, "Ссылка недоступна", show_alert=True)
         return
@@ -1953,21 +2006,21 @@ async def cb_sub_link(cb: CallbackQuery):
     )
 
     kind = "🎁 Пробная" if is_trial_email(sub.get("client_email")) else "✅ Платная"
-    photo = await make_qr_photo_async(link, "vpn_link.png")
+    photo = await make_qr_photo_async(link, f"vpn_link_{client}.png")
     await safe_cb_answer(cb)
-    kb = back_to_main_kb()
+    kb = sub_link_result_kb(sub_id, active_client=client)
     if sub_link_needs_separate_message(link):
         await cb.message.answer_photo(
             photo,
-            caption=f"🔗 <b>{kind} подписка</b>\n\nОтсканируйте QR или скопируйте ссылку ниже 👇",
+            caption=f"🔗 <b>{kind} подписка ({disp_name}) — {client_label}</b>\n\nОтсканируйте QR или скопируйте ключ ниже 👇",
         )
         followup = sub_link_standalone_message(link)
         if followup:
-            await user_cb_message_answer(cb,followup, reply_markup=kb)
+            await user_cb_message_answer(cb, followup, reply_markup=kb)
     else:
         await cb.message.answer_photo(
             photo,
-            caption=f"🔗 <b>{kind} подписка</b>\n\n<code>{link}</code>",
+            caption=f"🔗 <b>{kind} подписка ({disp_name}) — {client_label}</b>\n\n<code>{link}</code>",
             reply_markup=kb,
         )
 
@@ -1981,36 +2034,9 @@ async def cb_sub_info(cb: CallbackQuery):
         await safe_cb_answer(cb, "Подписка не найдена", show_alert=True)
         return
 
-    # 1. Показываем меню и статус подписки
     from .tickets import show_subscription_detail
     await show_subscription_detail(cb, cb.from_user.id, sub_id)
 
-    # 2. Выводим ссылку для подключения + QR-код
-    link = await build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
-    if link:
-        from services.fulfillment import make_qr_photo_async
-        from services.fulfillment_text import (
-            sub_link_needs_separate_message,
-            sub_link_standalone_message,
-        )
-        photo = await make_qr_photo_async(link, "vpn_link.png")
-        kb = back_to_main_kb()
-        kind = "🎁 Пробная" if is_trial_email(sub.get("client_email")) else "✅ Платная"
-        disp_name = subscription_display_name(sub)
-        if sub_link_needs_separate_message(link):
-            await cb.message.answer_photo(
-                photo,
-                caption=f"🔗 <b>{kind} подписка ({disp_name})</b>\n\nОтсканируйте QR или скопируйте ссылку ниже 👇",
-            )
-            followup = sub_link_standalone_message(link)
-            if followup:
-                await user_cb_message_answer(cb, followup, reply_markup=kb)
-        else:
-            await cb.message.answer_photo(
-                photo,
-                caption=f"🔗 <b>{kind} подписка ({disp_name})</b>\n\n<code>{link}</code>",
-                reply_markup=kb,
-            )
 
 
 

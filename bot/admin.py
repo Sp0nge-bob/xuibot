@@ -782,10 +782,16 @@ async def cb_admin_rotate_link_do(cb: CallbackQuery, state: FSMContext):
     notified = False
     try:
         from bot import bot as app_bot
+        from .keyboards import fulfillment_success_kb
 
         await app_bot.send_message(
             int(sub["tg_id"]),
             admin_rotate_link_notify_text(link=result["link"]),
+            reply_markup=fulfillment_success_kb(
+                happ_url=result.get("happ_url"),
+                incy_url=result.get("incy_url"),
+                sub_id=sub_id,
+            ),
         )
         notified = True
     except Exception as e:

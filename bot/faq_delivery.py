@@ -40,13 +40,42 @@ async def send_faq_article(
 async def send_activation_setup_faq(
     bot: Bot,
     chat_id: int,
-    article: dict[str, Any],
+    article: dict[str, Any] | None = None,
     *,
     reply_markup=None,
+    client: str | None = None,
 ) -> list[int]:
-    """Встроенная FAQ-статья — тот же текст и скриншоты, что после оплаты/пробного."""
-    header = _build_faq_header(article)
+    """Встроенная FAQ-статья подключения: выбор приложения, Happ (со скриншотами) или INCY."""
+    from services.fulfillment_text import (
+        activation_setup_text,
+        happ_setup_text,
+        incy_setup_text,
+    )
+
+    if client == "happ":
+        return await send_photos_with_text(
+            bot,
+            chat_id,
+            happ_setup_text(),
+            load_happ_setup_photos(),
+            reply_markup=reply_markup,
+            user_id=chat_id,
+        )
+    if client == "incy":
+        return await send_photos_with_text(
+            bot,
+            chat_id,
+            incy_setup_text(),
+            [],
+            reply_markup=reply_markup,
+            user_id=chat_id,
+        )
+    header = _build_faq_header(article) if article else activation_setup_text()
     return await send_photos_with_text(
-        bot, chat_id, header, load_happ_setup_photos(),
-        reply_markup=reply_markup, user_id=chat_id,
+        bot,
+        chat_id,
+        header,
+        [],
+        reply_markup=reply_markup,
+        user_id=chat_id,
     )

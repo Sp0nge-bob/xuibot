@@ -168,6 +168,42 @@ def faq_article_nav_kb() -> InlineKeyboardMarkup:
     ])
 
 
+def faq_activation_choice_kb(*, from_faq: bool = True) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = [
+        [InlineKeyboardButton(
+            text="📱 Инструкция Happ (со скриншотами)",
+            callback_data="faq:activation:happ",
+        )],
+        [InlineKeyboardButton(
+            text="🛡 Инструкция INCY (без смены региона РФ)",
+            callback_data="faq:activation:incy",
+        )],
+    ]
+    if from_faq:
+        rows.append([InlineKeyboardButton(text="◀️ К списку FAQ", callback_data="faq_menu")])
+    rows.append([InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def faq_activation_client_nav_kb(*, client: str) -> InlineKeyboardMarkup:
+    other_btn = (
+        InlineKeyboardButton(
+            text="🛡 Инструкция INCY",
+            callback_data="faq:activation:incy",
+        )
+        if client == "happ"
+        else InlineKeyboardButton(
+            text="📱 Инструкция Happ",
+            callback_data="faq:activation:happ",
+        )
+    )
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [other_btn],
+        [InlineKeyboardButton(text="◀️ Выбор приложения", callback_data="faq:builtin:activation")],
+        [InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")],
+    ])
+
+
 def plans_kb(
     plans: list[Plan],
     *,
@@ -345,6 +381,7 @@ def subscription_manage_kb(
     sub_id: int,
     *,
     happ_url: str | None = None,
+    incy_url: str | None = None,
     refund_tickets: list[dict] | None = None,
     can_request_refund: bool = True,
     can_extend: bool = True,
@@ -354,12 +391,20 @@ def subscription_manage_kb(
     refund_tickets = refund_tickets or []
     rows: list[list[InlineKeyboardButton]] = []
 
-    # 1 строка - Одна большая кнопка - Добавить в Happ
+    # 1 строка - в один ряд: [📱 Добавить в Happ] [🛡 Добавить в INCY]
+    client_row: list[InlineKeyboardButton] = []
     if happ_url:
-        rows.append([InlineKeyboardButton(
+        client_row.append(InlineKeyboardButton(
             text="📱 Добавить в Happ",
             url=happ_url,
-        )])
+        ))
+    if incy_url:
+        client_row.append(InlineKeyboardButton(
+            text="🛡 Добавить в INCY",
+            url=incy_url,
+        ))
+    if client_row:
+        rows.append(client_row)
 
     # 2 строка - две кнопки, Ссылка и QR и Переименовать
     row_2 = [
@@ -404,6 +449,28 @@ def subscription_manage_kb(
     # 5 строка - назад и главное меню
     rows.append(nav_row(back_callback))
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def sub_link_client_picker_kb(sub_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📱 Happ", callback_data=f"sub_link:{sub_id}:happ"),
+            InlineKeyboardButton(text="🛡 INCY", callback_data=f"sub_link:{sub_id}:incy"),
+        ],
+        nav_row(f"manage_sub:{sub_id}"),
+    ])
+
+
+def sub_link_result_kb(sub_id: int, *, active_client: str = "happ") -> InlineKeyboardMarkup:
+    other_btn = (
+        InlineKeyboardButton(text="🛡 QR и ключ INCY", callback_data=f"sub_link:{sub_id}:incy")
+        if active_client == "happ"
+        else InlineKeyboardButton(text="📱 QR и ключ Happ", callback_data=f"sub_link:{sub_id}:happ")
+    )
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [other_btn],
+        nav_row(f"manage_sub:{sub_id}"),
+    ])
 
 
 def support_menu_kb(tickets: list) -> InlineKeyboardMarkup:
@@ -624,12 +691,30 @@ def back_to_main_kb() -> InlineKeyboardMarkup:
     ])
 
 
-def fulfillment_success_kb(*, happ_url: str | None = None) -> InlineKeyboardMarkup:
+def fulfillment_success_kb(
+    *,
+    happ_url: str | None = None,
+    incy_url: str | None = None,
+    sub_id: int | None = None,
+) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
+    client_row: list[InlineKeyboardButton] = []
     if happ_url:
-        rows.append([InlineKeyboardButton(
+        client_row.append(InlineKeyboardButton(
             text="📱 Добавить в Happ",
             url=happ_url,
+        ))
+    if incy_url:
+        client_row.append(InlineKeyboardButton(
+            text="🛡 Добавить в INCY",
+            url=incy_url,
+        ))
+    if client_row:
+        rows.append(client_row)
+    if sub_id:
+        rows.append([InlineKeyboardButton(
+            text="🔗 Ссылка и QR",
+            callback_data=f"sub_link:{sub_id}",
         )])
     rows.append([InlineKeyboardButton(
         text="📲 Как подключить подписку",

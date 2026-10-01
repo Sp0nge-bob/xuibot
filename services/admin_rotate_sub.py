@@ -6,6 +6,8 @@ import secrets
 from loguru import logger
 
 from db import database as db
+from services.happ_crypto import build_happ_redirect_url
+from services.incy_crypto import build_incy_redirect_url
 from services.xui import build_sub_link, rotate_client_sub_id
 
 
@@ -18,15 +20,11 @@ def _fresh_sub_id(old: str) -> str:
     raise ValueError("Не удалось сгенерировать новый subId")
 
 
-def admin_rotate_link_notify_text(*, link: str) -> str:
-    from html import escape
-
-    safe = escape(link)
+def admin_rotate_link_notify_text(*, link: str = "") -> str:
     return (
-        "Ваша ссылка на подписку была перегенерирована.\n\n"
-        "Новая ссылка:\n"
-        f"<code>{safe}</code>\n\n"
-        "Старая ссылка, которую вы использовали ранее, теперь неактивна."
+        "🔄 <b>Ваша ссылка на подписку была перегенерирована.</b>\n\n"
+        "Старая ссылка, которую вы использовали ранее, теперь неактивна.\n"
+        "Добавьте обновлённую подписку в приложение кнопками ниже 👇"
     )
 
 
@@ -37,7 +35,7 @@ async def admin_rotate_subscription_link(
 ) -> dict:
     """
     Новый subId на ★ Primary и в БД. Остальные поля клиента не меняются.
-    Возвращает {subscription, old_sub_id, new_sub_id, link}.
+    Возвращает {subscription, old_sub_id, new_sub_id, link, happ_url, incy_url}.
     """
     sub = await db.get_subscription_by_id(subscription_id)
     if not sub or not sub.get("is_active"):
@@ -53,6 +51,8 @@ async def admin_rotate_subscription_link(
     await rotate_client_sub_id(email, new_sub_id)
     await db.update_subscription_sub_id(subscription_id, new_sub_id)
     link = await build_sub_link(new_sub_id)
+    happ_url = build_happ_redirect_url(new_sub_id)
+    incy_url = build_incy_redirect_url(new_sub_id)
 
     logger.success(
         "Admin rotate sub #{} {} → {} (admin_tg={})",
@@ -67,4 +67,6 @@ async def admin_rotate_subscription_link(
         "old_sub_id": old_sub_id,
         "new_sub_id": new_sub_id,
         "link": link,
+        "happ_url": happ_url,
+        "incy_url": incy_url,
     }

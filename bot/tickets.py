@@ -486,16 +486,19 @@ async def show_subscription_detail(
         _, can_refund = await _refund_ui_state(tg_id, sub_id)
 
     limit_ip = await resolve_limit_ip_for_email(sub.get("client_email") or "")
-    sub_link = await build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
-    text = subscription_manage_text(sub, sub_link, limit_ip=limit_ip)
+    text = subscription_manage_text(sub, None, limit_ip=limit_ip)
     # Если подписок несколько — «Назад» к списку; если одна — в главное меню
     active_subs = await get_active_subscriptions_for_ui(tg_id)
     back_cb = "manage_sub" if len(active_subs) > 1 else "main_menu"
     from services.happ_crypto import build_happ_redirect_url
-    happ_url = build_happ_redirect_url(sub.get("sub_id") or sub.get("id"))
+    from services.incy_crypto import build_incy_redirect_url
+    sub_key = sub.get("sub_id") or sub.get("id")
+    happ_url = build_happ_redirect_url(sub_key)
+    incy_url = build_incy_redirect_url(sub_key)
     kb = subscription_manage_kb(
         sub_id,
         happ_url=happ_url,
+        incy_url=incy_url,
         refund_tickets=refund_by_sub.get(sub_id, []),
         can_request_refund=can_refund,
         can_extend=not extend_blocked,
@@ -516,7 +519,6 @@ async def show_subscriptions_manage(
     from .messages import subscription_manage_text, subscriptions_picker_text
     from .keyboards import subscriptions_picker_kb
     from services.limit_ip import resolve_limit_ip_for_email
-    from services.xui import build_sub_link
 
     if isinstance(target, CallbackQuery):
         await safe_cb_answer(target)
@@ -543,13 +545,16 @@ async def show_subscriptions_manage(
         for sub in subs:
             limit_ips[sub["id"]] = await resolve_limit_ip_for_email(sub.get("client_email") or "")
         sub = subs[0]
-        sub_link = await build_sub_link(sub["sub_id"]) if sub.get("sub_id") else None
-        text = subscription_manage_text(sub, sub_link, limit_ip=limit_ips.get(sub["id"]))
+        text = subscription_manage_text(sub, None, limit_ip=limit_ips.get(sub["id"]))
         from services.happ_crypto import build_happ_redirect_url
-        happ_url = build_happ_redirect_url(sub.get("sub_id") or sub.get("id"))
+        from services.incy_crypto import build_incy_redirect_url
+        sub_key = sub.get("sub_id") or sub.get("id")
+        happ_url = build_happ_redirect_url(sub_key)
+        incy_url = build_incy_redirect_url(sub_key)
         kb = subscription_manage_kb(
             sub["id"],
             happ_url=happ_url,
+            incy_url=incy_url,
             refund_tickets=refund_by_sub.get(sub["id"], []),
             can_request_refund=can_refund.get(sub["id"], False),
             can_extend=not extend_blocked,

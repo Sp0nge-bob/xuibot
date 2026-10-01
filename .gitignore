@@ -43,6 +43,7 @@ grokerrorreports/
 .grok/
 AGENTS.md
 docs/SESSION_CONTEXT.md
+dev-docs/
 agent-tools/
 replacements.txt
 email_callback.py

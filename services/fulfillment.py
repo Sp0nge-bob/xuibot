@@ -45,6 +45,7 @@ class FulfillmentResult:
     subscription_id: Optional[int] = None
     sub_id: Optional[str] = None
     happ_url: Optional[str] = None
+    incy_url: Optional[str] = None
 
 
 async def fulfill_paid_order(order: dict) -> FulfillmentResult:
@@ -207,19 +208,21 @@ async def _fulfill_extend(
         inbound_count=inbound_count,
         limit_ip=limit_ip,
     )
-    photo = await make_qr_photo_async(sub_link or email, "vpn_extend.png")
     if log_context:
         logger.success("{} extended sub #{} for tg_id={}", log_context, target_sub["id"], tg_id)
     from services.happ_crypto import build_happ_redirect_url
+    from services.incy_crypto import build_incy_redirect_url
     sub_key = target_sub.get("sub_id") or target_sub["id"]
     happ_url = build_happ_redirect_url(sub_key)
+    incy_url = build_incy_redirect_url(sub_key)
     return FulfillmentResult(
         text=text,
-        photo=photo,
-        link_message=sub_link_standalone_message(sub_link),
+        photo=None,
+        link_message=None,
         subscription_id=target_sub["id"],
         sub_id=target_sub.get("sub_id"),
         happ_url=happ_url,
+        incy_url=incy_url,
     )
 
 
@@ -262,7 +265,7 @@ async def _fulfill_new(
     text = _success_text(
         title=title,
         plan=plan,
-        end_date=end_date,
+        end_date=end_date[:10],
         sub_link=sub_link,
         client_email=email,
         display_name=display_name,
@@ -270,18 +273,21 @@ async def _fulfill_new(
         inbound_count=inbound_count,
         limit_ip=limit_ip,
     )
-    photo = await make_qr_photo_async(sub_link or email, "vpn.png")
     if log_context:
         logger.success("{} created sub #{} for tg_id={}", log_context, sub_db_id, tg_id)
     from services.happ_crypto import build_happ_redirect_url
-    happ_url = build_happ_redirect_url(sub_id or sub_db_id)
+    from services.incy_crypto import build_incy_redirect_url
+    sub_key = sub_id or sub_db_id
+    happ_url = build_happ_redirect_url(sub_key)
+    incy_url = build_incy_redirect_url(sub_key)
     return FulfillmentResult(
         text=text,
-        photo=photo,
-        link_message=sub_link_standalone_message(sub_link),
+        photo=None,
+        link_message=None,
         subscription_id=sub_db_id,
         sub_id=sub_id,
         happ_url=happ_url,
+        incy_url=incy_url,
     )
 
 
@@ -305,10 +311,10 @@ def _success_text(
         f"📅 Действует до: <b>{end_date}</b>",
         f"📊 Трафик: {traffic_label(plan['traffic_gb'])}",
         format_connections_limit_line(limit_ip),
+        f"👤 Клиент: <code>{client_email}</code>",
+        "",
+        panel_sync_notice_text(inbound_count),
     ]
-    details += sub_link_caption_lines(sub_link)
-    details.append(f"👤 Клиент: <code>{client_email}</code>")
-    details.append(panel_sync_notice_text(inbound_count))
     footer = "⚠️ <i>Тестовый режим — оплата симулирована</i>" if is_test else None
     return screen(f"✅ <b>{title}</b>", "\n".join(details), footer=footer)
 

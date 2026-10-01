@@ -63,14 +63,23 @@ async def _deliver_result(tx_id: str, result: PaymentProcessResult) -> None:
     delays = _retry_delays()
     attempts = max(1, int(settings.FULFILLMENT_RETRY_ATTEMPTS))
 
+    sub_key = result.sub_id or result.subscription_id or order.get("subscription_id")
     happ_url = result.happ_url
-    if not happ_url:
+    if not happ_url and sub_key:
         from services.happ_crypto import build_happ_redirect_url
-        sub_key = result.sub_id or result.subscription_id or order.get("subscription_id")
-        if sub_key:
-            happ_url = build_happ_redirect_url(sub_key)
+        happ_url = build_happ_redirect_url(sub_key)
 
-    success_markup = fulfillment_success_kb(happ_url=happ_url)
+    incy_url = getattr(result, "incy_url", None)
+    if not incy_url and sub_key:
+        from services.incy_crypto import build_incy_redirect_url
+        incy_url = build_incy_redirect_url(sub_key)
+
+    sub_db_id = result.subscription_id or order.get("subscription_id")
+    success_markup = fulfillment_success_kb(
+        happ_url=happ_url,
+        incy_url=incy_url,
+        sub_id=int(sub_db_id) if sub_db_id else None,
+    )
 
     for attempt in range(1, attempts + 1):
         try:

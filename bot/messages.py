@@ -383,7 +383,7 @@ def test_scenario_result_text(scenario: str, tx_id: str | None = None) -> str:
 
 def _subscription_detail_block(
     sub: Dict[str, Any],
-    sub_link: Optional[str],
+    sub_link: Optional[str] = None,
     *,
     limit_ip: int | None = None,
 ) -> str:
@@ -400,14 +400,12 @@ def _subscription_detail_block(
     if limit_ip is not None:
         lines.append(format_connections_limit_line(limit_ip))
     lines.append(f"👤 Клиент: <code>{sub['client_email']}</code>")
-    if sub_link:
-        lines += [f"🔗 <b>Ссылка:</b>", f"<code>{sub_link}</code>"]
     return "\n".join(lines)
 
 
 def subscription_manage_text(
     sub: Dict[str, Any],
-    sub_link: Optional[str],
+    sub_link: Optional[str] = None,
     *,
     limit_ip: int | None = None,
 ) -> str:

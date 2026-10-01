@@ -74,31 +74,28 @@ async def claim_trial(tg_id: int) -> FulfillmentResult:
         f"⏱ Срок: <b>{TRIAL_DAYS} дн.</b> (до {end_date})",
         f"📊 Трафик: <b>{TRIAL_TRAFFIC_GB} ГБ</b>",
         format_connections_limit_line(limit_ip),
-        "",
-    ]
-    lines += sub_link_caption_lines(sub_link)
-    if sub_link:
-        lines.append("")
-    lines += [
         f"👤 Клиент: <code>{email}</code>",
         qr_and_sync_footer(inbound_count),
         "",
         f"<i>Повторно — не раньше чем через {TRIAL_COOLDOWN_DAYS} дн.</i>",
     ]
 
-    photo = await make_qr_photo_async(sub_link or email, "trial_vpn.png")
     logger.info("Trial granted for tg_id={} sub_id={}", tg_id, sub_db_id)
     from services.happ_crypto import build_happ_redirect_url
-    happ_url = build_happ_redirect_url(sub_id or sub_db_id)
+    from services.incy_crypto import build_incy_redirect_url
+    sub_key = sub_id or sub_db_id
+    happ_url = build_happ_redirect_url(sub_key)
+    incy_url = build_incy_redirect_url(sub_key)
     return FulfillmentResult(
         text="\n".join(lines),
-        photo=photo,
-        link_message=sub_link_standalone_message(sub_link),
-        setup_text=happ_setup_text(),
-        setup_photos=load_happ_setup_photos(),
+        photo=None,
+        link_message=None,
+        setup_text=None,
+        setup_photos=[],
         subscription_id=sub_db_id,
         sub_id=sub_id,
         happ_url=happ_url,
+        incy_url=incy_url,
     )
 
 

@@ -8,10 +8,10 @@ TELEGRAM_PHOTO_CAPTION_MAX = 1024
 
 
 def sub_link_needs_separate_message(sub_link: str | None) -> bool:
-    """happ://crypt* не влезает в caption вместе с остальным текстом."""
+    """happ://crypt* и incy://crypt* выносятся в отдельное сообщение для удобного копирования."""
     if not sub_link:
         return False
-    if sub_link.startswith("happ://crypt"):
+    if sub_link.startswith(("happ://crypt", "incy://crypt")):
         return True
     return len(sub_link) > 350
 
@@ -45,20 +45,20 @@ def qr_and_sync_footer(inbound_count: int) -> str:
     """Общий блок под QR: подсказка + синхронизация (платная и пробная подписка)."""
     return "\n".join([
         "",
-        "Скопируйте ссылку или отсканируйте QR-код ниже.",
+        "Выберите удобный клиент ниже или нажмите «🔗 Ссылка и QR».",
         "",
         panel_sync_notice_text(inbound_count),
     ])
 
 
-def activation_setup_body() -> str:
-    """Текст инструкции Happ — общий для выдачи подписки и FAQ."""
+def happ_setup_body() -> str:
+    """Пошаговая инструкция для клиента Happ со скриншотами."""
     return "\n".join([
-        "Для подключения выполните шаги ниже.\n"
+        "Для подключения через <b>Happ</b> выполните шаги ниже.\n"
         "На скриншотах отмечены нужные кнопки 👇",
         "",
-        "1️⃣ Скопируйте <b>ссылку на подписку</b> из сообщения бота — "
-        "примеры приведены на первом фото",
+        "1️⃣ Нажмите кнопку <b>«📱 Добавить в Happ»</b> в карточке подписки "
+        "или скопируйте ключ Happ через <b>«🔗 Ссылка и QR»</b>",
         "",
         "2️⃣ Установите приложение <b>Happ</b>\n"
         "   • Android / iOS — магазин приложений\n"
@@ -77,8 +77,62 @@ def activation_setup_body() -> str:
     ])
 
 
+def incy_setup_body() -> str:
+    """Пошаговая инструкция для клиента INCY (доступен в App Store РФ без смены региона)."""
+    return "\n".join([
+        "<b>INCY</b> — современный клиент для всех платформ. "
+        "Доступен в российском <b>App Store без смены региона Apple ID</b>!\n",
+        "1️⃣ <b>Установите приложение INCY:</b>",
+        '   • iOS / macOS (App Store РФ): <a href="https://apps.apple.com/us/app/incy/id6756943388">Скачать в App Store</a>',
+        '   • Android: <a href="https://play.google.com/store/apps/details?id=com.incy.vpn">Google Play</a>',
+        '   • Windows: <a href="https://incy.cc/downloads/incy-windows-x64-installer.exe">Установщик Windows (.exe)</a>',
+        '   • macOS (DMG): <a href="https://incy.cc/downloads/incy-macos-universal.dmg">Скачать .dmg</a>',
+        '   • Linux: <a href="https://incy.cc/downloads/incy-linux-x86_64.AppImage">Скачать .AppImage</a>',
+        '   • Все платформы: <a href="https://incy.cc">incy.cc</a>',
+        "",
+        "2️⃣ <b>Добавьте подписку в 1 клик:</b>",
+        "   Нажмите кнопку <b>«🛡 Добавить в INCY»</b> в карточке вашей подписки — "
+        "приложение откроется и предложит подтвердить импорт.",
+        "",
+        "3️⃣ <b>Или добавьте вручную по ключу / QR-коду:</b>",
+        "   Нажмите <b>«🔗 Ссылка и QR»</b> → выберите <b>«🛡 INCY»</b>, "
+        "скопируйте защищённый ключ <code>incy://crypt1/...</code> (или отсканируйте QR-код) "
+        "и вставьте его в приложении INCY.",
+    ])
+
+
+def activation_setup_body() -> str:
+    """Обзорная инструкция по выбору клиента (Happ или INCY) — для FAQ и кнопки подключения."""
+    return "\n".join([
+        "Выберите удобное приложение для подключения вашей подписки:\n",
+        "📱 <b>Вариант 1: Happ</b>",
+        "Основной клиент для Android, iOS, Windows и macOS. "
+        "Поддерживает быстрое добавление в 1 клик и наглядную проверку пинга серверов.",
+        "",
+        "🛡 <b>Вариант 2: INCY (без смены региона App Store в РФ)</b>",
+        "Отличная альтернатива, если вам не подходит Happ или вы используете iPhone "
+        "с российским аккаунтом App Store (устанавливается напрямую без смены региона).",
+        "",
+        "👇 <b>Выберите клиент ниже, чтобы открыть подробную инструкцию:</b>",
+    ])
+
+
 def happ_setup_text() -> str:
     return screen(
-        "📲 <b>Как подключить подписку (Happ)</b>",
+        "📱 <b>Инструкция по подключению: Happ</b>",
+        happ_setup_body(),
+    )
+
+
+def incy_setup_text() -> str:
+    return screen(
+        "🛡 <b>Инструкция по подключению: INCY</b>",
+        incy_setup_body(),
+    )
+
+
+def activation_setup_text() -> str:
+    return screen(
+        "📲 <b>Как подключить подписку</b>",
         activation_setup_body(),
     )
