@@ -179,6 +179,9 @@ def project_policy_text() -> str:
                 "",
                 "📜 <b>Пользовательское соглашение</b>",
                 "Правила использования сервиса и оформления подписки.",
+                "",
+                "💸 <b>Политика возврата</b>",
+                "Условия и порядок рассмотрения обращений на возврат средств.",
             ),
         ]),
         hint="Нажмите кнопку ниже — документ откроется в браузере 👇",
@@ -624,11 +627,17 @@ def admin_legal_menu_text(
     *,
     privacy_url: str,
     terms_url: str,
+    refund_url: str = "",
     privacy_custom: bool,
     terms_custom: bool,
+    refund_custom: bool = False,
 ) -> str:
+    from config.legal import REFUND_POLICY_URL
+
+    resolved_refund_url = (refund_url or "").strip() or REFUND_POLICY_URL
     privacy_src = "админка" if privacy_custom else "по умолчанию"
     terms_src = "админка" if terms_custom else "по умолчанию"
+    refund_src = "админка" if refund_custom else "по умолчанию"
     return (
         "📄 <b>Юридические ссылки</b>\n"
         "━━━━━━━━━━━━━━━━\n\n"
@@ -637,16 +646,19 @@ def admin_legal_menu_text(
         f"<code>{_legal_url_display(privacy_url)}</code>\n\n"
         f"📜 <b>Пользовательское соглашение</b> ({terms_src})\n"
         f"<code>{_legal_url_display(terms_url)}</code>\n\n"
+        f"💸 <b>Политика возврата</b> ({refund_src})\n"
+        f"<code>{_legal_url_display(resolved_refund_url)}</code>\n\n"
         "<i>Ссылка должна начинаться с https:// или http://</i>"
     )
 
 
 def admin_legal_edit_prompt_text(*, kind: str, current: str) -> str:
-    title = (
-        "Политика конфиденциальности"
-        if kind == "privacy"
-        else "Пользовательское соглашение"
-    )
+    titles = {
+        "privacy": "Политика конфиденциальности",
+        "terms": "Пользовательское соглашение",
+        "refund": "Политика возврата",
+    }
+    title = titles.get(kind, "Пользовательское соглашение")
     return (
         f"✏️ <b>{title}</b>\n"
         "━━━━━━━━━━━━━━━━\n\n"

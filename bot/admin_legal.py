@@ -25,25 +25,34 @@ def _is_valid_legal_url(url: str) -> bool:
     return parsed.scheme in ("http", "https") and bool(parsed.netloc)
 
 
-async def _custom_flags() -> tuple[bool, bool]:
+async def _custom_flags() -> tuple[bool, bool, bool]:
     privacy_raw = await settings_db.get_setting(settings_db.SETTING_PRIVACY_POLICY_URL)
     terms_raw = await settings_db.get_setting(settings_db.SETTING_TERMS_OF_SERVICE_URL)
-    return bool((privacy_raw or "").strip()), bool((terms_raw or "").strip())
+    refund_raw = await settings_db.get_setting(settings_db.SETTING_REFUND_POLICY_URL)
+    return (
+        bool((privacy_raw or "").strip()),
+        bool((terms_raw or "").strip()),
+        bool((refund_raw or "").strip()),
+    )
 
 
 async def _show_legal_menu(target: CallbackQuery | Message) -> None:
     privacy_url = await settings_db.get_privacy_policy_url()
     terms_url = await settings_db.get_terms_of_service_url()
-    privacy_custom, terms_custom = await _custom_flags()
+    refund_url = await settings_db.get_refund_policy_url()
+    privacy_custom, terms_custom, refund_custom = await _custom_flags()
     text = admin_legal_menu_text(
         privacy_url=privacy_url,
         terms_url=terms_url,
+        refund_url=refund_url,
         privacy_custom=privacy_custom,
         terms_custom=terms_custom,
+        refund_custom=refund_custom,
     )
     kb = admin_legal_kb(
         privacy_custom=privacy_custom,
         terms_custom=terms_custom,
+        refund_custom=refund_custom,
     )
     if isinstance(target, CallbackQuery):
         await send_or_edit(target, text, kb)
@@ -80,6 +89,16 @@ async def cb_admin_legal_edit_terms(cb: CallbackQuery, state: FSMContext):
     await send_or_edit(cb, admin_legal_edit_prompt_text(kind="terms", current=current))
 
 
+@router.callback_query(F.data == "adm:legal:edit:refund")
+async def cb_admin_legal_edit_refund(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    current = await settings_db.get_refund_policy_url()
+    await state.set_state(AdminStates.waiting_refund_policy_url)
+    await safe_cb_answer(cb)
+    await send_or_edit(cb, admin_legal_edit_prompt_text(kind="refund", current=current))
+
+
 @router.callback_query(F.data == "adm:legal:reset:privacy")
 async def cb_admin_legal_reset_privacy(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
@@ -96,6 +115,16 @@ async def cb_admin_legal_reset_terms(cb: CallbackQuery, state: FSMContext):
         return
     await state.set_state(None)
     await settings_db.clear_terms_of_service_url()
+    await safe_cb_answer(cb, "Сброшено")
+    await _show_legal_menu(cb)
+
+
+@router.callback_query(F.data == "adm:legal:reset:refund")
+async def cb_admin_legal_reset_refund(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    await state.set_state(None)
+    await settings_db.clear_refund_policy_url()
     await safe_cb_answer(cb, "Сброшено")
     await _show_legal_menu(cb)
 
@@ -151,4 +180,23 @@ async def msg_admin_terms_url(message: Message, state: FSMContext):
     await settings_db.set_terms_of_service_url(url)
     await state.set_state(None)
     await message.answer("✅ Ссылка на пользовательское соглашение сохранена.")
+    await _show_legal_menu(message)
+
+
+@router.message(AdminStates.waiting_refund_policy_url)
+async def msg_admin_refund_url(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    if await _cancel_to_admin(message, state):
+        return
+    url = (message.text or "").strip()
+    if not _is_valid_legal_url(url):
+        await message.answer(
+            "❌ Некорректная ссылка. Укажите URL вида "
+            "<code>https://example.com/doc</code>"
+        )
+        return
+    await settings_db.set_refund_policy_url(url)
+    await state.set_state(None)
+    await message.answer("✅ Ссылка на политику возврата сохранена.")
     await _show_legal_menu(message)

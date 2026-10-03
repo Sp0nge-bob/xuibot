@@ -16,8 +16,13 @@ async def cb_project_policy(cb: CallbackQuery):
     await safe_cb_answer(cb)
     privacy_url = await settings_db.get_privacy_policy_url()
     terms_url = await settings_db.get_terms_of_service_url()
+    refund_url = await settings_db.get_refund_policy_url()
     await send_or_edit(
         cb,
         project_policy_text(),
-        project_policy_kb(privacy_url=privacy_url, terms_url=terms_url),
+        project_policy_kb(
+            privacy_url=privacy_url,
+            terms_url=terms_url,
+            refund_url=refund_url,
+        ),
     )

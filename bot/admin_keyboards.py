@@ -14,6 +14,7 @@ def admin_legal_kb(
     *,
     privacy_custom: bool = False,
     terms_custom: bool = False,
+    refund_custom: bool = False,
 ) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(
@@ -23,6 +24,10 @@ def admin_legal_kb(
         [InlineKeyboardButton(
             text="📜 Пользовательское соглашение",
             callback_data="adm:legal:edit:terms",
+        )],
+        [InlineKeyboardButton(
+            text="💸 Политика возврата",
+            callback_data="adm:legal:edit:refund",
         )],
     ]
     if privacy_custom:
@@ -34,6 +39,11 @@ def admin_legal_kb(
         rows.append([InlineKeyboardButton(
             text="↩️ Сбросить соглашение (дефолт)",
             callback_data="adm:legal:reset:terms",
+        )])
+    if refund_custom:
+        rows.append([InlineKeyboardButton(
+            text="↩️ Сбросить возврат (дефолт)",
+            callback_data="adm:legal:reset:refund",
         )])
     rows.append([InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)

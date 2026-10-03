@@ -42,6 +42,7 @@ BTN_HELP_HUB = "💬 Помощь и FAQ"
 BTN_POLICY = "📄 Документы"
 BTN_PRIVACY_POLICY = "📄 Политика конфиденциальности"
 BTN_TERMS_OF_SERVICE = "📜 Пользовательское соглашение"
+BTN_REFUND_POLICY = "💸 Политика возврата"
 BTN_RESUME_PAY = "💳 Вернуться к оплате"
 
 

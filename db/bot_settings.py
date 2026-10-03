@@ -18,6 +18,7 @@ SETTING_TRIAL_LIMIT_IP = "trial_limit_ip"
 SETTING_PAID_LIMIT_IP = "paid_limit_ip"
 SETTING_PRIVACY_POLICY_URL = "privacy_policy_url"
 SETTING_TERMS_OF_SERVICE_URL = "terms_of_service_url"
+SETTING_REFUND_POLICY_URL = "refund_policy_url"
 SETTING_PAYMENT_ADMIN_NOTIFY = "payment_admin_notify_enabled"
 SETTING_TEST_MODE = "test_mode"
 SETTING_BOT_LOCKDOWN = "bot_lockdown"
@@ -395,6 +396,15 @@ async def get_terms_of_service_url() -> str:
     return TERMS_OF_SERVICE_URL
 
 
+async def get_refund_policy_url() -> str:
+    from config.legal import REFUND_POLICY_URL
+
+    raw = await get_setting(SETTING_REFUND_POLICY_URL)
+    if raw and raw.strip():
+        return raw.strip()
+    return REFUND_POLICY_URL
+
+
 async def set_privacy_policy_url(url: str) -> str:
     value = url.strip()
     await set_setting(SETTING_PRIVACY_POLICY_URL, value)
@@ -407,12 +417,22 @@ async def set_terms_of_service_url(url: str) -> str:
     return value
 
 
+async def set_refund_policy_url(url: str) -> str:
+    value = url.strip()
+    await set_setting(SETTING_REFUND_POLICY_URL, value)
+    return value
+
+
 async def clear_privacy_policy_url() -> None:
     await set_setting(SETTING_PRIVACY_POLICY_URL, "")
 
 
 async def clear_terms_of_service_url() -> None:
     await set_setting(SETTING_TERMS_OF_SERVICE_URL, "")
+
+
+async def clear_refund_policy_url() -> None:
+    await set_setting(SETTING_REFUND_POLICY_URL, "")
 
 
 async def is_test_mode_overridden() -> bool:

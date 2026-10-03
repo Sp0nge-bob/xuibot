@@ -29,6 +29,7 @@ from ui.theme import (
     BTN_SUPPORT_SHORT,
     BTN_TARIFFS,
     BTN_TERMS_OF_SERVICE,
+    BTN_REFUND_POLICY,
     BTN_TRIAL,
     format_email_button_label,
     plan_button_label,
@@ -152,10 +153,15 @@ def project_policy_kb(
     *,
     privacy_url: str,
     terms_url: str,
+    refund_url: str | None = None,
 ) -> InlineKeyboardMarkup:
+    from config.legal import REFUND_POLICY_URL
+
+    resolved_refund_url = (refund_url or "").strip() or REFUND_POLICY_URL
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=BTN_PRIVACY_POLICY, url=privacy_url)],
         [InlineKeyboardButton(text=BTN_TERMS_OF_SERVICE, url=terms_url)],
+        [InlineKeyboardButton(text=BTN_REFUND_POLICY, url=resolved_refund_url)],
         [InlineKeyboardButton(text=BTN_HOME, callback_data="main_menu")],
     ])
 

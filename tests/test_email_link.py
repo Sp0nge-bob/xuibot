@@ -328,7 +328,7 @@ async def test_email_bonus_lifecycle():
         await db.execute("INSERT INTO users (tg_id, email_bonus_granted) VALUES (?, 0)", (test_user_id,))
         await db.execute(
             """INSERT INTO subscriptions (tg_id, client_email, end_date, is_active)
-               VALUES (?, 'client_sub_1@vpn.com', '2026-10-01T00:00:00+00:00', 1)""",
+               VALUES (?, 'client_sub_1@vpn.com', '2030-10-01T00:00:00+00:00', 1)""",
             (test_user_id,),
         )
         await db.commit()
@@ -353,7 +353,7 @@ async def test_email_bonus_lifecycle():
     async with get_db() as db:
         async with db.execute("SELECT end_date FROM subscriptions WHERE tg_id = ?", (test_user_id,)) as cur:
             row = await cur.fetchone()
-            assert row[0].startswith("2026-10-06")
+            assert row[0].startswith("2030-10-06")
 
     # 3. Second call returns 0 (cannot double-dip)
     with patch("services.xui.get_unified_panel_client", return_value=None):
