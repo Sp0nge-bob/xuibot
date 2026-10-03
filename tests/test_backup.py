@@ -30,6 +30,15 @@ def mock_db_file(monkeypatch: pytest.MonkeyPatch):
     conn.commit()
     conn.close()
 
+    env_file = _TEST_TMP / ".env"
+    env_file.write_text("SECRET_KEY=super_secret_test_key\n", encoding="utf-8")
+
+    git_dir = _TEST_TMP / ".git"
+    (git_dir / "refs" / "heads").mkdir(parents=True, exist_ok=True)
+    (git_dir / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (git_dir / "config").write_text("[core]\n\trepositoryformatversion = 0\n", encoding="utf-8")
+
+    monkeypatch.setattr("services.backup._PROJECT_ROOT", _TEST_TMP)
     monkeypatch.setattr("services.backup.DB_PATH", str(db_file))
     backup_dir = _TEST_TMP / "backups"
     monkeypatch.setattr("services.backup._BACKUP_DIR", backup_dir)
@@ -72,12 +81,18 @@ async def test_create_backup_archive_with_nodes(mock_db_file: Path, monkeypatch:
     with zipfile.ZipFile(archive_path, "r") as zf:
         namelist = zf.namelist()
         assert "bot.db" in namelist
+        assert ".env" in namelist
+        assert ".git/HEAD" in namelist
+        assert ".git/config" in namelist
         assert "manifest.json" in namelist
         assert "restore.txt" in namelist
         assert "nodes/node_1_Node-NL.db" in namelist
         assert "nodes/node_2_Node_DE.db" in namelist
+        assert "SECRET_KEY=super_secret_test_key" in zf.read(".env").decode("utf-8")
 
         manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+        assert manifest.get("env_included") is True
+        assert manifest.get("git_included") is True
         nodes_backup = manifest.get("nodes_backup")
         assert nodes_backup is not None
         assert nodes_backup["total"] == 2

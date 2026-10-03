@@ -128,12 +128,19 @@ async def _fetch_all_nodes_db(dest_dir: Path) -> list[dict[str, Any]]:
     return results
 
 
-async def _build_manifest(nodes_backup: dict[str, Any] | None = None) -> dict[str, Any]:
+async def _build_manifest(
+    nodes_backup: dict[str, Any] | None = None,
+    *,
+    env_included: bool = False,
+    git_included: bool = False,
+) -> dict[str, Any]:
     stats = await db.get_admin_stats()
     sync_disabled = await bot_settings_db.is_sync_disabled()
     manifest: dict[str, Any] = {
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "db_path": DB_PATH,
+        "env_included": env_included,
+        "git_included": git_included,
         "stats": stats,
         "sync_disabled": sync_disabled,
         "test_mode": await is_test_mode(),
@@ -147,11 +154,16 @@ def _restore_instructions() -> str:
     return (
         "VPN Platega Bot — восстановление из бэкапа\n"
         "=====================================\n\n"
-        "1. Восстановление базы данных бота (bot.db):\n"
+        "1. Восстановление кода и окружения (.git и .env):\n"
+        "   - Распакуйте папку .git в корень проекта и выполните `git reset --hard HEAD`,\n"
+        "     чтобы восстановить все исходные файлы репозитория.\n"
+        "   - Скопируйте файл .env в корень проекта (в нём хранится SECRET_KEY / ENCRYPTION_KEY,\n"
+        "     необходимый для расшифровки паролей и токенов нод 3x-ui в bot.db).\n\n"
+        "2. Восстановление базы данных бота (bot.db):\n"
         "   - Остановите бота (app.py и run_bot.py).\n"
         "   - Замените data/bot.db файлом bot.db из архива.\n"
         "   - Запустите бота снова.\n\n"
-        "2. Восстановление баз данных нод 3x-ui (папка nodes/):\n"
+        "3. Восстановление баз данных нод 3x-ui (папка nodes/):\n"
         "   - В папке nodes/ содержатся дампы x-ui.db для каждой активной ноды.\n"
         "   - Для восстановления ноды остановите сервис на сервере (`x-ui stop`),"
         "\n     замените /etc/x-ui/x-ui.db файлом соответствующей ноды,"
@@ -176,8 +188,24 @@ def _prune_local_backups(retain: int) -> None:
             logger.warning("Failed to remove old backup {}: {}", old, e)
 
 
+def _write_git_to_zip(zf: zipfile.ZipFile, git_dir: Path) -> int:
+    """Записывает содержимое директории .git в zip-архив. Возвращает число добавленных файлов."""
+    if not git_dir.is_dir():
+        return 0
+    count = 0
+    for fpath in git_dir.rglob("*"):
+        try:
+            if fpath.is_file():
+                rel = fpath.relative_to(git_dir).as_posix()
+                zf.write(fpath, arcname=f".git/{rel}")
+                count += 1
+        except OSError as e:
+            logger.warning("Skip file in .git backup {}: {}", fpath, e)
+    return count
+
+
 async def create_backup_archive() -> Path:
-    """Собирает zip: bot.db, дампы баз нод 3x-ui, manifest.json, restore.txt, логи."""
+    """Собирает zip: bot.db, .env, .git, дампы баз нод 3x-ui, manifest.json, restore.txt, логи."""
     src_db = Path(DB_PATH)
     if not src_db.is_file():
         raise FileNotFoundError(f"Database not found: {src_db}")
@@ -187,6 +215,11 @@ async def create_backup_archive() -> Path:
     archive_path = _BACKUP_DIR / f"vpn-bot-backup_{stamp}.zip"
     tmp_db = _BACKUP_DIR / f"_tmp_bot_{stamp}.db"
     tmp_nodes_dir = _BACKUP_DIR / f"_tmp_nodes_{stamp}"
+
+    env_path = _PROJECT_ROOT / ".env"
+    git_dir = _PROJECT_ROOT / ".git"
+    env_exists = env_path.is_file()
+    git_exists = git_dir.is_dir()
 
     try:
         await asyncio.to_thread(_sqlite_backup_file, src_db, tmp_db)
@@ -199,12 +232,22 @@ async def create_backup_archive() -> Path:
             "details": node_results,
         }
 
-        manifest = await _build_manifest(nodes_backup=nodes_summary)
+        manifest = await _build_manifest(
+            nodes_backup=nodes_summary,
+            env_included=env_exists,
+            git_included=git_exists,
+        )
 
         with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             zf.write(tmp_db, arcname="bot.db")
             zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
             zf.writestr("restore.txt", _restore_instructions())
+
+            if env_exists:
+                zf.write(env_path, arcname=".env")
+
+            if git_exists:
+                await asyncio.to_thread(_write_git_to_zip, zf, git_dir)
 
             for r in node_results:
                 if r.get("ok") and r.get("file_name"):
@@ -220,11 +263,13 @@ async def create_backup_archive() -> Path:
 
         _prune_local_backups(settings.BACKUP_LOCAL_RETAIN)
         logger.info(
-            "Backup archive created: {} ({:.1f} KB, nodes: {}/{})",
+            "Backup archive created: {} ({:.1f} KB, nodes: {}/{}, env={}, git={})",
             archive_path,
             archive_path.stat().st_size / 1024,
             nodes_summary["succeeded"],
             nodes_summary["total"],
+            env_exists,
+            git_exists,
         )
         return archive_path
     finally:
@@ -278,7 +323,7 @@ async def send_backup_to_admins(*, source: str = "manual") -> dict[str, Any]:
         f"✅ Платных подписок: <b>{stats.get('paid_subs', 0)}</b>\n"
         f"💰 Оплаченных заказов: <b>{stats.get('paid_orders', 0)}</b>\n"
         f"{nodes_line}\n"
-        f"<i>Внутри: bot.db, manifest.json, restore.txt, базы нод, логи.</i>"
+        f"<i>Внутри: bot.db, .env, .git, manifest.json, restore.txt, базы нод, логи.</i>"
     )
 
     import sys
