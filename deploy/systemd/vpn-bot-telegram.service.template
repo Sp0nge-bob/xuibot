@@ -20,7 +20,7 @@ PrivateTmp=true
 ProtectControlGroups=true
 ProtectKernelModules=true
 ProtectKernelTunables=true
-RestrictSUIDSGID=true
+NoNewPrivileges=false
 UMask=0077
 
 [Install]

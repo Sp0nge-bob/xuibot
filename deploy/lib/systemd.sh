@@ -92,8 +92,10 @@ restart_services() {
         warn "Службы не установлены — сначала пункт 1 (установить / обновить)"
         return 1
     fi
-    log "Быстрый перезапуск (без обновления venv и unit-файлов)"
+    log "Перезапуск служб (обновление unit-файлов и sudoers)"
+    write_units
     install_restart_sudoers || true
+    systemctl daemon-reload
     if [[ -x "$APP_DIR/deploy/restart-services.sh" ]]; then
         bash "$APP_DIR/deploy/restart-services.sh"
     else
