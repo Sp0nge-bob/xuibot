@@ -924,7 +924,7 @@ async def log_inbound_port_conflicts() -> None:
         logger.warning("Не удалось проверить конфликты портов инбаундов: {}", e)
         return
     for port, ids in conflicts.items():
-        logger.info("Инбаунды {} на порту {}", ids, port)
+        logger.debug("Инбаунды {} на порту {}", ids, port)
 
 
 def _client_needs_update(

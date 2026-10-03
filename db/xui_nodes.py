@@ -163,10 +163,19 @@ async def _init_xui_nodes_impl() -> None:
             )
         async with db.execute("SELECT id, password, token FROM xui_nodes") as cur:
             raw_nodes = await cur.fetchall()
+        from services.crypto import needs_reencryption
         for rn in raw_nodes:
             nid, raw_pwd, raw_tok = rn[0], str(rn[1] or ""), str(rn[2] or "")
-            new_pwd = encrypt_secret(raw_pwd) if raw_pwd and not raw_pwd.startswith("enc:") else raw_pwd
-            new_tok = encrypt_secret(raw_tok) if raw_tok and not raw_tok.startswith("enc:") else raw_tok
+            new_pwd = raw_pwd
+            new_tok = raw_tok
+            if needs_reencryption(raw_pwd):
+                plain_pwd = decrypt_secret(raw_pwd)
+                if plain_pwd:
+                    new_pwd = encrypt_secret(plain_pwd)
+            if needs_reencryption(raw_tok):
+                plain_tok = decrypt_secret(raw_tok)
+                if plain_tok:
+                    new_tok = encrypt_secret(plain_tok)
             if new_pwd != raw_pwd or new_tok != raw_tok:
                 await db.execute(
                     "UPDATE xui_nodes SET password = ?, token = ? WHERE id = ?",

@@ -149,7 +149,7 @@ def decrypt_secret(ciphertext: Optional[str]) -> str:
         try:
             decrypted = fernet.decrypt(token_b64.encode("utf-8"))
             if idx > 0:
-                logger.info("Successfully decrypted node credential using fallback key #{}", idx)
+                logger.debug("Successfully decrypted node credential using fallback key #{}", idx)
             return decrypted.decode("utf-8")
         except InvalidToken:
             continue
@@ -170,3 +170,18 @@ def encrypt_secret(plaintext: str) -> str:
     fernet = _get_fernet()
     token = fernet.encrypt(plaintext.encode("utf-8"))
     return f"{_ENC_PREFIX}{token.decode('utf-8')}"
+
+
+def needs_reencryption(ciphertext: Optional[str]) -> bool:
+    """Возвращает True, если непустой секрет не зашифрован или зашифрован не основным ключом (#0)."""
+    if not ciphertext:
+        return False
+    if not ciphertext.startswith(_ENC_PREFIX):
+        return True
+    token_b64 = ciphertext[len(_ENC_PREFIX):].strip()
+    try:
+        _get_fernet().decrypt(token_b64.encode("utf-8"))
+        return False
+    except Exception:
+        return True
+
