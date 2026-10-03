@@ -376,11 +376,13 @@ _cmd_update_finish() {
     fi
     fix_permissions
     # После overlay на диске новый код, а shell ещё со старыми функциями —
-    # перечитываем cli_command.sh и ставим ярлык.
-    if [[ -f "$APP_DIR/deploy/lib/cli_command.sh" ]]; then
-        # shellcheck source=/dev/null
-        source "$APP_DIR/deploy/lib/cli_command.sh"
-    fi
+    # перечитываем библиотечные скрипты перед рестартом.
+    for _lib in systemd.sh sudoers.sh cli_command.sh; do
+        if [[ -f "$APP_DIR/deploy/lib/$_lib" ]]; then
+            # shellcheck source=/dev/null
+            source "$APP_DIR/deploy/lib/$_lib"
+        fi
+    done
     if declare -F install_vpnplategabot_command >/dev/null 2>&1; then
         install_vpnplategabot_command || true
     else
