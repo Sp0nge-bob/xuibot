@@ -4,7 +4,9 @@ import re
 from typing import Any, List, Optional
 
 
+import time
 from config.settings import settings
+import db.connection as db_conn
 from db.connection import get_db
 
 SETTING_SUBSCRIPTION_INBOUNDS = "subscription_inbounds"
@@ -27,9 +29,20 @@ SETTING_EMAIL_BONUS_ENABLED = "email_bonus_enabled"
 SETTING_EMAIL_BONUS_DAYS = "email_bonus_days"
 
 _SYNC_DISABLED_TRUTHY = frozenset({"1", "true", "yes", "on"})
+_SETTINGS_CACHE_TTL_SEC = 3.0
+_settings_cache: dict[tuple[str, str], tuple[float, Optional[str]]] = {}
+
+
+def invalidate_settings_cache(key: Optional[str] = None) -> None:
+    if key is None:
+        _settings_cache.clear()
+        return
+    db_key = str(getattr(db_conn, "DB_PATH", ""))
+    _settings_cache.pop((db_key, key), None)
 
 
 async def init_bot_settings():
+    invalidate_settings_cache()
     async with get_db() as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS bot_settings (
@@ -42,10 +55,18 @@ async def init_bot_settings():
 
 
 async def get_setting(key: str) -> Optional[str]:
+    db_key = str(getattr(db_conn, "DB_PATH", ""))
+    cache_key = (db_key, key)
+    now = time.monotonic()
+    cached = _settings_cache.get(cache_key)
+    if cached is not None and (now - cached[0]) < _SETTINGS_CACHE_TTL_SEC:
+        return cached[1]
     async with get_db() as db:
         async with db.execute("SELECT value FROM bot_settings WHERE key = ?", (key,)) as cur:
             row = await cur.fetchone()
-            return row[0] if row else None
+            val = row[0] if row else None
+    _settings_cache[cache_key] = (time.monotonic(), val)
+    return val
 
 
 async def set_setting(key: str, value: str):
@@ -59,12 +80,16 @@ async def set_setting(key: str, value: str):
             (key, value),
         )
         await db.commit()
+    db_key = str(getattr(db_conn, "DB_PATH", ""))
+    _settings_cache[(db_key, key)] = (time.monotonic(), value)
 
 
 async def delete_setting(key: str) -> None:
     async with get_db() as db:
         await db.execute("DELETE FROM bot_settings WHERE key = ?", (key,))
         await db.commit()
+    db_key = str(getattr(db_conn, "DB_PATH", ""))
+    _settings_cache[(db_key, key)] = (time.monotonic(), None)
 
 
 def _parse_inbound_ids(raw: str) -> List[int]:
@@ -99,12 +124,7 @@ async def set_subscription_inbound_ids(inbound_ids: List[int]) -> str:
 
 async def clear_subscription_inbound_ids_override() -> None:
     """Убрать runtime-переопределение из bot_settings."""
-    async with get_db() as db:
-        await db.execute(
-            "DELETE FROM bot_settings WHERE key = ?",
-            (SETTING_SUBSCRIPTION_INBOUNDS,),
-        )
-        await db.commit()
+    await delete_setting(SETTING_SUBSCRIPTION_INBOUNDS)
 
 
 async def reset_subscription_inbounds_to_env() -> str:

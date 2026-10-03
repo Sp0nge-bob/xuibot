@@ -265,6 +265,57 @@ def _write_git_to_zip(zf: zipfile.ZipFile, git_dir: Path) -> int:
     return count
 
 
+def _pack_backup_zip_sync(
+    *,
+    archive_path: Path,
+    tmp_db: Path,
+    manifest: dict[str, Any],
+    env_exists: bool,
+    env_path: Path,
+    project_root: Path,
+    git_include_full: bool,
+    git_dir: Path,
+    node_results: list[dict[str, Any]],
+    tmp_nodes_dir: Path,
+) -> None:
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.write(tmp_db, arcname="bot.db")
+        zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+        zf.writestr("restore.txt", _restore_instructions())
+
+        if env_exists:
+            zf.write(env_path, arcname=".env")
+
+        _write_project_code_to_zip(zf, project_root)
+
+        if git_include_full:
+            _write_git_to_zip(zf, git_dir)
+        elif git_dir.is_dir():
+            logger.info(
+                ".git directory exceeds 30 MB — skipping raw .git/objects to fit Telegram 50 MB limit (working tree backed up in code/)"
+            )
+            for meta_name in ("HEAD", "config", "packed-refs"):
+                meta_file = git_dir / meta_name
+                if meta_file.is_file():
+                    zf.write(meta_file, arcname=f".git/{meta_name}")
+
+        for r in node_results:
+            if r.get("ok") and r.get("file_name"):
+                fpath = tmp_nodes_dir / r["file_name"]
+                if fpath.is_file():
+                    zf.write(fpath, arcname=f"nodes/{r['file_name']}")
+
+        for log_path in _collect_log_paths():
+            if log_path.stat().st_size > _MAX_LOG_BYTES:
+                logger.debug("Skip large log in backup: {}", log_path)
+                continue
+            if archive_path.is_file() and archive_path.stat().st_size > _TELEGRAM_SAFE_MAX_BYTES:
+                break
+            zf.write(log_path, arcname=f"logs/{log_path.name}")
+
+    _prune_local_backups(settings.BACKUP_LOCAL_RETAIN)
+
+
 async def create_backup_archive() -> Path:
     """Собирает zip: bot.db, .env, code/, .git (если <=35MB), дампы баз нод 3x-ui, manifest.json, restore.txt, логи."""
     src_db = Path(DB_PATH)
@@ -305,42 +356,19 @@ async def create_backup_archive() -> Path:
             git_included=git_include_full,
         )
 
-        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            zf.write(tmp_db, arcname="bot.db")
-            zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
-            zf.writestr("restore.txt", _restore_instructions())
-
-            if env_exists:
-                zf.write(env_path, arcname=".env")
-
-            await asyncio.to_thread(_write_project_code_to_zip, zf, _PROJECT_ROOT)
-
-            if git_include_full:
-                await asyncio.to_thread(_write_git_to_zip, zf, git_dir)
-            elif git_dir.is_dir():
-                logger.info(
-                    ".git directory exceeds 30 MB — skipping raw .git/objects to fit Telegram 50 MB limit (working tree backed up in code/)"
-                )
-                for meta_name in ("HEAD", "config", "packed-refs"):
-                    meta_file = git_dir / meta_name
-                    if meta_file.is_file():
-                        zf.write(meta_file, arcname=f".git/{meta_name}")
-
-            for r in node_results:
-                if r.get("ok") and r.get("file_name"):
-                    fpath = tmp_nodes_dir / r["file_name"]
-                    if fpath.is_file():
-                        zf.write(fpath, arcname=f"nodes/{r['file_name']}")
-
-            for log_path in _collect_log_paths():
-                if log_path.stat().st_size > _MAX_LOG_BYTES:
-                    logger.debug("Skip large log in backup: {}", log_path)
-                    continue
-                if archive_path.is_file() and archive_path.stat().st_size > _TELEGRAM_SAFE_MAX_BYTES:
-                    break
-                zf.write(log_path, arcname=f"logs/{log_path.name}")
-
-        _prune_local_backups(settings.BACKUP_LOCAL_RETAIN)
+        await asyncio.to_thread(
+            _pack_backup_zip_sync,
+            archive_path=archive_path,
+            tmp_db=tmp_db,
+            manifest=manifest,
+            env_exists=env_exists,
+            env_path=env_path,
+            project_root=_PROJECT_ROOT,
+            git_include_full=git_include_full,
+            git_dir=git_dir,
+            node_results=node_results,
+            tmp_nodes_dir=tmp_nodes_dir,
+        )
         logger.info(
             "Backup archive created: {} ({:.1f} KB, nodes: {}/{}, env={}, git={})",
             archive_path,

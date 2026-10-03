@@ -200,16 +200,18 @@ async def _show_main_menu(
     edit: bool = False,
     state: FSMContext | None = None,
     prepend_text: str | None = None,
+    cb_answered: bool = False,
 ):
     user = target.from_user
-    if isinstance(target, CallbackQuery):
+    if isinstance(target, CallbackQuery) and not cb_answered:
         await safe_cb_answer(target)
 
-    await db.get_or_create_user(user.id, user.username, user.first_name)
-    user_row = await db.get_user(user.id)
+    user_row = await db.get_or_create_user(user.id, user.username, user.first_name)
+    if not isinstance(user_row, dict) or "email" not in user_row:
+        user_row = await db.get_user(user.id)
     user_email = (user_row.get("email") or "").strip() if user_row else None
     subs = await get_active_subscriptions_for_ui(user.id)
-    trial_available = await get_trial_button_visible(user.id)
+    trial_available = await get_trial_button_visible(user.id, active_subs=subs)
     pending_promo = None
     pending_expires = None
     pending = await pending_db.get_active_pending_discount(user.id)
@@ -387,11 +389,12 @@ async def cb_main_menu(cb: CallbackQuery, state: FSMContext):
     from bot.faq_view import dismiss_faq_view
     from bot.ticket_chat import clear_active_session
 
+    await safe_cb_answer(cb)
     if cb.from_user:
         clear_active_session(cb.from_user.id)
     had_faq_view = await dismiss_faq_view(cb.bot, cb.message.chat.id)
     await _clear_promo_input_state(state)
-    await _show_main_menu(cb, edit=not had_faq_view, state=state)
+    await _show_main_menu(cb, edit=not had_faq_view, state=state, cb_answered=True)
 
 
 def _get_website_url() -> str:

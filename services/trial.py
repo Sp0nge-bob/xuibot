@@ -29,8 +29,8 @@ from services.xui import provision_client
 from utils.utc import days_from_now_ms, ms_to_utc_iso, parse_utc
 
 
-async def get_trial_button_visible(tg_id: int) -> bool:
-    ok, _ = await trial_db.can_claim_trial(tg_id)
+async def get_trial_button_visible(tg_id: int, *, active_subs: list[dict] | None = None) -> bool:
+    ok, _ = await trial_db.can_claim_trial(tg_id, active_subs=active_subs)
     return ok
 
 

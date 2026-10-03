@@ -1,4 +1,5 @@
-from aiogram.exceptions import TelegramBadRequest
+import asyncio
+from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from loguru import logger
 
@@ -40,6 +41,8 @@ async def safe_cb_answer(
             logger.debug("Просроченный callback проигнорирован: {}", cb.data)
         else:
             raise
+    except (TelegramNetworkError, asyncio.TimeoutError) as e:
+        logger.debug("Сетевая задержка при cb.answer ({}): {}", cb.data, e)
 
 
 async def user_answer(message: Message, text: str, **kwargs):

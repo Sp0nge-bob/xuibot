@@ -65,18 +65,23 @@ async def record_trial_grant(tg_id: int, subscription_id: int) -> int:
         return cursor.lastrowid
 
 
-async def can_claim_trial(tg_id: int) -> tuple[bool, str]:
+async def can_claim_trial(
+    tg_id: int,
+    *,
+    active_subs: Optional[List[Dict[str, Any]]] = None,
+) -> tuple[bool, str]:
     """Возвращает (доступно, причина отказа)."""
     await _ensure_init()
     from db import database as db
 
-    if await has_recent_trial_grant(tg_id):
-        grant = await get_last_trial_grant(tg_id)
+    grant = await get_last_trial_grant(tg_id)
+    if grant:
         granted_at = datetime.fromisoformat(str(grant["granted_at"]).replace("Z", ""))
-        next_at = granted_at + timedelta(days=TRIAL_COOLDOWN_DAYS)
-        return False, f"Пробный период уже использован. Снова доступен с {next_at.strftime('%d.%m.%Y')}."
+        if granted_at >= datetime.utcnow() - timedelta(days=TRIAL_COOLDOWN_DAYS):
+            next_at = granted_at + timedelta(days=TRIAL_COOLDOWN_DAYS)
+            return False, f"Пробный период уже использован. Снова доступен с {next_at.strftime('%d.%m.%Y')}."
 
-    subs = await db.get_active_subscriptions(tg_id)
+    subs = active_subs if active_subs is not None else await db.get_active_subscriptions(tg_id)
     for sub in subs:
         if is_trial_email(sub.get("client_email")):
             return False, "У вас уже активен пробный период."

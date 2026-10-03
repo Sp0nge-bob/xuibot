@@ -823,6 +823,20 @@ async def sync_web_subscriptions_for_user(tg_id: int) -> None:
     """Связывает подписки веб-кабинета с текущим Telegram аккаунтом, если почта привязана."""
     try:
         async with get_db() as db:
+            async with db.execute(
+                """SELECT 1 FROM subscriptions
+                   WHERE (tg_id IS NULL OR tg_id = 0)
+                     AND email_account IS NOT NULL
+                     AND (
+                         email_account IN (SELECT email FROM email_accounts WHERE tg_id = ? AND email IS NOT NULL)
+                         OR email_account IN (SELECT email FROM users WHERE tg_id = ? AND email IS NOT NULL)
+                     )
+                   LIMIT 1""",
+                (tg_id, tg_id),
+            ) as cur:
+                has_unlinked = await cur.fetchone() is not None
+            if not has_unlinked:
+                return
             await db.execute(
                 """UPDATE subscriptions
                    SET tg_id = ?
@@ -842,7 +856,6 @@ async def sync_web_subscriptions_for_user(tg_id: int) -> None:
 async def get_active_subscriptions(tg_id: int) -> List[Dict[str, Any]]:
     await sync_web_subscriptions_for_user(tg_id)
     async with get_db() as db:
-
         async with db.execute(
             """SELECT * FROM subscriptions
                WHERE tg_id = ? AND is_active = 1

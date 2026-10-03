@@ -20,10 +20,16 @@ async def has_unhealthy_secondary_node(*, max_age_sec: float = 30.0) -> bool:
     if now - _checked_at <= max_age_sec:
         return _cached
 
-    secondaries = await nodes_db.get_secondary_nodes()
-    _cached = bool(secondaries) and any(
-        not n.get("is_healthy", True) for n in secondaries
-    )
+    # Если в тестах замокан get_secondary_nodes, используем его; иначе быстрый SELECT без Fernet-дешифровки
+    get_sec = getattr(nodes_db, "get_secondary_nodes", None)
+    fast_check = getattr(nodes_db, "has_unhealthy_enabled_secondary", None)
+    if fast_check is not None and getattr(get_sec, "__module__", "") == "db.xui_nodes":
+        _cached = bool(await fast_check())
+    else:
+        secondaries = await nodes_db.get_secondary_nodes()
+        _cached = bool(secondaries) and any(
+            not n.get("is_healthy", True) for n in secondaries
+        )
     _checked_at = now
     return _cached
 

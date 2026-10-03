@@ -556,6 +556,16 @@ async def delete_node(node_id: int) -> tuple[bool, str]:
     return True, ""
 
 
+async def has_unhealthy_enabled_secondary() -> bool:
+    """Быстрая проверка без расшифровки секретов: есть ли включённая вторичная нода с is_healthy = 0."""
+    await _ensure_init()
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT 1 FROM xui_nodes WHERE is_enabled = 1 AND is_primary = 0 AND is_healthy = 0 LIMIT 1"
+        ) as cur:
+            return (await cur.fetchone()) is not None
+
+
 async def record_health_check(
     node_id: int,
     *,
@@ -563,27 +573,39 @@ async def record_health_check(
     latency_ms: Optional[int],
     error: Optional[str],
 ) -> None:
+    await _ensure_init()
     now = datetime.utcnow().isoformat()
-    node = await get_node(node_id)
-    if not node:
-        return
-    failures = 0 if ok else int(node.get("consecutive_failures") or 0) + 1
-    await update_node(
-        node_id,
-        is_healthy=int(ok),
-        last_health_check_at=now,
-        health_latency_ms=latency_ms,
-        last_health_error=error if not ok else None,
-        consecutive_failures=failures,
-    )
+    cutoff = (datetime.utcnow() - timedelta(days=7)).isoformat()
     async with get_db() as db:
+        cur = await db.execute(
+            """UPDATE xui_nodes
+               SET is_healthy = ?,
+                   last_health_check_at = ?,
+                   health_latency_ms = ?,
+                   last_health_error = ?,
+                   consecutive_failures = CASE WHEN ? THEN 0 ELSE COALESCE(consecutive_failures, 0) + 1 END
+               WHERE id = ?""",
+            (
+                int(ok),
+                now,
+                latency_ms,
+                error if not ok else None,
+                int(ok),
+                node_id,
+            ),
+        )
+        if cur.rowcount <= 0:
+            return
         await db.execute(
             """INSERT INTO node_health_checks (node_id, ok, latency_ms, error)
                VALUES (?, ?, ?, ?)""",
             (node_id, int(ok), latency_ms, error),
         )
+        await db.execute(
+            "DELETE FROM node_health_checks WHERE node_id = ? AND checked_at < ?",
+            (node_id, cutoff),
+        )
         await db.commit()
-    await _prune_health_checks(node_id)
 
 
 async def _prune_health_checks(node_id: int, keep_days: int = 7) -> None:
