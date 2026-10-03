@@ -128,10 +128,31 @@ async def _fetch_all_nodes_db(dest_dir: Path) -> list[dict[str, Any]]:
     return results
 
 
+_TELEGRAM_SAFE_MAX_BYTES = 45 * 1024 * 1024  # Лимит Telegram Bot API sendDocument — 50 МБ
+_CODE_SKIP_DIRS = {
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".test_tmp",
+    "_tmp_backup",
+    "node_modules",
+    "data",
+    "logs",
+    "report",
+    ".cache",
+    "vpn_platega_bot.egg-info",
+}
+
+
 async def _build_manifest(
     nodes_backup: dict[str, Any] | None = None,
     *,
     env_included: bool = False,
+    code_included: bool = False,
     git_included: bool = False,
 ) -> dict[str, Any]:
     stats = await db.get_admin_stats()
@@ -140,6 +161,7 @@ async def _build_manifest(
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "db_path": DB_PATH,
         "env_included": env_included,
+        "code_included": code_included,
         "git_included": git_included,
         "stats": stats,
         "sync_disabled": sync_disabled,
@@ -154,11 +176,11 @@ def _restore_instructions() -> str:
     return (
         "VPN Platega Bot — восстановление из бэкапа\n"
         "=====================================\n\n"
-        "1. Восстановление кода и окружения (.git и .env):\n"
-        "   - Распакуйте папку .git в корень проекта и выполните `git reset --hard HEAD`,\n"
-        "     чтобы восстановить все исходные файлы репозитория.\n"
+        "1. Восстановление кода и окружения (.env, code/, .git/):\n"
         "   - Скопируйте файл .env в корень проекта (в нём хранится SECRET_KEY / ENCRYPTION_KEY,\n"
-        "     необходимый для расшифровки паролей и токенов нод 3x-ui в bot.db).\n\n"
+        "     необходимый для расшифровки паролей и токенов нод 3x-ui в bot.db).\n"
+        "   - В папке code/ находятся все исходные файлы проекта (и папка .git, если она\n"
+        "     поместилась в лимит Telegram Bot API 50 МБ).\n\n"
         "2. Восстановление базы данных бота (bot.db):\n"
         "   - Остановите бота (app.py и run_bot.py).\n"
         "   - Замените data/bot.db файлом bot.db из архива.\n"
@@ -188,6 +210,45 @@ def _prune_local_backups(retain: int) -> None:
             logger.warning("Failed to remove old backup {}: {}", old, e)
 
 
+def _dir_size_bytes(directory: Path, limit_bytes: int) -> int:
+    """Подсчитывает размер директории с ранним выходом при превышении limit_bytes."""
+    if not directory.is_dir():
+        return 0
+    total = 0
+    for fpath in directory.rglob("*"):
+        try:
+            if fpath.is_file():
+                total += fpath.stat().st_size
+                if total > limit_bytes:
+                    return total
+        except OSError:
+            continue
+    return total
+
+
+def _write_project_code_to_zip(zf: zipfile.ZipFile, project_root: Path) -> int:
+    """Упаковывает исходный код проекта в папку code/ внутри архива (без venv/data/cache)."""
+    if not project_root.is_dir():
+        return 0
+    count = 0
+    for fpath in project_root.rglob("*"):
+        try:
+            rel_parts = fpath.relative_to(project_root).parts
+            if not rel_parts:
+                continue
+            if any(part in _CODE_SKIP_DIRS for part in rel_parts):
+                continue
+            if rel_parts[0] == ".env":
+                continue
+            if fpath.is_file() and fpath.stat().st_size <= 5 * 1024 * 1024:
+                rel_posix = fpath.relative_to(project_root).as_posix()
+                zf.write(fpath, arcname=f"code/{rel_posix}")
+                count += 1
+        except OSError as e:
+            logger.warning("Skip file in code backup {}: {}", fpath, e)
+    return count
+
+
 def _write_git_to_zip(zf: zipfile.ZipFile, git_dir: Path) -> int:
     """Записывает содержимое директории .git в zip-архив. Возвращает число добавленных файлов."""
     if not git_dir.is_dir():
@@ -205,7 +266,7 @@ def _write_git_to_zip(zf: zipfile.ZipFile, git_dir: Path) -> int:
 
 
 async def create_backup_archive() -> Path:
-    """Собирает zip: bot.db, .env, .git, дампы баз нод 3x-ui, manifest.json, restore.txt, логи."""
+    """Собирает zip: bot.db, .env, code/, .git (если <=35MB), дампы баз нод 3x-ui, manifest.json, restore.txt, логи."""
     src_db = Path(DB_PATH)
     if not src_db.is_file():
         raise FileNotFoundError(f"Database not found: {src_db}")
@@ -219,7 +280,12 @@ async def create_backup_archive() -> Path:
     env_path = _PROJECT_ROOT / ".env"
     git_dir = _PROJECT_ROOT / ".git"
     env_exists = env_path.is_file()
-    git_exists = git_dir.is_dir()
+    # Telegram Bot API лимит на отправку файла — 50 МБ.
+    # Если .git на сервере раздулся больше 30 МБ, пропускаем сырой .git/objects,
+    # так как весь рабочий код проекта уже упакован в code/.
+    git_max_raw = 30 * 1024 * 1024
+    git_size = await asyncio.to_thread(_dir_size_bytes, git_dir, git_max_raw + 1) if git_dir.is_dir() else 0
+    git_include_full = git_dir.is_dir() and git_size <= git_max_raw
 
     try:
         await asyncio.to_thread(_sqlite_backup_file, src_db, tmp_db)
@@ -235,7 +301,8 @@ async def create_backup_archive() -> Path:
         manifest = await _build_manifest(
             nodes_backup=nodes_summary,
             env_included=env_exists,
-            git_included=git_exists,
+            code_included=True,
+            git_included=git_include_full,
         )
 
         with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
@@ -246,8 +313,18 @@ async def create_backup_archive() -> Path:
             if env_exists:
                 zf.write(env_path, arcname=".env")
 
-            if git_exists:
+            await asyncio.to_thread(_write_project_code_to_zip, zf, _PROJECT_ROOT)
+
+            if git_include_full:
                 await asyncio.to_thread(_write_git_to_zip, zf, git_dir)
+            elif git_dir.is_dir():
+                logger.info(
+                    ".git directory exceeds 30 MB — skipping raw .git/objects to fit Telegram 50 MB limit (working tree backed up in code/)"
+                )
+                for meta_name in ("HEAD", "config", "packed-refs"):
+                    meta_file = git_dir / meta_name
+                    if meta_file.is_file():
+                        zf.write(meta_file, arcname=f".git/{meta_name}")
 
             for r in node_results:
                 if r.get("ok") and r.get("file_name"):
@@ -259,6 +336,8 @@ async def create_backup_archive() -> Path:
                 if log_path.stat().st_size > _MAX_LOG_BYTES:
                     logger.debug("Skip large log in backup: {}", log_path)
                     continue
+                if archive_path.is_file() and archive_path.stat().st_size > _TELEGRAM_SAFE_MAX_BYTES:
+                    break
                 zf.write(log_path, arcname=f"logs/{log_path.name}")
 
         _prune_local_backups(settings.BACKUP_LOCAL_RETAIN)
@@ -269,7 +348,7 @@ async def create_backup_archive() -> Path:
             nodes_summary["succeeded"],
             nodes_summary["total"],
             env_exists,
-            git_exists,
+            git_include_full,
         )
         return archive_path
     finally:
@@ -323,7 +402,7 @@ async def send_backup_to_admins(*, source: str = "manual") -> dict[str, Any]:
         f"✅ Платных подписок: <b>{stats.get('paid_subs', 0)}</b>\n"
         f"💰 Оплаченных заказов: <b>{stats.get('paid_orders', 0)}</b>\n"
         f"{nodes_line}\n"
-        f"<i>Внутри: bot.db, .env, .git, manifest.json, restore.txt, базы нод, логи.</i>"
+        f"<i>Внутри: bot.db, .env, код проекта, базы нод, логи.</i>"
     )
 
     import sys
