@@ -123,6 +123,11 @@ interactive_menu() {
                 if [[ -n "${APP_DIR:-}" ]]; then
                     echo
                     ui_kv "Версия" "$(format_installed_version)"
+                    local _ctitle=""
+                    _ctitle="$(read_deploy_meta_field COMMIT_TITLE 2>/dev/null || true)"
+                    if [[ -n "$_ctitle" ]]; then
+                        ui_kv "Коммит" "$_ctitle"
+                    fi
                 fi
                 pause_menu
                 ;;

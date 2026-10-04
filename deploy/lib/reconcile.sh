@@ -122,13 +122,15 @@ read_deploy_meta_field() {
 }
 
 write_deploy_meta() {
-    local channel="$1" version="$2" sha="$3" remote="$4"
-    local now
+    local channel="$1" version="$2" sha="$3" remote="$4" commit_title="${5:-}"
+    local now clean_title
     now="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    clean_title="$(printf '%s' "$commit_title" | head -n 1 | tr -d '\r')"
     cat >"$APP_DIR/$DEPLOY_META_FILE" <<EOF
 CHANNEL=$channel
 VERSION=$version
 SHA=$sha
+COMMIT_TITLE=$clean_title
 REMOTE=$remote
 UPDATED_AT=$now
 EOF
@@ -166,20 +168,39 @@ format_installed_version() {
 
 # ── overlay archive onto APP_DIR ───────────────────────────────
 
+CODE_UPDATED=0
+GITHUB_COMMIT_SHA=""
+GITHUB_COMMIT_TITLE=""
+
 apply_code_tarball() {
-    # args: archive_url channel version sha remote
-    local archive_url="$1" channel="$2" version="$3" sha="$4" remote="$5"
-    local short current_sha tmp tarball extract_root
+    # args: archive_url channel version sha remote [commit_title]
+    local archive_url="$1" channel="$2" version="$3" sha="$4" remote="$5" commit_title="${6:-}"
+    local short current_sha tmp tarball extract_root title_suffix=""
     short="${sha:0:7}"
+    CODE_UPDATED=0
+
+    commit_title="$(printf '%s' "$commit_title" | head -n 1 | tr -d '\r')"
+    if [[ -n "$commit_title" ]]; then
+        title_suffix=" — ${commit_title}"
+    fi
 
     current_sha="$(read_deploy_meta_field SHA 2>/dev/null || true)"
     if [[ -z "$current_sha" && -f "$APP_DIR/$DEPLOY_REVISION_FILE" ]]; then
         current_sha="$(tr -d '[:space:]' <"$APP_DIR/$DEPLOY_REVISION_FILE" || true)"
     fi
+    if [[ -z "$current_sha" && -d "$APP_DIR/.git" ]] && command -v git >/dev/null 2>&1; then
+        current_sha="$(git -C "$APP_DIR" rev-parse HEAD 2>/dev/null || true)"
+    fi
     if [[ -n "$current_sha" && "$current_sha" == "$sha" ]]; then
-        ok "Код уже актуален: $version ($short)"
-        write_deploy_meta "$channel" "$version" "$sha" "$remote"
+        ok "Код уже актуален: $version ($short)${title_suffix}"
+        write_deploy_meta "$channel" "$version" "$sha" "$remote" "$commit_title"
         return 0
+    fi
+
+    if [[ -n "$current_sha" ]]; then
+        log "Целевой коммит: ${current_sha:0:7} → $short ($version)${title_suffix}"
+    else
+        log "Целевой коммит: $version ($short)${title_suffix}"
     fi
 
     tmp="$(mktemp -d)"
@@ -236,36 +257,48 @@ apply_code_tarball() {
     fi
     slim_purge_docs_from_app_dir "$APP_DIR"
 
-    write_deploy_meta "$channel" "$version" "$sha" "$remote"
+    write_deploy_meta "$channel" "$version" "$sha" "$remote" "$commit_title"
     rm -rf "$tmp"
+    CODE_UPDATED=1
     if [[ -n "$current_sha" ]]; then
-        ok "Код обновлён: ${current_sha:0:7} → $short ($version, $channel)"
+        ok "Код обновлён: ${current_sha:0:7} → $short ($version, $channel)${title_suffix}"
     else
-        ok "Код установлен: $version ($short, $channel)"
+        ok "Код установлен: $version ($short, $channel)${title_suffix}"
     fi
     return 0
 }
 
-github_branch_sha() {
-    local slug="$1" branch="$2"
-    local api_url tmp sha
-    api_url="https://api.github.com/repos/${slug}/commits/${branch}"
+github_ref_commit_info() {
+    local slug="$1" ref="$2"
+    local api_url tmp sha title
+    GITHUB_COMMIT_SHA=""
+    GITHUB_COMMIT_TITLE=""
+    api_url="https://api.github.com/repos/${slug}/commits/${ref}"
     tmp="$(mktemp)"
     if ! _http_get "$api_url" "$tmp"; then
         rm -f "$tmp"
         return 1
     fi
     sha="$(_json_get "$tmp" sha 2>/dev/null || true)"
+    title="$(_json_get "$tmp" commit message 2>/dev/null | head -n 1 | tr -d '\r' || true)"
     rm -f "$tmp"
     sha="${sha:0:40}"
     [[ -n "$sha" && ${#sha} -ge 7 ]] || return 1
-    echo "$sha"
+    GITHUB_COMMIT_SHA="$sha"
+    GITHUB_COMMIT_TITLE="$title"
+    return 0
+}
+
+github_branch_sha() {
+    local slug="$1" branch="$2"
+    github_ref_commit_info "$slug" "$branch" || return 1
+    echo "$GITHUB_COMMIT_SHA"
 }
 
 # ── public update modes ────────────────────────────────────────
 
 update_from_latest_release() {
-    local remote slug tmp tag tarball_url sha api_url
+    local remote slug tmp tag tarball_url sha commit_title="" release_name="" api_url
     remote="$(resolve_git_remote)"
     if ! slug="$(github_slug_from_remote "$remote")"; then
         warn "Не разобрать GitHub remote: $remote"
@@ -291,6 +324,7 @@ update_from_latest_release() {
     fi
 
     tag="$(_json_get "$tmp" tag_name 2>/dev/null || true)"
+    release_name="$(_json_get "$tmp" name 2>/dev/null | head -n 1 | tr -d '\r' || true)"
     tarball_url="$(_json_get "$tmp" tarball_url 2>/dev/null || true)"
     # target_commitish may be branch name; prefer uploading assetless tag archive + resolve sha
     rm -f "$tmp"
@@ -305,35 +339,42 @@ update_from_latest_release() {
         tarball_url="https://github.com/${slug}/archive/refs/tags/${tag}.tar.gz"
     fi
 
-    # Resolve tag → commit SHA
-    tmp="$(mktemp)"
-    if _http_get "https://api.github.com/repos/${slug}/git/refs/tags/${tag}" "$tmp" 2>/dev/null; then
-        sha="$(_json_get "$tmp" object sha 2>/dev/null || true)"
-        # annotated tags: object.type=tag → need another hop; try commit sha from object
-        local otype
-        otype="$(python3 -c "import json; d=json.load(open('$tmp')); print(d.get('object',{}).get('type',''))" 2>/dev/null || true)"
-        if [[ "$otype" == "tag" && -n "$sha" ]]; then
-            local tmp2
-            tmp2="$(mktemp)"
-            if _http_get "https://api.github.com/repos/${slug}/git/tags/${sha}" "$tmp2" 2>/dev/null; then
-                sha="$(_json_get "$tmp2" object sha 2>/dev/null || true)"
+    # Resolve tag → commit SHA + commit title
+    if github_ref_commit_info "$slug" "$tag" 2>/dev/null; then
+        sha="$GITHUB_COMMIT_SHA"
+        commit_title="$GITHUB_COMMIT_TITLE"
+    else
+        tmp="$(mktemp)"
+        if _http_get "https://api.github.com/repos/${slug}/git/refs/tags/${tag}" "$tmp" 2>/dev/null; then
+            sha="$(_json_get "$tmp" object sha 2>/dev/null || true)"
+            local otype
+            otype="$(python3 -c "import json; d=json.load(open('$tmp')); print(d.get('object',{}).get('type',''))" 2>/dev/null || true)"
+            if [[ "$otype" == "tag" && -n "$sha" ]]; then
+                local tmp2
+                tmp2="$(mktemp)"
+                if _http_get "https://api.github.com/repos/${slug}/git/tags/${sha}" "$tmp2" 2>/dev/null; then
+                    sha="$(_json_get "$tmp2" object sha 2>/dev/null || true)"
+                fi
+                rm -f "$tmp2"
             fi
-            rm -f "$tmp2"
         fi
+        rm -f "$tmp"
     fi
-    rm -f "$tmp"
     if [[ -z "$sha" || ${#sha} -lt 7 ]]; then
         # fallback: use tag archive URL; sha unknown — store tag as version, sha=tag
         sha="$tag"
     fi
+    if [[ -z "$commit_title" && -n "$release_name" ]]; then
+        commit_title="$release_name"
+    fi
 
     # Prefer codeload archive by tag (stable URL)
     local archive_url="https://github.com/${slug}/archive/refs/tags/${tag}.tar.gz"
-    apply_code_tarball "$archive_url" "release" "$tag" "$sha" "$remote"
+    apply_code_tarball "$archive_url" "release" "$tag" "$sha" "$remote" "$commit_title"
 }
 
 update_from_latest_commit() {
-    local remote branch slug sha short archive_url
+    local remote branch slug sha short commit_title archive_url
     remote="$(resolve_git_remote)"
     branch="$(resolve_git_branch)"
     if ! slug="$(github_slug_from_remote "$remote")"; then
@@ -343,13 +384,15 @@ update_from_latest_commit() {
 
     log "Канал: edge (последний коммит $branch)"
     log "Репозиторий: $slug"
-    if ! sha="$(github_branch_sha "$slug" "$branch")"; then
+    if ! github_ref_commit_info "$slug" "$branch"; then
         warn "Не удалось получить SHA с api.github.com"
         return 1
     fi
+    sha="$GITHUB_COMMIT_SHA"
+    commit_title="$GITHUB_COMMIT_TITLE"
     short="${sha:0:7}"
     archive_url="https://github.com/${slug}/archive/${sha}.tar.gz"
-    apply_code_tarball "$archive_url" "commit" "$short" "$sha" "$remote"
+    apply_code_tarball "$archive_url" "commit" "$short" "$sha" "$remote" "$commit_title"
 }
 
 # UPDATE_CHANNEL=release|edge  (default release for `update`)
@@ -400,7 +443,12 @@ cmd_update_bot_release() {
         warn "Службы не установлены — сначала пункт 1"
         return 1
     fi
+    CODE_UPDATED=0
     UPDATE_CHANNEL=release update_bot_code || return 1
+    if [[ "${CODE_UPDATED:-0}" -eq 0 ]]; then
+        log "Обновление и перезапуск служб не требуются"
+        return 0
+    fi
     _cmd_update_finish
 }
 
@@ -413,7 +461,12 @@ cmd_update_bot_edge() {
         warn "Службы не установлены — сначала пункт 1"
         return 1
     fi
+    CODE_UPDATED=0
     UPDATE_CHANNEL=edge update_bot_code || return 1
+    if [[ "${CODE_UPDATED:-0}" -eq 0 ]]; then
+        log "Обновление и перезапуск служб не требуются"
+        return 0
+    fi
     _cmd_update_finish
 }
 
