@@ -54,8 +54,23 @@ def qr_and_sync_footer(inbound_count: int) -> str:
 IOS_REGION_GUIDE_URL = "https://my.caelixflow.com/ios-guide"
 
 
+def get_ios_happ_blocked_url() -> str:
+    """
+    Возвращает ссылку на инструкцию по установке Happ на iOS (из ioshappblocked в .env).
+    Если переменная не указана или пустая — возвращает '', и бот не упоминает блокировку Happ в РФ.
+    """
+    from config.legal import get_env_ios_happ_blocked_url
+
+    return get_env_ios_happ_blocked_url()
+
+
 def happ_setup_body() -> str:
     """Пошаговая инструкция для клиента Happ со скриншотами."""
+    ios_url = get_ios_happ_blocked_url()
+    if ios_url:
+        ios_line = f'   • iOS (недоступен в РФ): <a href="{ios_url}">инструкция по смене региона App Store</a>\n'
+    else:
+        ios_line = "   • iOS / macOS — App Store\n"
     return "\n".join([
         "Для подключения через <b>Happ</b> выполните шаги ниже.\n"
         "На скриншотах отмечены нужные кнопки 👇",
@@ -65,7 +80,7 @@ def happ_setup_body() -> str:
         "",
         "2️⃣ Установите приложение <b>Happ</b>\n"
         "   • Android — Google Play\n"
-        f'   • iOS (недоступен в РФ): <a href="{IOS_REGION_GUIDE_URL}">инструкция по смене региона App Store</a>\n'
+        f"{ios_line}"
         "   • Windows — с официального сайта Happ",
         "",
         "3️⃣ Запустите Happ",
@@ -82,12 +97,21 @@ def happ_setup_body() -> str:
 
 
 def incy_setup_body() -> str:
-    """Пошаговая инструкция для клиента INCY (доступен в App Store РФ без смены региона)."""
+    """Пошаговая инструкция для клиента INCY."""
+    ios_url = get_ios_happ_blocked_url()
+    if ios_url:
+        intro = (
+            "<b>INCY</b> — современный клиент для всех платформ. "
+            "Доступен в российском <b>App Store без смены региона Apple ID</b>!\n"
+        )
+        ios_label = "iOS / macOS (App Store РФ)"
+    else:
+        intro = "<b>INCY</b> — современный клиент для всех платформ (iOS, macOS, Android, Windows, Linux).\n"
+        ios_label = "iOS / macOS (App Store)"
     return "\n".join([
-        "<b>INCY</b> — современный клиент для всех платформ. "
-        "Доступен в российском <b>App Store без смены региона Apple ID</b>!\n",
+        intro,
         "1️⃣ <b>Установите приложение INCY:</b>",
-        '   • iOS / macOS (App Store РФ): <a href="https://apps.apple.com/us/app/incy/id6756943388">Скачать в App Store</a>',
+        f'   • {ios_label}: <a href="https://apps.apple.com/us/app/incy/id6756943388">Скачать в App Store</a>',
         '   • Android: <a href="https://play.google.com/store/apps/details?id=com.incy.vpn">Google Play</a>',
         '   • Windows: <a href="https://incy.cc/downloads/incy-windows-x64-installer.exe">Установщик Windows (.exe)</a>',
         '   • macOS (DMG): <a href="https://incy.cc/downloads/incy-macos-universal.dmg">Скачать .dmg</a>',
@@ -107,16 +131,34 @@ def incy_setup_body() -> str:
 
 def activation_setup_body() -> str:
     """Обзорная инструкция по выбору клиента (Happ или INCY) — для FAQ и кнопки подключения."""
+    ios_url = get_ios_happ_blocked_url()
+    happ_desc = (
+        "Основной клиент для Android, iOS, Windows и macOS. "
+        "Поддерживает быстрое добавление в 1 клик и наглядную проверку пинга серверов."
+    )
+    if ios_url:
+        happ_desc += (
+            f'\n🍏 <i>В российском App Store Happ недоступен — '
+            f'<a href="{ios_url}">инструкция по смене региона</a>.</i>'
+        )
+        incy_title = "🛡 <b>Вариант 2: INCY (без смены региона App Store в РФ)</b>"
+        incy_desc = (
+            "Отличная альтернатива, если вам не подходит Happ или вы используете iPhone "
+            "с российским аккаунтом App Store (устанавливается напрямую без смены региона)."
+        )
+    else:
+        incy_title = "🛡 <b>Вариант 2: INCY</b>"
+        incy_desc = (
+            "Отличная альтернатива для iOS, macOS, Android, Windows и Linux "
+            "с быстрым подключением в 1 клик."
+        )
     return "\n".join([
         "Выберите удобное приложение для подключения вашей подписки:\n",
         "📱 <b>Вариант 1: Happ</b>",
-        "Основной клиент для Android, iOS, Windows и macOS. "
-        "Поддерживает быстрое добавление в 1 клик и наглядную проверку пинга серверов.\n"
-        f'🍏 <i>В российском App Store Happ недоступен — <a href="{IOS_REGION_GUIDE_URL}">инструкция по смене региона</a>.</i>',
+        happ_desc,
         "",
-        "🛡 <b>Вариант 2: INCY (без смены региона App Store в РФ)</b>",
-        "Отличная альтернатива, если вам не подходит Happ или вы используете iPhone "
-        "с российским аккаунтом App Store (устанавливается напрямую без смены региона).",
+        incy_title,
+        incy_desc,
         "",
         "👇 <b>Выберите клиент ниже, чтобы открыть подробную инструкцию:</b>",
     ])

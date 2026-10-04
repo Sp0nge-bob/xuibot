@@ -2037,15 +2037,24 @@ async def cb_sub_link(cb: CallbackQuery):
 
     disp_name = subscription_display_name(sub)
     if client not in ("happ", "incy"):
-        from services.fulfillment_text import IOS_REGION_GUIDE_URL
+        from services.fulfillment_text import get_ios_happ_blocked_url
 
         await safe_cb_answer(cb)
+        ios_url = get_ios_happ_blocked_url()
+        if ios_url:
+            clients_desc = (
+                "📱 <b>Happ</b> — классический клиент (Android / ПК / iOS со "
+                f'<a href="{ios_url}">сменой региона App Store</a>)\n'
+                "🛡 <b>INCY</b> — новый клиент (доступен в РФ App Store без смены региона)"
+            )
+        else:
+            clients_desc = (
+                "📱 <b>Happ</b> — классический клиент (Android / iOS / Windows / macOS)\n"
+                "🛡 <b>INCY</b> — альтернативный клиент (iOS / macOS / Android / Windows / Linux)"
+            )
         prompt_text = screen(
             f"🔗 <b>QR и инструкция — {disp_name}</b>",
-            "Выберите приложение, для которого нужно показать QR-код и ключ подключения:\n\n"
-            "📱 <b>Happ</b> — классический клиент (Android / ПК / iOS со "
-            f'<a href="{IOS_REGION_GUIDE_URL}">сменой региона App Store</a>)\n'
-            "🛡 <b>INCY</b> — новый клиент (доступен в РФ App Store без смены региона)",
+            f"Выберите приложение, для которого нужно показать QR-код и ключ подключения:\n\n{clients_desc}",
         )
         await send_or_edit(cb, prompt_text, sub_link_client_picker_kb(sub_id))
         return

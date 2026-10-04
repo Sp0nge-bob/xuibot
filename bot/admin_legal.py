@@ -26,13 +26,19 @@ def _is_valid_legal_url(url: str) -> bool:
 
 
 async def _custom_flags() -> tuple[bool, bool, bool]:
-    privacy_raw = await settings_db.get_setting(settings_db.SETTING_PRIVACY_POLICY_URL)
-    terms_raw = await settings_db.get_setting(settings_db.SETTING_TERMS_OF_SERVICE_URL)
-    refund_raw = await settings_db.get_setting(settings_db.SETTING_REFUND_POLICY_URL)
+    from config.legal import (
+        DEFAULT_PRIVACY_POLICY_URL,
+        DEFAULT_REFUND_POLICY_URL,
+        DEFAULT_TERMS_OF_SERVICE_URL,
+    )
+
+    privacy_url = await settings_db.get_privacy_policy_url()
+    terms_url = await settings_db.get_terms_of_service_url()
+    refund_url = await settings_db.get_refund_policy_url()
     return (
-        bool((privacy_raw or "").strip()),
-        bool((terms_raw or "").strip()),
-        bool((refund_raw or "").strip()),
+        bool(privacy_url and privacy_url != DEFAULT_PRIVACY_POLICY_URL),
+        bool(terms_url and terms_url != DEFAULT_TERMS_OF_SERVICE_URL),
+        bool(refund_url and refund_url != DEFAULT_REFUND_POLICY_URL),
     )
 
 

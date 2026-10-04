@@ -155,9 +155,9 @@ def project_policy_kb(
     terms_url: str,
     refund_url: str | None = None,
 ) -> InlineKeyboardMarkup:
-    from config.legal import REFUND_POLICY_URL
+    from config.legal import get_env_refund_policy_url
 
-    resolved_refund_url = (refund_url or "").strip() or REFUND_POLICY_URL
+    resolved_refund_url = (refund_url or "").strip() or get_env_refund_policy_url()
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=BTN_PRIVACY_POLICY, url=privacy_url)],
         [InlineKeyboardButton(text=BTN_TERMS_OF_SERVICE, url=terms_url)],
@@ -193,22 +193,29 @@ def faq_article_nav_kb() -> InlineKeyboardMarkup:
 
 
 def faq_activation_choice_kb(*, from_faq: bool = True) -> InlineKeyboardMarkup:
-    from services.fulfillment_text import IOS_REGION_GUIDE_URL
+    from services.fulfillment_text import get_ios_happ_blocked_url
 
+    ios_url = get_ios_happ_blocked_url()
+    incy_label = (
+        "🛡 Инструкция INCY (без смены региона РФ)"
+        if ios_url
+        else "🛡 Инструкция INCY"
+    )
     rows: list[list[InlineKeyboardButton]] = [
         [InlineKeyboardButton(
             text="📱 Инструкция Happ (со скриншотами)",
             callback_data="faq:activation:happ",
         )],
         [InlineKeyboardButton(
-            text="🛡 Инструкция INCY (без смены региона РФ)",
+            text=incy_label,
             callback_data="faq:activation:incy",
         )],
-        [InlineKeyboardButton(
-            text="🍏 Смена региона App Store (iOS)",
-            url=IOS_REGION_GUIDE_URL,
-        )],
     ]
+    if ios_url:
+        rows.append([InlineKeyboardButton(
+            text="🍏 Смена региона App Store (iOS)",
+            url=ios_url,
+        )])
     if from_faq:
         rows.append(nav_row("help_hub"))
     else:
@@ -217,14 +224,16 @@ def faq_activation_choice_kb(*, from_faq: bool = True) -> InlineKeyboardMarkup:
 
 
 def faq_activation_client_nav_kb(*, client: str) -> InlineKeyboardMarkup:
-    from services.fulfillment_text import IOS_REGION_GUIDE_URL
+    from services.fulfillment_text import get_ios_happ_blocked_url
 
+    ios_url = get_ios_happ_blocked_url()
     rows: list[list[InlineKeyboardButton]] = []
     if client == "happ":
-        rows.append([InlineKeyboardButton(
-            text="🍏 Смена региона App Store (iOS)",
-            url=IOS_REGION_GUIDE_URL,
-        )])
+        if ios_url:
+            rows.append([InlineKeyboardButton(
+                text="🍏 Смена региона App Store (iOS)",
+                url=ios_url,
+            )])
         rows.append([InlineKeyboardButton(
             text="🛡 Инструкция INCY",
             callback_data="faq:activation:incy",

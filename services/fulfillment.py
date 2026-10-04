@@ -306,7 +306,7 @@ def _success_text(
     inbound_count: int,
     limit_ip: int,
 ) -> str:
-    from services.fulfillment_text import IOS_REGION_GUIDE_URL
+    from services.fulfillment_text import get_ios_happ_blocked_url
     from ui.theme import quote_block, screen, traffic_label
 
     spec_block = quote_block(
@@ -317,17 +317,19 @@ def _success_text(
         format_connections_limit_line(limit_ip),
         f"👤 Клиент: <code>{client_email}</code>",
     )
-    ios_note = (
-        f'🍏 <i>На iPhone Happ недоступен в РФ App Store — '
-        f'<a href="{IOS_REGION_GUIDE_URL}">инструкция по смене региона</a> '
-        f'или используйте <b>INCY</b>.</i>'
-    )
+    blocks = [spec_block]
+    ios_url = get_ios_happ_blocked_url()
+    if ios_url:
+        blocks.append(
+            f'🍏 <i>На iPhone Happ недоступен в РФ App Store — '
+            f'<a href="{ios_url}">инструкция по смене региона</a> '
+            f'или используйте <b>INCY</b>.</i>'
+        )
+    blocks.append(panel_sync_notice_text(inbound_count))
     footer = "⚠️ <i>Тестовый режим — оплата симулирована</i>" if is_test else None
     return screen(
         f"✅ <b>{title}</b>",
-        spec_block,
-        ios_note,
-        panel_sync_notice_text(inbound_count),
+        *blocks,
         footer=footer,
     )
 

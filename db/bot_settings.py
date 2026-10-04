@@ -52,6 +52,7 @@ async def init_bot_settings():
             )
         """)
         await db.commit()
+    await _sync_documents_with_env_on_startup()
 
 
 async def get_setting(key: str) -> Optional[str]:
@@ -398,61 +399,139 @@ async def set_paid_limit_ip(value: int) -> int:
     return val
 
 
+async def _sync_documents_with_env_on_startup(env_path: Optional["Path"] = None) -> None:
+    """
+    При первом запуске после обновления переносит уже настроенные ссылки из БД в .env
+    (в секцию «Документы и инструкции»), чтобы ничего не сбросилось.
+    При последующих запусках синхронизирует БД с .env, чтобы правки в .env сразу применялись.
+    """
+    from pathlib import Path
+    from config.legal import (
+        DEFAULT_IOS_HAPP_BLOCKED_URL,
+        _is_pytest_default_env,
+        env_file_has_documents_section,
+        get_env_privacy_policy_url,
+        get_env_refund_policy_url,
+        get_env_terms_of_service_url,
+        migrate_documents_to_env_file,
+    )
+
+    if _is_pytest_default_env(env_path):
+        return
+    path = env_path or Path(".env")
+    if not path.is_file():
+        return
+
+    if not env_file_has_documents_section(path):
+        db_priv = (await get_setting(SETTING_PRIVACY_POLICY_URL) or "").strip()
+        db_terms = (await get_setting(SETTING_TERMS_OF_SERVICE_URL) or "").strip()
+        db_refund = (await get_setting(SETTING_REFUND_POLICY_URL) or "").strip()
+
+        priv_url = db_priv or get_env_privacy_policy_url()
+        terms_url = db_terms or get_env_terms_of_service_url()
+        refund_url = db_refund or get_env_refund_policy_url()
+        ios_url = (getattr(settings, "IOSHAPPBLOCKED", "") or "").strip() or DEFAULT_IOS_HAPP_BLOCKED_URL
+
+        migrate_documents_to_env_file(
+            privacy_url=priv_url,
+            terms_url=terms_url,
+            refund_url=refund_url,
+            ios_happ_blocked_url=ios_url,
+            env_path=path,
+        )
+        settings.PRIVACY_POLICY_URL = priv_url
+        settings.TERMS_OF_SERVICE_URL = terms_url
+        settings.REFUND_POLICY_URL = refund_url
+        settings.IOSHAPPBLOCKED = ios_url
+
+    # Очищаем устаревшие переопределения в БД при старте, чтобы правки в .env сразу действовали
+    for key in (
+        SETTING_PRIVACY_POLICY_URL,
+        SETTING_TERMS_OF_SERVICE_URL,
+        SETTING_REFUND_POLICY_URL,
+    ):
+        await delete_setting(key)
+
+
 async def get_privacy_policy_url() -> str:
-    from config.legal import PRIVACY_POLICY_URL
+    from config.legal import get_env_privacy_policy_url
 
     raw = await get_setting(SETTING_PRIVACY_POLICY_URL)
     if raw and raw.strip():
         return raw.strip()
-    return PRIVACY_POLICY_URL
+    return get_env_privacy_policy_url()
 
 
 async def get_terms_of_service_url() -> str:
-    from config.legal import TERMS_OF_SERVICE_URL
+    from config.legal import get_env_terms_of_service_url
 
     raw = await get_setting(SETTING_TERMS_OF_SERVICE_URL)
     if raw and raw.strip():
         return raw.strip()
-    return TERMS_OF_SERVICE_URL
+    return get_env_terms_of_service_url()
 
 
 async def get_refund_policy_url() -> str:
-    from config.legal import REFUND_POLICY_URL
+    from config.legal import get_env_refund_policy_url
 
     raw = await get_setting(SETTING_REFUND_POLICY_URL)
     if raw and raw.strip():
         return raw.strip()
-    return REFUND_POLICY_URL
+    return get_env_refund_policy_url()
 
 
 async def set_privacy_policy_url(url: str) -> str:
+    from config.legal import write_or_update_env_key
+
     value = url.strip()
     await set_setting(SETTING_PRIVACY_POLICY_URL, value)
+    settings.PRIVACY_POLICY_URL = value
+    write_or_update_env_key("PRIVACY_POLICY_URL", value)
     return value
 
 
 async def set_terms_of_service_url(url: str) -> str:
+    from config.legal import write_or_update_env_key
+
     value = url.strip()
     await set_setting(SETTING_TERMS_OF_SERVICE_URL, value)
+    settings.TERMS_OF_SERVICE_URL = value
+    write_or_update_env_key("TERMS_OF_SERVICE_URL", value)
     return value
 
 
 async def set_refund_policy_url(url: str) -> str:
+    from config.legal import write_or_update_env_key
+
     value = url.strip()
     await set_setting(SETTING_REFUND_POLICY_URL, value)
+    settings.REFUND_POLICY_URL = value
+    write_or_update_env_key("REFUND_POLICY_URL", value)
     return value
 
 
 async def clear_privacy_policy_url() -> None:
+    from config.legal import DEFAULT_PRIVACY_POLICY_URL, write_or_update_env_key
+
     await set_setting(SETTING_PRIVACY_POLICY_URL, "")
+    settings.PRIVACY_POLICY_URL = DEFAULT_PRIVACY_POLICY_URL
+    write_or_update_env_key("PRIVACY_POLICY_URL", DEFAULT_PRIVACY_POLICY_URL)
 
 
 async def clear_terms_of_service_url() -> None:
+    from config.legal import DEFAULT_TERMS_OF_SERVICE_URL, write_or_update_env_key
+
     await set_setting(SETTING_TERMS_OF_SERVICE_URL, "")
+    settings.TERMS_OF_SERVICE_URL = DEFAULT_TERMS_OF_SERVICE_URL
+    write_or_update_env_key("TERMS_OF_SERVICE_URL", DEFAULT_TERMS_OF_SERVICE_URL)
 
 
 async def clear_refund_policy_url() -> None:
+    from config.legal import DEFAULT_REFUND_POLICY_URL, write_or_update_env_key
+
     await set_setting(SETTING_REFUND_POLICY_URL, "")
+    settings.REFUND_POLICY_URL = DEFAULT_REFUND_POLICY_URL
+    write_or_update_env_key("REFUND_POLICY_URL", DEFAULT_REFUND_POLICY_URL)
 
 
 async def is_test_mode_overridden() -> bool:

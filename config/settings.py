@@ -160,6 +160,14 @@ class Settings(BaseSettings):
     FSM_STATE_TTL_SEC: int = 86400
     FSM_DATA_TTL_SEC: int = 86400
 
+    # --- Документы и инструкции ---
+    PRIVACY_POLICY_URL: str = "https://telegra.ph/Politika-konfidencialnosti-10-01-95"
+    TERMS_OF_SERVICE_URL: str = "https://telegra.ph/Polzovatelskoe-soglashenie-CaelixFlow-10-01"
+    REFUND_POLICY_URL: str = "https://my.caelixflow.com/refund"
+    # Ссылка на инструкцию по скачиванию Happ на iOS / смене региона App Store (ioshappblocked).
+    # Если не задана или пустая — в боте не упоминается, что Happ заблокирован в РФ.
+    IOSHAPPBLOCKED: str = ""
+
     model_config = {
         "env_file": None if os.environ.get("PYTEST_RUNNING") == "1" else ".env",
         "env_file_encoding": "utf-8",
@@ -195,7 +203,7 @@ class Settings(BaseSettings):
     @model_validator(mode="before")
     @classmethod
     def unify_inbound_env_keys(cls, data: Any) -> Any:
-        """Одна переменная DEFAULT_SUBSCRIPTION_INBOUNDS; DEFAULT_INBOUND_ID — legacy alias."""
+        """Одна переменная DEFAULT_SUBSCRIPTION_INBOUNDS; поддержка регистронезависимого ioshappblocked."""
         if not isinstance(data, dict):
             return data
         sub = str(data.get("DEFAULT_SUBSCRIPTION_INBOUNDS") or "").strip()
@@ -203,6 +211,33 @@ class Settings(BaseSettings):
         if not sub and legacy is not None and str(legacy).strip():
             data["DEFAULT_SUBSCRIPTION_INBOUNDS"] = str(legacy).strip()
         data.pop("DEFAULT_INBOUND_ID", None)
+
+        # Поддержка ioshappblocked / IOSHAPPBLOCKED / IOS_HAPP_BLOCKED в любом регистре
+        ios_val = ""
+        for key in list(data.keys()):
+            if str(key).lower() in ("ioshappblocked", "ios_happ_blocked", "ios_region_guide_url"):
+                val = str(data.get(key) or "").strip()
+                if val and not ios_val:
+                    ios_val = val
+                if key != "IOSHAPPBLOCKED":
+                    data.pop(key, None)
+        if not ios_val and os.environ.get("PYTEST_RUNNING") != "1":
+            for env_k in ("ioshappblocked", "IOSHAPPBLOCKED", "IOS_HAPP_BLOCKED"):
+                if env_k in os.environ:
+                    ios_val = os.environ[env_k].strip()
+                    break
+        if ios_val and not str(data.get("IOSHAPPBLOCKED") or "").strip():
+            data["IOSHAPPBLOCKED"] = ios_val
+
+        # Поддержка регистронезависимых ключей документов в .env
+        for canonical in ("PRIVACY_POLICY_URL", "TERMS_OF_SERVICE_URL", "REFUND_POLICY_URL"):
+            for key in list(data.keys()):
+                if str(key).lower() == canonical.lower() and key != canonical:
+                    val = str(data.get(key) or "").strip()
+                    if val and not str(data.get(canonical) or "").strip():
+                        data[canonical] = val
+                    data.pop(key, None)
+
         return data
 
     def subscription_inbound_ids(self) -> List[int]:

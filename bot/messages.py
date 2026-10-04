@@ -441,18 +441,20 @@ def subscription_manage_text(
     *,
     limit_ip: int | None = None,
 ) -> str:
-    from services.fulfillment_text import IOS_REGION_GUIDE_URL
+    from services.fulfillment_text import get_ios_happ_blocked_url
 
     title = subscription_display_name(sub)
-    ios_note = (
-        f'🍏 <i>На iPhone Happ недоступен в РФ App Store — '
-        f'<a href="{IOS_REGION_GUIDE_URL}">инструкция по смене региона</a> '
-        f'или используйте <b>INCY</b>.</i>'
-    )
+    blocks = [_subscription_detail_block(sub, sub_link, limit_ip=limit_ip)]
+    ios_url = get_ios_happ_blocked_url()
+    if ios_url:
+        blocks.append(
+            f'🍏 <i>На iPhone Happ недоступен в РФ App Store — '
+            f'<a href="{ios_url}">инструкция по смене региона</a> '
+            f'или используйте <b>INCY</b>.</i>'
+        )
     return screen(
         f"⚙️ <b>{title}</b>",
-        _subscription_detail_block(sub, sub_link, limit_ip=limit_ip),
-        ios_note,
+        *blocks,
         hint="Что хотите сделать?",
     )
 
@@ -632,12 +634,12 @@ def admin_legal_menu_text(
     terms_custom: bool,
     refund_custom: bool = False,
 ) -> str:
-    from config.legal import REFUND_POLICY_URL
+    from config.legal import get_env_refund_policy_url
 
-    resolved_refund_url = (refund_url or "").strip() or REFUND_POLICY_URL
-    privacy_src = "админка" if privacy_custom else "по умолчанию"
-    terms_src = "админка" if terms_custom else "по умолчанию"
-    refund_src = "админка" if refund_custom else "по умолчанию"
+    resolved_refund_url = (refund_url or "").strip() or get_env_refund_policy_url()
+    privacy_src = "админка / .env" if privacy_custom else ".env"
+    terms_src = "админка / .env" if terms_custom else ".env"
+    refund_src = "админка / .env" if refund_custom else ".env"
     return (
         "📄 <b>Юридические ссылки</b>\n"
         "━━━━━━━━━━━━━━━━\n\n"
