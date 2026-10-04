@@ -81,6 +81,17 @@ run_action() {
     return 1
 }
 
+reload_cli_libs() {
+    local base="${APP_DIR:-$REPO_ROOT}"
+    local _lib
+    for _lib in common.sh python.sh permissions.sh systemd.sh sudoers.sh cli_command.sh reconcile.sh logs.sh redis.sh; do
+        if [[ -f "$base/deploy/lib/$_lib" ]]; then
+            # shellcheck source=/dev/null
+            source "$base/deploy/lib/$_lib"
+        fi
+    done
+}
+
 interactive_menu() {
     require_root
     load_config 2>/dev/null || true
@@ -99,16 +110,19 @@ interactive_menu() {
             1)
                 ui_header "Установка / починка окружения"
                 run_action cmd_reconcile
+                reload_cli_libs
                 pause_menu
                 ;;
             2)
                 ui_header "Stable — последний GitHub Release"
                 run_action cmd_update_bot_release
+                reload_cli_libs
                 pause_menu
                 ;;
             3)
                 ui_header "Edge — последний коммит main"
                 run_action cmd_update_bot_edge
+                reload_cli_libs
                 pause_menu
                 ;;
             4)

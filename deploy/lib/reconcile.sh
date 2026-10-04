@@ -397,7 +397,7 @@ update_from_latest_commit() {
 
 # UPDATE_CHANNEL=release|edge  (default release for `update`)
 update_bot_code() {
-    local channel="${UPDATE_CHANNEL:-release}"
+    local channel="${1:-${UPDATE_CHANNEL:-release}}"
     case "$channel" in
         release|stable)
             update_from_latest_release
@@ -420,7 +420,7 @@ _cmd_update_finish() {
     fix_permissions
     # После overlay на диске новый код, а shell ещё со старыми функциями —
     # перечитываем библиотечные скрипты перед рестартом.
-    for _lib in systemd.sh sudoers.sh cli_command.sh; do
+    for _lib in common.sh python.sh permissions.sh systemd.sh sudoers.sh cli_command.sh reconcile.sh logs.sh redis.sh; do
         if [[ -f "$APP_DIR/deploy/lib/$_lib" ]]; then
             # shellcheck source=/dev/null
             source "$APP_DIR/deploy/lib/$_lib"
@@ -444,7 +444,7 @@ cmd_update_bot_release() {
         return 1
     fi
     CODE_UPDATED=0
-    UPDATE_CHANNEL=release update_bot_code || return 1
+    update_bot_code release || return 1
     if [[ "${CODE_UPDATED:-0}" -eq 0 ]]; then
         log "Обновление и перезапуск служб не требуются"
         return 0
@@ -462,7 +462,7 @@ cmd_update_bot_edge() {
         return 1
     fi
     CODE_UPDATED=0
-    UPDATE_CHANNEL=edge update_bot_code || return 1
+    update_bot_code edge || return 1
     if [[ "${CODE_UPDATED:-0}" -eq 0 ]]; then
         log "Обновление и перезапуск служб не требуются"
         return 0
