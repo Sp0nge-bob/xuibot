@@ -1,6 +1,6 @@
 # VPN Shop Bot v1.2.0 — Web Ecosystem & Node Scaling
 
-Релиз **v1.2.0** представляет полноценную интеграцию с независимым веб-порталом [CaelixFlow Web Portal](https://github.com/Sp0nge-bob/vpnwebsite.git), масштабную оптимизацию производительности базы данных, нативную поддержку пакетных операций 3x-ui (`bulkAdjust`) и усиленную систему безопасности.
+Релиз **v1.2.0** представляет полноценную интеграцию с независимым веб-порталом [VPN Web Portal](https://github.com/Sp0nge-bob/vpnwebsite.git), масштабную оптимизацию производительности базы данных, нативную поддержку пакетных операций 3x-ui (`bulkAdjust`) и усиленную систему безопасности.
 
 Предыдущий релиз: [v1.1.0](https://github.com/Sp0nge-bob/xuibot/releases/tag/v1.1.0).
 

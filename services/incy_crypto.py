@@ -104,8 +104,8 @@ def encrypt_incy_crypt1(
         return url
 
     target_url = build_incy_target_url(url, extra_params=extra_params)
-    site_name = getattr(settings, "SITE_NAME", None) or "CaelixFlow"
-    provider_name = (name or site_name or "CaelixFlow VPN").strip()
+    site_name = getattr(settings, "SITE_NAME", None) or getattr(settings, "BRAND_NAME", None) or "VPN"
+    provider_name = (name or site_name or "VPN Service").strip()
     if provider_name and "vpn" not in provider_name.lower():
         provider_name = f"{provider_name} VPN"
     provider_name = provider_name[:128] if provider_name else None
@@ -221,6 +221,6 @@ def build_incy_redirect_url(sub_key: str | int) -> str:
                 origin = f"{parts.scheme}://{parts.netloc}"
 
     if not origin:
-        origin = "https://caelixflow.com"
+        origin = "https://example.com"
 
     return f"{origin.rstrip('/')}/incy/{sub_key}"

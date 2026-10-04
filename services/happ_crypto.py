@@ -184,6 +184,6 @@ def build_happ_redirect_url(sub_key: str | int) -> str:
                 origin = f"{parts.scheme}://{parts.netloc}"
 
     if not origin:
-        origin = "https://caelixflow.com"
+        origin = "https://example.com"
 
     return f"{origin.rstrip('/')}/happ/{sub_key}"

@@ -51,7 +51,7 @@ def qr_and_sync_footer(inbound_count: int) -> str:
     ])
 
 
-IOS_REGION_GUIDE_URL = "https://my.caelixflow.com/ios-guide"
+from config.legal import DEFAULT_IOS_HAPP_BLOCKED_URL as IOS_REGION_GUIDE_URL
 
 
 def get_ios_happ_blocked_url() -> str:

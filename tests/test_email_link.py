@@ -15,10 +15,10 @@ def test_main_menu_kb_structure():
     assert [BTN_POLICY, BTN_LINK_EMAIL] in buttons
 
     # 2. With linked email
-    kb_with_email = main_menu_kb(user_email="test@caelixflow.com")
+    kb_with_email = main_menu_kb(user_email="test@example.com")
     buttons_with_email = [[b.text for b in row] for row in kb_with_email.inline_keyboard]
     assert [BTN_HELP_HUB, BTN_REFERRALS_SHORT] in buttons_with_email
-    assert [BTN_POLICY, "✉️ test@caelixflow.com"] in buttons_with_email
+    assert [BTN_POLICY, "✉️ test@example.com"] in buttons_with_email
 
 
 def test_email_link_keyboards():
@@ -26,7 +26,7 @@ def test_email_link_keyboards():
     unlinked_texts = [b.text for row in kb_unlinked.inline_keyboard for b in row]
     assert BTN_LINK_EMAIL in unlinked_texts
 
-    kb_linked = link_email_info_kb(user_email="test@caelixflow.com")
+    kb_linked = link_email_info_kb(user_email="test@example.com")
     linked_texts = [b.text for row in kb_linked.inline_keyboard for b in row]
     assert "🔄 Сменить почту" in linked_texts
     assert "❌ Отвязать почту" in linked_texts
@@ -283,9 +283,9 @@ def test_build_happ_redirect_url():
     # 3. WEBSITE_DOMAIN (raw domain without protocol)
     with patch.object(settings, "WEBSITE_PUBLIC_URL", ""), \
          patch.object(settings, "WEBSITE_URL", ""), \
-         patch.object(settings, "WEBSITE_DOMAIN", "portal.caelixflow.com"):
+         patch.object(settings, "WEBSITE_DOMAIN", "portal.example.com"):
         url = build_happ_redirect_url(100)
-        assert url == "https://portal.caelixflow.com/happ/100"
+        assert url == "https://portal.example.com/happ/100"
 
     # 4. Fallback to PUBLIC_WEBHOOK_URL if no website domain is set
     with patch.object(settings, "WEBSITE_PUBLIC_URL", ""), \
@@ -302,7 +302,7 @@ def test_build_happ_redirect_url():
          patch.object(settings, "PUBLIC_WEBHOOK_URL", ""), \
          patch.object(settings, "SUBSCRIPTION_BASE_URL", ""):
         url = build_happ_redirect_url("def")
-        assert url == "https://caelixflow.com/happ/def"
+        assert url == "https://example.com/happ/def"
 
 
 @pytest.mark.asyncio

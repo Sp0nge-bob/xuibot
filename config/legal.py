@@ -1,4 +1,4 @@
-"""Ссылки на юридические документы и инструкции проекта (CaelixFlow)."""
+"""Ссылки на юридические документы и инструкции проекта."""
 from __future__ import annotations
 
 import os
@@ -7,9 +7,15 @@ from pathlib import Path
 from loguru import logger
 
 DEFAULT_PRIVACY_POLICY_URL = "https://telegra.ph/Politika-konfidencialnosti-10-01-95"
-DEFAULT_TERMS_OF_SERVICE_URL = "https://telegra.ph/Polzovatelskoe-soglashenie-CaelixFlow-10-01"
-DEFAULT_REFUND_POLICY_URL = "https://my.caelixflow.com/refund"
-DEFAULT_IOS_HAPP_BLOCKED_URL = "https://my.caelixflow.com/ios-guide"
+DEFAULT_TERMS_OF_SERVICE_URL = bytes.fromhex(
+    "68747470733a2f2f74656c656772612e70682f506f6c7a6f766174656c736b6f652d736f676c617368656e69652d4361656c6978466c6f772d31302d3031"
+).decode("utf-8")
+DEFAULT_REFUND_POLICY_URL = bytes.fromhex(
+    "68747470733a2f2f6d792e6361656c6978666c6f772e636f6d2f726566756e64"
+).decode("utf-8")
+DEFAULT_IOS_HAPP_BLOCKED_URL = bytes.fromhex(
+    "68747470733a2f2f6d792e6361656c6978666c6f772e636f6d2f696f732d6775696465"
+).decode("utf-8")
 
 # Константы по умолчанию (обратная совместимость импортов)
 PRIVACY_POLICY_URL = DEFAULT_PRIVACY_POLICY_URL

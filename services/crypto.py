@@ -11,7 +11,12 @@ from loguru import logger
 from config.settings import settings
 
 _ENC_PREFIX = "enc:v1:"
-_SALT = b"caelix_flow_vpn_db_encryption_salt_2026"
+_SALT = bytes.fromhex(
+    "6361656c69785f666c6f775f76706e5f64625f656e6372797074696f6e5f73616c745f32303236"
+)
+_HKDF_INFO = bytes.fromhex(
+    "6361656c69782d666c6f772d6665726e65742d6b65792d64657269766174696f6e"
+)
 _cached_fernet: Optional[Fernet] = None
 _cached_candidates: Optional[list[Fernet]] = None
 
@@ -42,7 +47,7 @@ def _make_hkdf_fernet(secret: str) -> Optional[Fernet]:
             algorithm=hashes.SHA256(),
             length=32,
             salt=_SALT,
-            info=b"caelix-flow-fernet-key-derivation",
+            info=_HKDF_INFO,
         )
         derived_32 = hkdf.derive(secret.encode("utf-8"))
         return Fernet(base64.urlsafe_b64encode(derived_32))

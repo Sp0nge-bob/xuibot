@@ -408,7 +408,7 @@ def _get_website_url() -> str:
             parts = urllib.parse.urlsplit(target)
             if parts.netloc:
                 url = f"{parts.scheme}://{parts.netloc}"
-    return url or "https://caelixflow.com"
+    return url or "https://example.com"
 
 
 @router.callback_query(F.data == "link_email_menu")
