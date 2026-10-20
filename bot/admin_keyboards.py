@@ -795,6 +795,10 @@ def admin_user_detail_kb(
         back = "adm:users"
     rows: list[list[InlineKeyboardButton]] = [
         [InlineKeyboardButton(
+            text="Обновить сетевые данные",
+            callback_data=f"adm:network:{subscription_id}",
+        )],
+        [InlineKeyboardButton(
             text="🧾 Чеки на эту подписку",
             callback_data=f"adm:sub:orders:{subscription_id}:0",
         )],

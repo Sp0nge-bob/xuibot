@@ -1,6 +1,6 @@
 """Тексты интерфейса бота."""
 import html
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from ui.theme import (
@@ -19,6 +19,7 @@ from config.plans import Plan
 from config.settings import settings
 from config.trial import TRIAL_COOLDOWN_DAYS, TRIAL_DAYS, TRIAL_TRAFFIC_GB, is_trial_email
 from services.pricing import PriceQuote
+from services.client_network import ClientNetworkData
 from services.subscription_labels import subscription_display_name, subscription_short_label
 
 
@@ -1684,6 +1685,26 @@ def admin_user_sub_trial_block(trial: Dict[str, Any] | None) -> str:
     )
 
 
+def admin_client_network_block(data: ClientNetworkData) -> str:
+    heading = "\n\n🌐 <b>Сетевые данные</b>\n"
+    if data.status == "not_found":
+        return heading + "Клиент не найден на панели."
+    if data.status != "ok":
+        return heading + "Данные временно недоступны."
+    samara = timezone(timedelta(hours=4))
+    last = (
+        data.last_online.astimezone(samara).strftime("%d.%m.%Y %H:%M:%S") + " (Самара, UTC+4)"
+        if data.last_online else "нет данных"
+    )
+    used = (data.up + data.down) / (1024 ** 3)
+    updated = data.fetched_at.astimezone(samara).strftime("%H:%M:%S")
+    return (
+        heading + f"Последний онлайн: <b>{last}</b>\n"
+        f"Использовано: <b>{used:.2f} GiB</b>\n"
+        f"<i>Счётчик панели с момента сброса. Обновлено: {updated} (UTC+4)</i>"
+    )
+
+
 def admin_user_sub_detail_text(
     *,
     kind: str,
@@ -1697,6 +1718,7 @@ def admin_user_sub_detail_text(
     last_order: Dict[str, Any] | None = None,
     grant_use: Dict[str, Any] | None = None,
     trial_grant: Dict[str, Any] | None = None,
+    network_data: ClientNetworkData | None = None,
 ) -> str:
     display = (display_name or "").strip()
     name_line = f"Название: <b>{html.escape(display)}</b>\n" if display else ""
@@ -1722,6 +1744,7 @@ def admin_user_sub_detail_text(
         f"Клиент: <code>{html.escape(str(client_email or '—'))}</code>\n"
         f"До: <b>{end_s}</b>\n"
         f"subId: <code>{html.escape(str(sub_link_id or '—'))}</code>"
+        f"{admin_client_network_block(network_data) if network_data else ''}"
         f"{origin}"
     )
 

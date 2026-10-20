@@ -40,6 +40,7 @@ from services.admin_rotate_sub import (
     admin_rotate_subscription_link,
 )
 from services.order_referrer import enrich_order_with_referrer
+from services.client_network import get_client_network_data
 from .states import AdminPricingStates, AdminStates
 from services.subscription_admin import admin_delete_subscription
 from services.process_stats import fetch_bot_load_block
@@ -347,6 +348,9 @@ async def _show_admin_user_sub_detail(
             await target.answer("❌ Подписка не найдена.")
         return
 
+    if isinstance(target, CallbackQuery):
+        await safe_cb_answer(target)
+
     user = await db.get_or_create_user(sub["tg_id"])
     label = _user_label(user.get("username"), user.get("first_name"), sub["tg_id"])
     kind = subscription_kind_label(sub.get("client_email"))
@@ -365,6 +369,7 @@ async def _show_admin_user_sub_detail(
             g_sub = g.get("subscription_id")
             if g_sub is None or int(g_sub) == sub_id:
                 trial_grant = g
+    network_data = await get_client_network_data(str(sub.get("client_email") or ""))
     text = admin_user_sub_detail_text(
         kind=kind,
         label=label,
@@ -377,6 +382,7 @@ async def _show_admin_user_sub_detail(
         last_order=last_order,
         grant_use=grant_use,
         trial_grant=trial_grant,
+        network_data=network_data,
     )
     category = (await state.get_data()).get("admin_user_category")
     kb = admin_user_detail_kb(
@@ -388,7 +394,6 @@ async def _show_admin_user_sub_detail(
         has_orders=bool(paid_orders),
     )
     if isinstance(target, CallbackQuery):
-        await safe_cb_answer(target)
         await send_or_edit(target, text, kb)
     else:
         await target.answer(text, reply_markup=kb)
@@ -555,6 +560,12 @@ async def cb_admin_user_detail(cb: CallbackQuery, state: FSMContext):
         from_search=from_search,
         from_picker=from_picker,
     )
+
+
+@router.callback_query(F.data.regexp(r"^adm:network:\d+$"))
+async def cb_admin_user_network_refresh(cb: CallbackQuery, state: FSMContext):
+    # Same subscription ID position and navigation state as adm:user:{id}.
+    await cb_admin_user_detail(cb, state)
 
 
 @router.callback_query(F.data.regexp(r"^adm:sub:orders:\d+:\d+$"))
