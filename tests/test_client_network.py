@@ -124,7 +124,7 @@ async def test_refresh_renders_card_and_preserves_back_navigation(monkeypatch, s
     text, kb = render.await_args.args[1:]
     assert "Подписка клиента" in text and "Сетевые данные" in text
     buttons = [button for row in kb.inline_keyboard for button in row]
-    assert any(b.text == "Обновить сетевые данные" and b.callback_data == "adm:network:42" for b in buttons)
+    assert any(b.text == "🔄 Обновить сетевые данные" and b.callback_data == "adm:network:42" for b in buttons)
     assert any(b.callback_data == "adm:tg:123" for b in buttons)
 
 

@@ -91,7 +91,7 @@ class Settings(BaseSettings):
     HAPP_CRYPTO_TIMEOUT_SEC: float = 15.0
 
     # 3x-ui limitIp: одновременные уникальные IP (0 = без лимита)
-    TRIAL_LIMIT_IP: int = 3
+    TRIAL_LIMIT_IP: int = 0
     PAID_LIMIT_IP: int = 5
 
     # ID инбаундов в подписке (через запятую). Первый — главный на ★ Primary.
