@@ -54,6 +54,8 @@ async def _init_db_impl():
     await init_connection()
     async with get_db() as db:
         await _apply_pragmas(db)
+        from db.shared_schema import ensure_shared_schema
+        await ensure_shared_schema(db)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 tg_id INTEGER PRIMARY KEY,

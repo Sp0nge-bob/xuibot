@@ -17,12 +17,11 @@ os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
 
 
 async def _apply_pragmas(db: aiosqlite.Connection) -> None:
-    await db.execute("PRAGMA journal_mode=WAL")
-    await db.execute("PRAGMA busy_timeout=30000")
-    await db.execute("PRAGMA foreign_keys=ON")
-    await db.execute("PRAGMA synchronous=NORMAL")
-    await db.execute("PRAGMA temp_store=MEMORY")
-    await db.execute("PRAGMA cache_size=-32000")
+    for statement in ("PRAGMA journal_mode=WAL", "PRAGMA busy_timeout=30000",
+                      "PRAGMA foreign_keys=ON", "PRAGMA synchronous=NORMAL",
+                      "PRAGMA temp_store=MEMORY", "PRAGMA cache_size=-32000"):
+        async with db.execute(statement) as cursor:
+            await cursor.fetchall()
 
 
 async def init_connection() -> None:

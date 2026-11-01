@@ -26,9 +26,10 @@ warn_unsafe_runtime_config()
 from db.database import init_db
 from db import database as db
 from db.connection import close_connection
+from db.payment_inbox import persist_event
 from services.platega import normalize_platega_status
 from services.platega_client import verify_callback_headers
-from services.webhook_guard import acquire_webhook, complete_webhook, webhook_rate_limited
+from services.webhook_guard import webhook_rate_limited
 from services.fulfillment_queue import (
     drain_fulfillment_queue,
     enqueue_webhook_job,
@@ -136,7 +137,12 @@ async def platega_webhook(
         logger.warning("Webhook rate limited from {}", client_ip)
         raise HTTPException(status_code=429, detail="Too many requests")
 
-    body = await request.json()
+    try:
+        body = await request.json()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid callback JSON") from None
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Invalid callback body")
 
     tx_id = body.get("id")
     status = normalize_platega_status(body.get("status") or "")
@@ -188,11 +194,11 @@ async def platega_webhook(
     except Exception as e:
         logger.error("Error inspecting/forwarding order in webhook: {}", e)
 
-    if not await acquire_webhook(tx_id, status):
-        logger.debug("Duplicate webhook ignored: {} {}", tx_id, status)
-        return JSONResponse({"ok": True})
-
-    logger.debug("Platega callback body: {}", body)
+    try:
+        await persist_event(tx_id, status, body)
+    except Exception as error:
+        logger.error("Webhook persistence failed: {}", type(error).__name__)
+        return JSONResponse({"ok": False, "error": "Webhook storage unavailable"}, status_code=503)
     logger.info(
         "Platega callback: tx={} status={} method={}",
         tx_id,
@@ -201,9 +207,7 @@ async def platega_webhook(
     )
 
     if not enqueue_webhook_job(tx_id, status, body):
-        logger.error("Webhook queue saturated for tx {}", tx_id)
-        await complete_webhook(tx_id, status, success=False)
-        return JSONResponse({"ok": False, "error": "Webhook queue unavailable"}, status_code=503)
+        logger.warning("Webhook wakeup queue saturated; durable event will be polled")
 
     return JSONResponse({"ok": True})
 

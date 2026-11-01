@@ -6,6 +6,7 @@ from aiogram.types import BufferedInputFile, FSInputFile
 from loguru import logger
 
 from db import database as db
+from db import payment_states
 from db import tickets as tickets_db
 from services.fulfillment import fulfill_paid_order
 from services.primary_gate import require_primary_for_payment
@@ -29,6 +30,7 @@ class PaymentProcessResult:
     sub_id: Optional[str] = None
     happ_url: Optional[str] = None
     incy_url: Optional[str] = None
+    reconciliation_required: bool = False
 
 
 # Platega может прислать в callback сумму с комиссией сверх цены заказа (1 ₽ → 1.13 ₽).
@@ -154,8 +156,14 @@ async def handle_platega_status(
                 ),
             )
 
+    if status == "CHARGEBACKED":
+        # Financial refund is durable and terminal even if external revoke fails.
+        await payment_states.record_refund(tx_id)
+
     if order["status"] == "paid":
         if status == "CONFIRMED":
+            if await payment_states.claim_confirmation(tx_id) == "refunded":
+                return PaymentProcessResult(handled=True, user_message="Платёж возвращён." if notify else None)
             return PaymentProcessResult(handled=True, already_paid=True)
         if status == "CHARGEBACKED":
             was_paid = order["status"] == "paid"
@@ -164,9 +172,7 @@ async def handle_platega_status(
             msg = await _chargeback_user_message(order, reversal=reversal) if notify else None
             return PaymentProcessResult(handled=True, user_message=msg)
         if status in ("CANCELED", "FAILED"):
-            await db.update_order_status(tx_id, "failed")
-            msg = payment_failed_user_text(order, status=status) if notify else None
-            return PaymentProcessResult(handled=True, user_message=msg)
+            return PaymentProcessResult(handled=True, already_paid=True)
         return PaymentProcessResult(handled=True, already_paid=True)
 
     if status == "CONFIRMED":
@@ -177,7 +183,17 @@ async def handle_platega_status(
                 tx_id,
             )
             return PaymentProcessResult(handled=False)
-        if not await db.mark_order_paid_if_pending(tx_id):
+        confirmation = await payment_states.claim_confirmation(tx_id)
+        if confirmation == "refunded":
+            return PaymentProcessResult(handled=True, user_message="Платёж возвращён." if notify else None)
+        if confirmation == "reconcile":
+            return PaymentProcessResult(
+                handled=False, reconciliation_required=True,
+                user_message="Статус оплаты требует проверки. Обратитесь в поддержку." if notify else None,
+            )
+        if confirmation == "missing":
+            return PaymentProcessResult(handled=False)
+        if confirmation == "paid":
             return PaymentProcessResult(handled=True, already_paid=True)
         await _sync_lockdown_after_pending_end()
         try:
@@ -219,7 +235,7 @@ async def handle_platega_status(
         return PaymentProcessResult(handled=True, user_message=msg)
 
     if status in ("CANCELED", "FAILED"):
-        await db.update_order_status(tx_id, "failed")
+        await payment_states.cancel_unconfirmed(tx_id)
         if order["status"] == "pending":
             await _sync_lockdown_after_pending_end()
         msg = payment_failed_user_text(order, status=status) if notify else None

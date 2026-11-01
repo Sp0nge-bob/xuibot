@@ -9,8 +9,8 @@ from loguru import logger
 
 from config.settings import settings
 from db import database as db
+from db import payment_inbox
 from services.payment_processor import PaymentProcessResult, handle_platega_status
-from services.webhook_guard import complete_webhook
 
 _queue: asyncio.Queue["_WebhookJob"] | None = None
 _workers_started = False
@@ -115,7 +115,7 @@ async def _deliver_result(tx_id: str, result: PaymentProcessResult) -> None:
                 attempts,
                 tx_id,
                 delay,
-                e,
+                type(e).__name__,
             )
             await asyncio.sleep(delay)
 
@@ -130,93 +130,130 @@ def _should_retry_job(job: _WebhookJob, result: PaymentProcessResult | None) -> 
     return True
 
 
-async def _process_job(job: _WebhookJob) -> None:
+async def _process_job(job: _WebhookJob) -> PaymentProcessResult | None:
     delays = _retry_delays()
     attempts = max(1, int(settings.FULFILLMENT_RETRY_ATTEMPTS))
     result: PaymentProcessResult | None = None
-    success = False
-
-    try:
-        for attempt in range(1, attempts + 1):
-            try:
-                result = await handle_platega_status(
-                    job.tx_id,
-                    job.status,
-                    source="webhook_queue",
-                    callback_body=job.callback_body,
-                    notify=True,
-                )
-            except Exception as e:
-                if attempt >= attempts or not _should_retry_job(job, None):
-                    raise
-                delay = delays[min(attempt - 1, len(delays) - 1)]
-                logger.warning(
-                    "Fulfillment queue: worker retry {}/{} for tx {} in {:.0f}s: {}",
-                    attempt,
-                    attempts,
-                    job.tx_id,
-                    delay,
-                    e,
-                )
-                await asyncio.sleep(delay)
-                continue
-
-            if result.amount_mismatch:
-                logger.error("Queue rejected amount mismatch for tx {}", job.tx_id)
-                return
-
-            if result.handled:
-                success = True
-                await _deliver_result(job.tx_id, result)
-                return
-
-            if not _should_retry_job(job, result) or attempt >= attempts:
-                logger.error(
-                    "Fulfillment queue: unhandled tx {} status {} (attempt {}/{})",
-                    job.tx_id,
-                    job.status,
-                    attempt,
-                    attempts,
-                )
-                return
-
+    for attempt in range(1, attempts + 1):
+        try:
+            result = await handle_platega_status(
+                job.tx_id,
+                job.status,
+                source="webhook_queue",
+                callback_body=job.callback_body,
+                notify=True,
+            )
+        except Exception as e:
+            if attempt >= attempts or not _should_retry_job(job, None):
+                raise
             delay = delays[min(attempt - 1, len(delays) - 1)]
             logger.warning(
-                "Fulfillment queue: defer retry {}/{} for tx {} in {:.0f}s",
+                "Fulfillment queue: worker retry {}/{} for tx {} in {:.0f}s: {}",
                 attempt,
                 attempts,
                 job.tx_id,
                 delay,
+                e,
             )
             await asyncio.sleep(delay)
+            continue
+
+        if result.amount_mismatch:
+            logger.error("Queue rejected amount mismatch for tx {}", job.tx_id)
+            return result
+
+        if result.handled:
+            await _deliver_result(job.tx_id, result)
+            return result
+
+        if not _should_retry_job(job, result) or attempt >= attempts:
+            logger.error(
+                "Fulfillment queue: unhandled tx {} status {} (attempt {}/{})",
+                job.tx_id,
+                job.status,
+                attempt,
+                attempts,
+            )
+            return result
+
+        delay = delays[min(attempt - 1, len(delays) - 1)]
+        logger.warning(
+            "Fulfillment queue: defer retry {}/{} for tx {} in {:.0f}s",
+            attempt,
+            attempts,
+            job.tx_id,
+            delay,
+        )
+        await asyncio.sleep(delay)
+    return result
+
+
+async def _renew_lease(claim: payment_inbox.InboxClaim) -> None:
+    while True:
+        await asyncio.sleep(30)
+        if not await payment_inbox.renew_claim(claim):
+            raise RuntimeError("Inbox claim ownership lost")
+
+
+async def _process_claim(claim: payment_inbox.InboxClaim) -> None:
+    """Renew while processing; only the current owner may acknowledge durable work."""
+    job = _WebhookJob(claim.tx_id, claim.status, claim.payload)
+    processing = asyncio.create_task(_process_job(job))
+    heartbeat = asyncio.create_task(_renew_lease(claim))
+    state, error_code = "pending", "UNHANDLED"
+    try:
+        done, _ = await asyncio.wait((processing, heartbeat), return_when=asyncio.FIRST_COMPLETED)
+        if heartbeat in done:
+            heartbeat.result()
+        result = processing.result()
+        if result is not None and result.amount_mismatch:
+            state, error_code = "rejected", "INVALID_PAYMENT"
+        elif result is not None and result.handled:
+            state, error_code = "completed", None
+    except asyncio.CancelledError:
+        # Keep the lease on shutdown: an external request may already be in flight.
+        # Another process recovers the event after its deadline, with operation idempotency.
+        raise
+    except Exception as error:
+        error_code = "PROCESSING_FAILED"
+        logger.error("Durable webhook processing failed: {}", type(error).__name__)
     finally:
-        await complete_webhook(job.tx_id, job.status, success=success)
+        processing.cancel()
+        heartbeat.cancel()
+        await asyncio.gather(processing, heartbeat, return_exceptions=True)
+    delay = min(300, 2 ** min(claim.attempts, 8)) if state == "pending" else 0
+    await payment_inbox.finish_claim(claim, state=state, error_code=error_code, retry_delay=delay)
 
 
 async def _worker() -> None:
     q = _get_queue()
     while not _shutdown.is_set():
         try:
-            job = await asyncio.wait_for(q.get(), timeout=1.0)
-        except asyncio.TimeoutError:
-            continue
-        except asyncio.CancelledError:
-            break
-        try:
-            await _process_job(job)
+            # Memory queue is a wakeup hint; SQLite contains the authoritative body.
+            while not q.empty():
+                q.get_nowait()
+                q.task_done()
+            claim = await payment_inbox.claim_event()
+            if claim is not None:
+                await _process_claim(claim)
+            else:
+                try:
+                    await asyncio.wait_for(q.get(), timeout=1.0)
+                    q.task_done()
+                except asyncio.TimeoutError:
+                    pass
         except asyncio.CancelledError:
             break
         except Exception as e:
-            logger.exception("Fulfillment queue worker failed for tx {}: {}", job.tx_id, e)
-            await complete_webhook(job.tx_id, job.status, success=False)
-        finally:
-            q.task_done()
+            logger.error("Durable webhook worker failed: {}", type(e).__name__)
+            await asyncio.sleep(1)
 
 
 async def start_fulfillment_workers() -> None:
     global _workers_started, _worker_tasks
     if _workers_started:
         return
+    await payment_inbox.init_payment_inbox()
     _shutdown.clear()
     _workers_started = True
     workers = max(1, int(settings.FULFILLMENT_QUEUE_WORKERS))
@@ -232,7 +269,12 @@ async def stop_fulfillment_workers() -> None:
     if not _workers_started:
         return
     _shutdown.set()
-    for task in _worker_tasks:
+    # Let a short DB claim/commit handoff finish before cancellation. Pending
+    # network work remains recoverable through its durable lease deadline.
+    pending = set(_worker_tasks)
+    if pending:
+        _, pending = await asyncio.wait(pending, timeout=1.2)
+    for task in pending:
         task.cancel()
     if _worker_tasks:
         await asyncio.gather(*_worker_tasks, return_exceptions=True)
@@ -275,7 +317,7 @@ def enqueue_webhook_job(
         _get_queue().put_nowait(_WebhookJob(tx_id, status, callback_body))
         return True
     except asyncio.QueueFull:
-        logger.error("Fulfillment queue full — dropping tx {}", tx_id)
+        logger.warning("Fulfillment wakeup queue full; durable polling remains active")
         return False
 
 
