@@ -82,3 +82,60 @@ async def test_cross001_bot_order_source_overrides_website_default(monkeypatch):
         order_id = await database.create_order(7, "test-plan", "Test", 100, "synthetic-tx")
         async with connection.execute("SELECT source, status FROM orders WHERE id = ?", (order_id,)) as cursor:
             assert await cursor.fetchone() == ("bot", "pending")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_stage", ["ping", "construct", "close"])
+async def test_bot008_redis_failure_contains_no_credentials(monkeypatch, failure_stage):
+    from aiogram.fsm.storage.redis import RedisStorage
+    from bot import fsm_storage
+    url = "redis://synthetic-user:synthetic-password@cache.invalid:6379/0"
+    monkeypatch.setattr(fsm_storage.settings, "REDIS_URL", url)
+    storage = SimpleNamespace(redis=SimpleNamespace(ping=AsyncMock(
+        side_effect=ConnectionError("cannot connect " + url))), close=AsyncMock())
+    if failure_stage == "close":
+        storage.close.side_effect = ConnectionError("cleanup failed " + url)
+    def from_url(*args, **kwargs):
+        if failure_stage == "construct":
+            raise ConnectionError("invalid configuration " + url)
+        return storage
+    monkeypatch.setattr(RedisStorage, "from_url", from_url)
+    with pytest.raises(RuntimeError) as caught:
+        await fsm_storage.create_fsm_storage()
+    import traceback
+    rendered = "".join(traceback.format_exception(caught.value))
+    from loguru import logger
+    messages = []
+    sink = logger.add(lambda message: messages.append(str(message)), diagnose=True, backtrace=False)
+    try:
+        logger.opt(exception=caught.value).error("Synthetic Redis failure")
+    finally:
+        logger.remove(sink)
+    rendered += "".join(messages)
+    assert "synthetic-password" not in rendered
+    assert "synthetic-user" not in rendered
+    assert "cache.invalid" in str(caught.value)
+    assert "ConnectionError" in str(caught.value)
+    if failure_stage == "construct":
+        storage.close.assert_not_awaited()
+    else:
+        storage.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_bot008_rotated_bearer_not_logged(monkeypatch):
+    from services import xui
+    client = SimpleNamespace(expiry_time=0, total_gb=0, enable=True, limit_ip=0)
+    monkeypatch.setattr(xui, "get_api", AsyncMock(return_value=object()))
+    monkeypatch.setattr(xui, "_unified_get_client_info", AsyncMock(
+        return_value=(client, None, "synthetic-group")))
+    update = AsyncMock()
+    monkeypatch.setattr(xui, "_unified_update_client", update)
+    messages = []
+    sink = xui.logger.add(lambda msg: messages.append(str(msg)))
+    try:
+        await xui.rotate_client_sub_id("synthetic-email", "synthetic-bearer-token")
+    finally:
+        xui.logger.remove(sink)
+    assert update.await_args.kwargs["subId"] == "synthetic-bearer-token"
+    assert "synthetic-bearer-token" not in "".join(messages)

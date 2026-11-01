@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
 
 from aiogram.fsm.storage.base import BaseStorage
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -28,19 +29,28 @@ async def create_fsm_storage() -> BaseStorage:
 
     from aiogram.fsm.storage.redis import RedisStorage
 
-    storage = RedisStorage.from_url(
-        url,
-        state_ttl=settings.FSM_STATE_TTL_SEC,
-        data_ttl=settings.FSM_DATA_TTL_SEC,
-    )
+    storage = None
     try:
+        storage = RedisStorage.from_url(
+            url,
+            state_ttl=settings.FSM_STATE_TTL_SEC,
+            data_ttl=settings.FSM_DATA_TTL_SEC,
+        )
         await storage.redis.ping()
     except Exception as e:
-        await storage.close()
+        if storage is not None:
+            try:
+                await storage.close()
+            except Exception:
+                pass
+        try:
+            host = urlsplit(url).hostname or "configured host"
+        except ValueError:
+            host = "configured host"
         raise RuntimeError(
-            f"REDIS_URL задан, но Redis недоступен ({url!r}): {e}. "
+            f"REDIS_URL задан, но Redis недоступен ({host}; {type(e).__name__}). "
             "Установите redis-server или уберите REDIS_URL для MemoryStorage."
-        ) from e
+        ) from None
 
     logger.info(
         "FSM storage: Redis (TTL state={}s, data={}s)",
@@ -64,5 +74,5 @@ async def close_fsm_storage() -> None:
         try:
             await _fsm_storage.close()
         except Exception as e:
-            logger.debug("fsm storage close: {}", e)
+            logger.debug("fsm storage close failed: {}", type(e).__name__)
     _fsm_storage = None

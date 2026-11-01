@@ -516,7 +516,7 @@ async def rotate_client_sub_id(email: str, new_sub_id: str) -> None:
         limitIp=client.limit_ip or 0,
         current_group=current_group,
     )
-    logger.success("clients/update {} new subId={}", email, token)
+    logger.success("clients/update {} subscription link rotated", email)
 
 
 async def _unified_attach(api: AsyncApi, email: str, inbound_ids: list[int]) -> None:
