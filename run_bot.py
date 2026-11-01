@@ -22,7 +22,9 @@ from db.database import init_db
 
 async def _main() -> None:
     from config.settings import warn_unsafe_runtime_config
+    from services.crypto import validate_encryption_config
 
+    validate_encryption_config()
     warn_unsafe_runtime_config()
     install_shutdown_handlers()
     await init_db()

@@ -33,9 +33,8 @@ def _clean_str(val: Any) -> str:
 
 def _get_secret_key() -> str:
     key = _clean_str(getattr(settings, "SECRET_KEY", ""))
-    if not key:
-        logger.warning("SECRET_KEY is empty in settings, using fallback dev key")
-        key = "default_dev_secret_key_change_in_production"
+    if not key or key in KNOWN_FALLBACK_SECRETS:
+        raise ValueError("Configure a non-default SECRET_KEY or a valid ENCRYPTION_KEY")
     return key
 
 
@@ -75,20 +74,22 @@ def _get_fernet() -> Fernet:
     key_raw = _clean_str(getattr(settings, "ENCRYPTION_KEY", ""))
     if key_raw:
         try:
-            decoded = base64.urlsafe_b64decode(key_raw.encode("utf-8"))
-            if len(decoded) == 32:
-                _cached_fernet = Fernet(key_raw.encode("utf-8"))
-                return _cached_fernet
+            _cached_fernet = Fernet(key_raw.encode("utf-8"))
+            return _cached_fernet
         except Exception:
-            logger.warning("Configured ENCRYPTION_KEY is invalid, deriving key via HKDF from SECRET_KEY")
+            raise ValueError("ENCRYPTION_KEY must be a valid Fernet key") from None
 
     hkdf_f = _make_hkdf_fernet(_get_secret_key())
     if hkdf_f is not None:
         _cached_fernet = hkdf_f
         return _cached_fernet
 
-    _cached_fernet = Fernet(Fernet.generate_key())
-    return _cached_fernet
+    raise ValueError("Unable to derive encryption key from SECRET_KEY")
+
+
+def validate_encryption_config() -> None:
+    """Reject unusable active keys before startup touches the database or panels."""
+    _get_fernet()
 
 
 def _get_candidate_fernets() -> list[Fernet]:
@@ -116,21 +117,16 @@ def _get_candidate_fernets() -> list[Fernet]:
     add_fernet(_get_fernet())
 
     # 2. Текущий SECRET_KEY (HKDF + legacy SHA256)
-    current_sec = _get_secret_key()
-    add_fernet(_make_hkdf_fernet(current_sec))
-    add_fernet(_make_sha256_fernet(current_sec))
+    current_sec = _clean_str(getattr(settings, "SECRET_KEY", ""))
+    if current_sec and current_sec not in KNOWN_FALLBACK_SECRETS:
+        add_fernet(_make_hkdf_fernet(current_sec))
+        add_fernet(_make_sha256_fernet(current_sec))
 
     # 3. Резервный ключ из .env (если задан OLD_SECRET_KEY)
     old_sec = _clean_str(getattr(settings, "OLD_SECRET_KEY", ""))
-    if old_sec and old_sec != current_sec:
+    if old_sec:
         add_fernet(_make_hkdf_fernet(old_sec))
         add_fernet(_make_sha256_fernet(old_sec))
-
-    # 4. Общеизвестные дефолты разработчика
-    for fallback_sec in KNOWN_FALLBACK_SECRETS:
-        if fallback_sec != current_sec and fallback_sec != old_sec:
-            add_fernet(_make_hkdf_fernet(fallback_sec))
-            add_fernet(_make_sha256_fernet(fallback_sec))
 
     _cached_candidates = candidates
     return _cached_candidates

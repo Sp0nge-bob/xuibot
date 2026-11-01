@@ -48,6 +48,9 @@ install_uvicorn_shutdown_hook()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from services.crypto import validate_encryption_config
+
+    validate_encryption_config()
     bind_event_loop(asyncio.get_running_loop())
     await init_db()
     logger.info("Database ready")
