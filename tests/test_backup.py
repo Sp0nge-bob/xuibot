@@ -14,7 +14,7 @@ from services.backup import create_backup_archive, send_backup_to_admins
 
 import shutil
 
-_TEST_TMP = Path(__file__).resolve().parent / "_tmp_backup"
+_TEST_TMP = Path(__file__).resolve().parents[1] / ".test_tmp" / "backup"
 
 
 @pytest.fixture
@@ -40,6 +40,13 @@ def mock_db_file(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr("services.backup._PROJECT_ROOT", _TEST_TMP)
     monkeypatch.setattr("services.backup.DB_PATH", str(db_file))
+    # Archive statistics are an external dependency of this synthetic one-table DB.
+    # Keep manifest generation real; never query a different global bot database.
+    monkeypatch.setattr("services.backup.db.get_admin_stats", AsyncMock(return_value={
+        "users": 1, "paid_subs": 0, "paid_orders": 0,
+    }))
+    monkeypatch.setattr("services.backup.bot_settings_db.is_sync_disabled", AsyncMock(return_value=False))
+    monkeypatch.setattr("services.backup.is_test_mode", AsyncMock(return_value=False))
     backup_dir = _TEST_TMP / "backups"
     monkeypatch.setattr("services.backup._BACKUP_DIR", backup_dir)
 
@@ -93,6 +100,14 @@ async def test_create_backup_archive_with_nodes(mock_db_file: Path, monkeypatch:
         manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
         assert manifest.get("env_included") is True
         assert manifest.get("git_included") is True
+        assert manifest["stats"] == {"users": 1, "paid_subs": 0, "paid_orders": 0}
+        assert manifest["sync_disabled"] is False
+        assert manifest["test_mode"] is False
+        assert zf.read("restore.txt")
+        with sqlite3.connect(":memory:") as restored:
+            restored.deserialize(zf.read("bot.db"))
+            assert restored.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+            assert restored.execute("SELECT val FROM test_table").fetchall() == [("test",)]
         nodes_backup = manifest.get("nodes_backup")
         assert nodes_backup is not None
         assert nodes_backup["total"] == 2
