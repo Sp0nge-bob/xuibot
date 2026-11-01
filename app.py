@@ -28,7 +28,7 @@ from db import database as db
 from db.connection import close_connection
 from services.platega import normalize_platega_status
 from services.platega_client import verify_callback_headers
-from services.webhook_guard import acquire_webhook, webhook_rate_limited
+from services.webhook_guard import acquire_webhook, complete_webhook, webhook_rate_limited
 from services.fulfillment_queue import (
     drain_fulfillment_queue,
     enqueue_webhook_job,
@@ -202,6 +202,8 @@ async def platega_webhook(
 
     if not enqueue_webhook_job(tx_id, status, body):
         logger.error("Webhook queue saturated for tx {}", tx_id)
+        await complete_webhook(tx_id, status, success=False)
+        return JSONResponse({"ok": False, "error": "Webhook queue unavailable"}, status_code=503)
 
     return JSONResponse({"ok": True})
 
