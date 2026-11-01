@@ -73,3 +73,6 @@ data/
 *.bak
 data/*.db
 .test_tmp/
+# Local review evidence, reports and agent handoffs (never publish)
+security-fixes/
+security-audit/
