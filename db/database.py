@@ -726,6 +726,27 @@ async def add_subscription_bonus_days(subscription_id: int, days: int) -> str:
     if extra <= 0:
         sub = await get_subscription_by_id(subscription_id)
         return str(sub["end_date"]) if sub else ""
+    for _ in range(5):
+        sub = await get_subscription_by_id(subscription_id)
+        if not sub:
+            raise ValueError("Подписка не найдена")
+        old_end = sub["end_date"]
+        new_end = add_days_utc(str(old_end), extra)
+        async with get_db() as db:
+            if old_end is None:
+                cur = await db.execute(
+                    "UPDATE subscriptions SET end_date = ? WHERE id = ? AND end_date IS NULL",
+                    (new_end.isoformat(), subscription_id),
+                )
+            else:
+                cur = await db.execute(
+                    "UPDATE subscriptions SET end_date = ? WHERE id = ? AND end_date = ?",
+                    (new_end.isoformat(), subscription_id, str(old_end)),
+                )
+            await db.commit()
+            if cur.rowcount > 0:
+                return new_end.isoformat()
+    # fallback
     sub = await get_subscription_by_id(subscription_id)
     if not sub:
         raise ValueError("Подписка не найдена")
@@ -757,6 +778,34 @@ async def add_grant_bonus_days(subscription_id: int, days: int) -> None:
 async def extend_subscription_record(subscription_id: int, additional_days: int) -> str:
     from utils.utc import add_days_utc, parse_utc, utc_now
 
+    for _ in range(5):
+        sub = await get_subscription_by_id(subscription_id)
+        if not sub:
+            raise ValueError("Подписка не найдена")
+        current_end = parse_utc(sub["end_date"])
+        now = utc_now()
+        base = current_end if current_end > now else now
+        new_end = add_days_utc(base, additional_days)
+        old_end = sub["end_date"]
+        async with get_db() as db:
+            if old_end is None:
+                cur = await db.execute(
+                    """UPDATE subscriptions
+                       SET end_date = ?, is_active = 1, expiry_reminder_sent_at = NULL
+                       WHERE id = ? AND end_date IS NULL""",
+                    (new_end.isoformat(), subscription_id),
+                )
+            else:
+                cur = await db.execute(
+                    """UPDATE subscriptions
+                       SET end_date = ?, is_active = 1, expiry_reminder_sent_at = NULL
+                       WHERE id = ? AND end_date = ?""",
+                    (new_end.isoformat(), subscription_id, str(old_end)),
+                )
+            await db.commit()
+            if cur.rowcount > 0:
+                return new_end.isoformat()
+    # fallback
     sub = await get_subscription_by_id(subscription_id)
     if not sub:
         raise ValueError("Подписка не найдена")
