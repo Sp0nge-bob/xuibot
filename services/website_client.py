@@ -338,47 +338,11 @@ async def link_telegram_token(
 
     # Fallback to direct DB
     try:
-        from utils.utc import utc_now
         from db.connection import get_db
+        from db.telegram_linking import consume_link_token
 
         async with get_db() as db:
-            async with db.execute(
-                "SELECT email, expires_at, used FROM telegram_link_tokens WHERE token = ?",
-                (token,),
-            ) as cur:
-                row = await cur.fetchone()
-            if not row:
-                return {"ok": False, "detail": "Токен привязки не найден."}
-            email_val, exp_at, is_used = row[0], row[1], row[2]
-            if is_used:
-                return {"ok": False, "detail": "Эта ссылка для привязки уже была использована."}
-            if exp_at <= utc_now().isoformat():
-                return {"ok": False, "detail": "Срок действия ссылки для привязки истёк."}
-
-            try:
-                async with db.execute(
-                    "SELECT 1 FROM email_blacklist WHERE email = ? UNION SELECT 1 FROM email_accounts WHERE email = ? AND is_blocked = 1 LIMIT 1",
-                    (email_val, email_val),
-                ) as bcur:
-                    if await bcur.fetchone():
-                        return {"ok": False, "detail": "Данная почта находится в чёрном списке и не может быть привязана к Telegram."}
-            except Exception:
-                pass
-
-            await db.execute("UPDATE telegram_link_tokens SET used = 1 WHERE token = ?", (token,))
-            await db.execute(
-                "INSERT OR IGNORE INTO email_accounts (email, tg_id) VALUES (?, ?)",
-                (email_val, tg_id),
-            )
-            await db.execute("UPDATE email_accounts SET tg_id = ? WHERE email = ?", (tg_id, email_val))
-            await db.execute("UPDATE users SET email = ? WHERE tg_id = ?", (email_val, tg_id))
-            await db.execute("UPDATE subscriptions SET tg_id = ? WHERE email_account = ?", (tg_id, email_val))
-            await db.execute(
-                "UPDATE subscriptions SET email_account = ? WHERE tg_id = ? AND (email_account IS NULL OR email_account = '')",
-                (email_val, tg_id),
-            )
-            await db.commit()
-            return {"ok": True, "email": email_val, "message": f"Аккаунт успешно привязан к {email_val}!"}
+            return await consume_link_token(db, token, tg_id)
     except Exception as dbe:
         logger.error("Direct DB link error: {}", dbe)
         return {"ok": False, "detail": f"Ошибка привязки: {dbe}"}

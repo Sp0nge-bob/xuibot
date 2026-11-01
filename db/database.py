@@ -207,6 +207,13 @@ async def _init_db_impl():
                 used INTEGER DEFAULT 0
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS email_blacklist (
+                email TEXT PRIMARY KEY,
+                reason TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         await _create_indexes(db)
         await db.commit()
 
@@ -288,8 +295,8 @@ async def create_order(
             """INSERT INTO orders
                (tg_id, plan_id, plan_name, amount, platega_tx_id, payment_method, order_type,
                 promo_code, original_amount, discount_amount, payment_redirect,
-                subscription_id, sub_display_name, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')""",
+                subscription_id, sub_display_name, status, source)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'bot')""",
             (tg_id, plan_id, plan_name, amount, platega_tx_id, payment_method, order_type,
              promo_code, original_amount or amount, discount_amount, payment_redirect,
              subscription_id, sub_display_name)

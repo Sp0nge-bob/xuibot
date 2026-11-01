@@ -196,9 +196,11 @@ async def test_link_telegram_token_http_failure_fallback():
         await db.execute("""
             CREATE TABLE email_accounts (
                 email TEXT PRIMARY KEY,
-                tg_id INTEGER
+                tg_id INTEGER,
+                is_blocked INTEGER DEFAULT 0
             )
         """)
+        await db.execute("CREATE TABLE email_blacklist (email TEXT PRIMARY KEY)")
         await db.execute("""
             CREATE TABLE users (
                 tg_id INTEGER PRIMARY KEY,

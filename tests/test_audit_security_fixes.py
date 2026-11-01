@@ -58,3 +58,27 @@ def test_bot007_public_legacy_key_requires_explicit_migration_opt_in(crypto_conf
     crypto_config.OLD_SECRET_KEY = old_key
     crypto._cached_candidates = None
     assert crypto.decrypt_secret(token) == "legacy-password"
+
+
+@pytest.mark.asyncio
+async def test_cross001_bot_order_source_overrides_website_default(monkeypatch):
+    from contextlib import asynccontextmanager
+    import aiosqlite
+    from db import database
+
+    async with aiosqlite.connect(":memory:") as connection:
+        await connection.execute("""CREATE TABLE orders (
+            id INTEGER PRIMARY KEY, tg_id INTEGER, plan_id TEXT, plan_name TEXT,
+            amount INTEGER, platega_tx_id TEXT, payment_method TEXT, order_type TEXT,
+            promo_code TEXT, original_amount INTEGER, discount_amount INTEGER,
+            payment_redirect TEXT, subscription_id INTEGER, sub_display_name TEXT,
+            status TEXT, source TEXT DEFAULT 'web')""")
+
+        @asynccontextmanager
+        async def isolated_db():
+            yield connection
+
+        monkeypatch.setattr(database, "get_db", isolated_db)
+        order_id = await database.create_order(7, "test-plan", "Test", 100, "synthetic-tx")
+        async with connection.execute("SELECT source, status FROM orders WHERE id = ?", (order_id,)) as cursor:
+            assert await cursor.fetchone() == ("bot", "pending")
