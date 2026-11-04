@@ -1,19 +1,7 @@
-# Документация переехала
+# Руководство
 
-Полное руководство: **[docs/README.md](README.md)**.
+Документация проекта собрана в одном месте: **[откройте оглавление](README.md)**.
 
-| Раздел | Ссылка |
-|--------|--------|
-| Оглавление | [README.md](README.md) |
-| Архитектура | [architecture.md](architecture.md) |
-| Установка (Python 3.11–3.14) | [installation.md](installation.md) |
-| Конфигурация | [configuration.md](configuration.md) |
-| Деплой | [deployment.md](deployment.md) |
-| 3x-ui | [xui.md](xui.md) |
-| Platega | [platega.md](platega.md) |
-| Админка | [admin.md](admin.md) |
-| Подписки | [subscriptions.md](subscriptions.md) |
-| Разработка | [development.md](development.md) |
-| Troubleshooting | [troubleshooting.md](troubleshooting.md) |
-| Redis — план | [redis-migration-plan.md](redis-migration-plan.md) |
-| PostgreSQL — план | [postgresql-migration-plan.md](postgresql-migration-plan.md) |
+Если вы устанавливаете бота, следуйте маршруту: [требования](requirements.md) → [установка](installation.md) → [конфигурация](configuration.md) → [деплой](deployment.md).
+
+Для поиска ответа по уже запущенному боту используйте [решение проблем](troubleshooting.md) или [диагностику в админке](admin.md).

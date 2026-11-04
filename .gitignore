@@ -52,6 +52,11 @@ email_callback.py
 web_architecture.md
 prototype*.html
 
+# Персональные брендированные ассеты CaelixFlow (не добавлять в публичный репозиторий)
+assets/*[Cc]aelix[Ff]low*
+# Баннеры содержат название CaelixFlow внутри изображения, хотя бренд не указан в имени файла.
+assets/bot_banner*
+
 # OS
 .DS_Store
 Thumbs.db

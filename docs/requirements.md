@@ -1,4 +1,4 @@
-[← Документация](README.md) · [Архитектура](architecture.md) · [Установка](installation.md) · [Деплой](deployment.md) · [Конфигурация](configuration.md) · [Troubleshooting](troubleshooting.md)
+[← Оглавление](README.md)
 
 ---
 

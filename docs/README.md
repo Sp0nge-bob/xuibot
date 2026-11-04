@@ -1,78 +1,61 @@
-# Документация VPN Platega Bot
+# Документация VPN Shop Bot
 
-Telegram-бот для продажи VPN-подписок: оплата через **Platega**, выдача ключей через **3x-ui**.
+VPN Shop Bot — Telegram-бот для продажи VPN-подписок. Он принимает платежи через Platega и управляет клиентами на 3x-ui.
 
-**Возможности:** тарифы, Platega, промокоды, trial, рефералы, FAQ, тикеты, мульти-ноды, Happ, hub-админка, техническая диагностика, lockdown, автобэкап.
+> [!TIP]
+> Первый раз настраиваете бота? Начните с [быстрого маршрута установки](#быстрый-маршрут), затем переходите к конфигурации и деплою.
 
-## Управление на VPS: `vpnplategabot`
+## Быстрый маршрут
 
-После установки одной командой на сервере доступна системная команда (как `x-ui`):
+1. [Проверьте системные требования](requirements.md).
+2. [Установите бота](installation.md).
+3. [Настройте переменные окружения](configuration.md).
+4. [Подключите Platega и HTTPS webhook](platega.md).
+5. [Проверьте сервер перед запуском](deployment.md#чеклист).
+6. Настройте [панель 3x-ui](xui.md) и [админку](admin.md).
 
-```bash
-vpnplategabot                 # интерактивное меню ctl
-sudo vpnplategabot update     # stable-релиз
-```
+## Руководства
 
-Эквивалент: `sudo bash /opt/vpn-bot/deploy/vpn-bot-ctl.sh`.
+| Раздел | Что внутри |
+| --- | --- |
+| [Установка](installation.md) | Установка на VPS, мастер установки, ручной запуск и управление службой |
+| [Конфигурация](configuration.md) | Переменные `.env`, Telegram, Platega, 3x-ui, Happ и Redis |
+| [Деплой](deployment.md) | Подготовка production, nginx, обновление и проверочный список |
+| [Системные требования](requirements.md) | Оценка VPS и параметры при росте нагрузки |
+| [Архитектура](architecture.md) | Процессы, база данных, очереди, планировщик и lockdown |
+| [3x-ui и подписки](xui.md) | Основная панель, ноды, inbounds и ссылки подписки |
+| [Platega и платежи](platega.md) | Настройка callback и обработка платежей |
+| [Админка](admin.md) | Управление ботом, клиентами и диагностикой |
+| [Жизненный цикл подписки](subscriptions.md) | Продления, пробный период, промокоды, рефералы и возвраты |
+| [Разработка и отладка](development.md) | Локальный запуск, TEST_MODE, логи и служебные скрипты |
+| [Решение проблем](troubleshooting.md) | Проверки и действия при типичных сбоях |
 
----
+## Справочные материалы
 
-## Быстрая навигация
+| Документ | Назначение |
+| --- | --- |
+| [Техническая механика](infrastructure-and-mechanics.md) | Подробное описание внутренних процессов и инфраструктуры |
+| [Настройка шаблона подписки](json-subscription-template-setup.md) | Подготовка JSON-шаблона подписки |
+| [План JSON-подписок](json-subscriptions-plan.md) | План развития JSON-подписок |
+| [План переноса FSM в Redis](redis-migration-plan.md) | Архитектурный план миграции |
+| [План PostgreSQL](postgresql-migration-plan.md) | Возможная миграция базы данных бота |
+| [Юридические документы](LEGAL_DOCUMENTS_RU.md) | Шаблоны политики конфиденциальности и пользовательского соглашения |
 
-| Раздел | Описание |
-|--------|----------|
-| [Архитектура](architecture.md) | Два процесса, Redis, lockdown, планировщик |
-| [Установка](installation.md) | Python **3.11–3.14**, venv, `vpn-bot-ctl.sh` (пункты 1–7) |
-| [Конфигурация](configuration.md) | Переменные `.env`, Redis, рефералы |
-| [Деплой](deployment.md) | Чеклист прода, обновление, nginx |
-| [Системные требования](requirements.md) | VPS: CPU, RAM, диск |
-| [3x-ui](xui.md) | Панель, подписка, синк нод |
-| [Platega](platega.md) | Платежи и webhook |
-| [Админка](admin.md) | Hub `/admin`, диагностика, отладка |
-| [Подписки](subscriptions.md) | Истечение, рефералы, возвраты |
-| [Разработка](development.md) | TEST_MODE, логи, скрипты |
-| [Troubleshooting](troubleshooting.md) | Типичные проблемы |
-| [Redis — план](redis-migration-plan.md) | FSM и сессии на Redis |
-| [PostgreSQL — план](postgresql-migration-plan.md) | Опциональный переход БД бота |
-| [Релиз v1.3.0](RELEASE_v1.3.0.md) | Бонус за email, оптимизация старта (1000+), крипто-фоллбэк |
-| [Релиз v1.2.0](RELEASE_v1.2.0.md) | Web-экосистема, bulkAdjust, безопасность |
+## История версий
 
----
+- [v1.3.0](RELEASE_v1.3.0.md)
+- [v1.2.0](RELEASE_v1.2.0.md)
+- [v1.1.0](RELEASE_v1.1.0.md)
+- [v1.0.1](RELEASE_v1.0.1.md)
+- [v1.0.0](RELEASE_v1.0.0.md)
 
-## С чего начать
+## Как выбрать раздел
 
-**Установка одной командой** (VPS):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/install.sh | sudo bash
-```
-
-После мастера: **`vpnplategabot`**, затем webhook URL из `.env` → **ЛК Platega** + **nginx** (см. [Platega](platega.md), [Деплой](deployment.md)).
-
-Подробности: [Установка](installation.md).
-
-1. [Установка](installation.md) — one-liner / `vpnplategabot` / venv вручную
-2. [Конфигурация](configuration.md) — токены и URL
-3. [Деплой](deployment.md) — чеклист прода, nginx
-4. [3x-ui](xui.md) + [Platega](platega.md) — интеграции и Callback URL
-5. [Админка](admin.md) — настройка после старта
-
-Корневой [README.md](../README.md) — краткий quick start.
+- Нужно запустить бота — [Установка](installation.md) → [Конфигурация](configuration.md) → [Деплой](deployment.md).
+- Не работает оплата — [Platega](platega.md) → [Решение проблем](troubleshooting.md).
+- Не выдаётся или не обновляется доступ — [3x-ui](xui.md) → [Подписки](subscriptions.md) → [Решение проблем](troubleshooting.md).
+- Нужно проверить состояние сервера — `/admin` → **Обзор** → **Диагностика**; подробности — [Админка](admin.md).
 
 ---
 
-## Порядок чтения
-
-```mermaid
-flowchart LR
-    arch[architecture] --> install[installation]
-    install --> config[configuration]
-    config --> deploy[deployment]
-    deploy --> reqs[requirements]
-    reqs --> xui[xui]
-    xui --> platega[platega]
-    platega --> admin[admin]
-    admin --> subs[subscriptions]
-    subs --> dev[development]
-    dev --> trouble[troubleshooting]
-```
+[← README проекта](../README.md) · [Установка →](installation.md)

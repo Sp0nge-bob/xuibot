@@ -1,145 +1,102 @@
-# VPN Shop Bot (Platega + 3x-ui)
+<p align="center">
+  <img src="https://cdn.simpleicons.org/telegram/26A5E4" width="112" height="112" alt="Логотип Telegram">
+</p>
 
-Telegram-бот для продажи VPN-подписок: оплата через **Platega**, выдача ключей через **3x-ui** (главная панель + ноды).
+<h1 align="center">VPN Shop Bot</h1>
 
-**Возможности:** тарифы, 5 способов оплаты, промокоды, пробный период, реферальная программа, FAQ, тикеты и возвраты, мульти-ноды, Happ-шифрование ссылок, hub-админка с диагностикой и lockdown.
+<p align="center">
+  Telegram-бот для продажи VPN-подписок с оплатой через Platega<br>
+  и автоматической выдачей доступа через 3x-ui.
+</p>
 
-**Версия:** [v1.2.0](https://github.com/Sp0nge-bob/xuibot/releases/tag/v1.2.0) · **Python:** 3.11–3.14
+<p align="center">
+  <a href="https://github.com/Sp0nge-bob/xuibot/releases"><img src="https://img.shields.io/badge/version-1.5.0-2ea44f" alt="Версия 1.5.0"></a>
+  <img src="https://img.shields.io/badge/Python-3.11%E2%80%933.14-3776AB?logo=python&logoColor=white" alt="Python 3.11–3.14">
+  <a href="docs/README.md"><img src="https://img.shields.io/badge/docs-руководства-blue" alt="Документация"></a>
+  <img src="https://img.shields.io/badge/Telegram-bot-26A5E4?logo=telegram&logoColor=white" alt="Telegram-бот">
+</p>
 
-> **Секреты:** `.env` не должен попадать в git. См. [SECURITY.md](SECURITY.md).
+<p align="center"><a href="docs/README.md">Документация</a> · <a href="SECURITY.md">Безопасность</a></p>
 
-**Управление на VPS:** после установки — команда **`vpnplategabot`** (меню ctl, как `x-ui`):
+---
+
+Поддерживаются тарифы, промокоды, пробный период, реферальная программа, FAQ, тикеты, возвраты, несколько VPN-нод и ссылки для Happ. Для администрирования доступны `/admin`, диагностика и резервное копирование.
+
+**Python:** 3.11–3.14 · **Развёртывание:** Ubuntu/Debian VPS
+
+> [!IMPORTANT]
+> Храните токены и пароли только в `.env`. Не публикуйте этот файл и не добавляйте его в Git. См. [правила безопасности](SECURITY.md).
+
+## Установка на VPS
+
+На чистом Ubuntu/Debian сервере запустите мастер установки от имени администратора:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/install.sh | sudo bash
+```
+
+Мастер установит приложение и службы, запросит Telegram-токен и параметры 3x-ui, а также предложит настроить Platega. После установки команда `vpnplategabot` откроет меню управления:
 
 ```bash
 vpnplategabot
-# sudo vpnplategabot update
+sudo vpnplategabot update
 ```
 
----
+Если платежи будут приниматься через Platega, настройте HTTPS webhook: URL из `.env` нужно указать в кабинете Platega и проксировать через nginx. Подробности — в разделах [установки](docs/installation.md) и [настройки Platega](docs/platega.md).
 
-## Установка одной командой
+## Быстрый запуск вручную
 
-На чистом VPS (Ubuntu/Debian), от root:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/install.sh \
-  | sudo bash
-```
-
-Или с каталогом (по умолчанию `/opt/vpn-bot`):
+Для установки без мастера используйте bootstrap-скрипт:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/install.sh \
-  | sudo bash -s -- /opt/vpn-bot
-```
-
-Мастер скачает **последний Release**, проверит **BOT_TOKEN** через Telegram `getMe`, спросит панель 3x-ui и (опционально) Platega, затем поставит Redis, venv и systemd. В конце выведет **webhook URL** — его нужно указать в **ЛК Platega** и проксировать через **nginx** на `:8080`.
-
-После установки:
-
-```bash
-vpnplategabot          # меню управления (как x-ui)
-# или: sudo vpnplategabot update
-```
-
----
-
-## Быстрый старт (вручную)
-
-Только код без мастера:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/bootstrap.sh \
-  | sudo bash -s -- /opt/vpn-bot
+curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/xuibot/main/deploy/bootstrap.sh | sudo bash -s -- /opt/vpn-bot
 sudo nano /opt/vpn-bot/.env
-sudo bash /opt/vpn-bot/deploy/vpn-bot-ctl.sh   # пункт 1
+sudo bash /opt/vpn-bot/deploy/vpn-bot-ctl.sh
 ```
 
-Или полностью вручную:
+Для локального запуска из клонированного репозитория:
 
 ```bash
-cd /opt/vpn-bot
-python3.11 -m venv .venv && source .venv/bin/activate   # или python3.12…3.14
-pip install -U pip && pip install -e .
-cp .env.example .env && nano .env
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+cp .env.example .env
+python run_all.py
 ```
 
-**Обязательно в `.env`:**
-
-| Переменная | Значение |
-|------------|----------|
-| `TEST_MODE` | `false` |
-| `START_BOT_IN_WEBAPP` | `false` |
-| `PUBLIC_WEBHOOK_URL` | HTTPS + `/platega-webhook` |
-| `ALLOW_DEBUG_ADMIN` | `false` |
-| `REDIS_URL` | `redis://127.0.0.1:6379/0` (рекомендуется в проде) |
-
-**Запуск:**
-
-```bash
-python run_all.py          # webhook + Telegram
-# или: python app.py + python run_bot.py
-# systemd: sudo bash deploy/vpn-bot-ctl.sh → 1
-```
-
-Проверка: `curl https://your-domain.com/health` → `{"status":"ok"}`
-
-**Обновление на VPS:**
-
-```bash
-sudo bash deploy/vpn-bot-ctl.sh update           # последний Release (stable)
-sudo bash deploy/vpn-bot-ctl.sh update --edge    # последний коммит main
-```
-
-Релизные заметки: [v1.2.0](docs/RELEASE_v1.2.0.md) · [v1.1.0](docs/RELEASE_v1.1.0.md) · [v1.0.1](docs/RELEASE_v1.0.1.md) · [v1.0.0](docs/RELEASE_v1.0.0.md).
-
----
+Заполните `.env` перед запуском. Описание параметров — в [конфигурации](docs/configuration.md); локальный сценарий разработки — в [руководстве разработчика](docs/development.md).
 
 ## Документация
 
-**[docs/README.md](docs/README.md)** — оглавление.
+Начните с [оглавления документации](docs/README.md). Там есть пошаговый маршрут запуска, руководства по интеграциям и раздел с устранением неполадок.
 
-| Раздел | Описание |
-|--------|----------|
-| [Архитектура](docs/architecture.md) | Два процесса, lockdown, планировщик |
-| [Установка](docs/installation.md) | Python **3.11–3.14**, venv, `vpn-bot-ctl.sh` |
-| [Конфигурация](docs/configuration.md) | Переменные `.env`, Redis, рефералы |
-| [Деплой](docs/deployment.md) | Чеклист прода, nginx, обновление |
-| [Системные требования](docs/requirements.md) | VPS по нагрузке |
-| [3x-ui](docs/xui.md) | Панель, подписка, ноды |
-| [Platega](docs/platega.md) | Платежи и webhook |
-| [Админка](docs/admin.md) | Hub `/admin`, диагностика, отладка |
-| [Подписки](docs/subscriptions.md) | Истечение, рефералы, возвраты |
-| [Разработка](docs/development.md) | TEST_MODE, логи, скрипты |
-| [Troubleshooting](docs/troubleshooting.md) | Типичные проблемы |
-| [Redis — план](docs/redis-migration-plan.md) | FSM и сессии |
-| [PostgreSQL — план](docs/postgresql-migration-plan.md) | Опционально на будущее |
+| Задача | Раздел |
+| --- | --- |
+| Установить и обновить бота | [Установка](docs/installation.md) · [Деплой](docs/deployment.md) |
+| Заполнить `.env` | [Конфигурация](docs/configuration.md) |
+| Подключить панель VPN | [3x-ui](docs/xui.md) |
+| Настроить оплату | [Platega](docs/platega.md) |
+| Управлять клиентами и подписками | [Админка](docs/admin.md) · [Подписки](docs/subscriptions.md) |
+| Найти причину сбоя | [Решение проблем](docs/troubleshooting.md) |
 
----
+## Структура проекта
 
-## Структура
+| Каталог или файл | Назначение |
+| --- | --- |
+| `app.py` | FastAPI-приложение и webhook Platega |
+| `run_bot.py` | Telegram-бот и планировщик |
+| `run_all.py` | Запуск webhook и бота одной командой |
+| `bot/` | Обработчики Telegram, меню и админка |
+| `services/` | Интеграции с Platega и 3x-ui, выдача доступа и диагностика |
+| `db/` | SQLite и операции с данными |
+| `deploy/` | Установка, systemd и команды управления |
+| `docs/` | Руководства и справочные материалы |
 
-| Путь | Назначение |
-|------|------------|
-| `run_all.py` | Webhook + Telegram одной командой |
-| `app.py` | FastAPI: webhook, очередь fulfillment |
-| `run_bot.py` | Telegram polling + планировщик |
-| `bot/` | aiogram: меню, админка, тикеты, middleware |
-| `services/` | Platega, 3x-ui, lockdown, диагностика |
-| `db/` | SQLite (заказы, подписки, настройки) |
-| `ui/` | Тексты и `screen()` |
-| `deploy/` | `vpn-bot-ctl.sh`, systemd |
-| `scripts/dev/` | Тесты и утилиты разработки |
+## Перед первым запуском
 
-**Локально только:** `.env`, `data/`, `.venv/`.
+- Укажите Telegram-токен и ID администраторов.
+- Настройте доступ к основной панели 3x-ui и выберите inbounds.
+- Для реальных платежей задайте реквизиты Platega, HTTPS `PUBLIC_WEBHOOK_URL` и выключите `TEST_MODE`.
+- Проверьте настройки и подключения в `/admin` → **Обзор** → **Диагностика**.
 
----
-
-## Чеклист перед запуском
-
-1. `TEST_MODE=false`, реальные `PLATEGA_*`
-2. Callback URL в Platega = `PUBLIC_WEBHOOK_URL`
-3. `/admin` → оплата, тарифы, ноды, inbounds
-4. Тестовый платёж → ключ → клиент в 3x-ui
-5. `/admin` → **Диагностика** — зелёная сводка
-6. `LOG_LEVEL=INFO` в проде
+Пошаговый production-чеклист находится в [руководстве по деплою](docs/deployment.md#чеклист).
