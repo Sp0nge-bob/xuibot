@@ -60,7 +60,37 @@ def _recovery_text(*, node: dict[str, Any], is_primary: bool) -> str:
     )
 
 
-async def _notify_admins(text: str) -> int:
+def node_down_alert_kb(node_id: int) -> Any:
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="🔄 Проверить и восстановить доступ",
+            callback_data=f"adm:node:retry_alert:{node_id}",
+        )],
+        [InlineKeyboardButton(
+            text="⚙️ Управление нодой",
+            callback_data=f"adm:node:{node_id}",
+        )],
+    ])
+
+
+def node_up_alert_kb(node_id: int) -> Any:
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="⚙️ Управление нодой",
+            callback_data=f"adm:node:{node_id}",
+        )],
+    ])
+
+
+def set_node_last_healthy(node_id: int, healthy: bool) -> None:
+    _last_known_healthy[node_id] = healthy
+
+
+async def _notify_admins(text: str, reply_markup: Any = None) -> int:
     admin_ids = list(settings.BOT_ADMINS)
     if not admin_ids:
         logger.warning("Node alert skipped — BOT_ADMINS empty")
@@ -71,7 +101,7 @@ async def _notify_admins(text: str) -> int:
     sent = 0
     for admin_id in admin_ids:
         try:
-            await send_message(admin_id, text)
+            await send_message(admin_id, text, reply_markup=reply_markup)
             sent += 1
         except Exception as e:
             logger.error("Node alert failed for admin {}: {}", admin_id, e)
@@ -119,7 +149,10 @@ async def process_health_transitions(results: list[dict[str, Any]]) -> dict[str,
         _last_known_healthy[node_id] = now_ok
 
         if now_ok:
-            sent = await _notify_admins(_recovery_text(node=node, is_primary=is_primary))
+            sent = await _notify_admins(
+                _recovery_text(node=node, is_primary=is_primary),
+                reply_markup=node_up_alert_kb(node_id),
+            )
             if sent:
                 up_alerts += 1
                 logger.info(
@@ -129,7 +162,8 @@ async def process_health_transitions(results: list[dict[str, Any]]) -> dict[str,
                 )
         else:
             sent = await _notify_admins(
-                _down_text(node=node, error=result.get("error"), is_primary=is_primary)
+                _down_text(node=node, error=result.get("error"), is_primary=is_primary),
+                reply_markup=node_down_alert_kb(node_id),
             )
             if sent:
                 down_alerts += 1

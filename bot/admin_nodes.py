@@ -675,6 +675,100 @@ async def cb_node_health(cb: CallbackQuery):
     )
 
 
+@router.callback_query(F.data.startswith("adm:node:retry_alert:"))
+async def cb_node_retry_alert(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    node_id = int(cb.data.split(":")[3])
+    node = await nodes_db.get_node(node_id)
+    if not node:
+        await safe_cb_answer(cb, "Нода не найдена в базе данных", show_alert=True)
+        return
+
+    from datetime import datetime
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+    from services.node_alerts import _short_host, set_node_last_healthy
+
+    invalidate_api_cache(node_id)
+    await safe_cb_answer(cb, "Проверяем доступность панели…")
+
+    result = await check_node_health(node, timeout_sec=15.0)
+    is_ok = bool(result.get("ok"))
+    node = await nodes_db.get_node(node_id) or node
+
+    name = node.get("name") or f"#{node_id}"
+    host = _short_host(str(node.get("host") or ""))
+    is_primary = bool(node.get("is_primary"))
+    check_time = datetime.now().strftime("%H:%M:%S")
+
+    if is_ok:
+        set_node_last_healthy(node_id, True)
+        if is_primary:
+            from services.primary_gate import apply_primary_health_results
+            await apply_primary_health_results([result])
+        else:
+            from services.secondary_node_notice import invalidate_secondary_node_notice_cache
+            invalidate_secondary_node_notice_cache()
+
+        lat = result.get("latency_ms")
+        lat_text = f" (задержка: {lat} мс)" if lat is not None else ""
+        recovery_details = (
+            "<i>Бот для пользователей полностью разблокирован.</i>"
+            if is_primary
+            else "<i>Синхронизация и доступ к панели успешно восстановлены.</i>"
+        )
+        text = (
+            "🟢 <b>Нода успешно восстановлена</b>\n"
+            "━━━━━━━━━━━━━━━━\n\n"
+            f"Нода: <b>{name}</b>\n"
+            f"Host: <code>{host}</code>\n"
+            f"Статус: <b>online</b>{lat_text}\n"
+            f"Проверено в: <b>{check_time}</b>\n\n"
+            f"{recovery_details}"
+        )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(
+                text="🔄 Проверить снова",
+                callback_data=f"adm:node:retry_alert:{node_id}",
+            )],
+            [InlineKeyboardButton(
+                text="⚙️ Управление нодой",
+                callback_data=f"adm:node:{node_id}",
+            )],
+        ])
+        await send_or_edit(cb, text, kb)
+        await safe_cb_answer(cb, f"✅ Нода {name} доступна! Доступ восстановлен.", show_alert=True)
+    else:
+        err = (result.get("error") or "недоступна")[:300]
+        prefix = "🔴 <b>★ Primary всё ещё недоступна</b>" if is_primary else "🔴 <b>Нода всё ещё недоступна</b>"
+        consequence = (
+            "<i>Бот для пользователей заблокирован до восстановления панели.</i>"
+            if is_primary
+            else "<i>Синхронизация с этой панелью может не работать. Основной бот продолжает работу.</i>"
+        )
+        text = (
+            f"{prefix}\n"
+            "━━━━━━━━━━━━━━━━\n\n"
+            f"Нода: <b>{name}</b>\n"
+            f"Host: <code>{host}</code>\n"
+            f"Ошибка: <code>{err}</code>\n"
+            f"Проверено в: <b>{check_time}</b>\n\n"
+            f"{consequence}"
+        )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(
+                text="🔄 Повторить проверку",
+                callback_data=f"adm:node:retry_alert:{node_id}",
+            )],
+            [InlineKeyboardButton(
+                text="⚙️ Управление нодой",
+                callback_data=f"adm:node:{node_id}",
+            )],
+        ])
+        await send_or_edit(cb, text, kb)
+        await safe_cb_answer(cb, f"❌ Нода {name} недоступна: {err[:80]}", show_alert=True)
+
+
 @router.callback_query(F.data == "adm:nodes:dedupe")
 async def cb_nodes_dedupe(cb: CallbackQuery):
     if not is_admin(cb.from_user.id):
