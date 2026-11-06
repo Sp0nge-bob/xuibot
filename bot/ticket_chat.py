@@ -108,6 +108,119 @@ def message_preview(content_type: str, body: str | None) -> str:
     return _CONTENT_PREVIEW.get(content_type, "💬 Сообщение")
 
 
+def format_ticket_message_time(created_at: str | None) -> str:
+    """Форматирует timestamp в читаемое время (ДД.ММ ЧЧ:ММ)."""
+    if not created_at:
+        return "—"
+    s = str(created_at).replace("T", " ")
+    if len(s) >= 16 and s[4] == "-" and s[7] == "-":
+        return f"{s[8:10]}.{s[5:7]} {s[11:16]}"
+    return s[:16]
+
+
+def format_ticket_message_snippet(
+    msg: dict[str, Any],
+    *,
+    viewer_is_admin: bool = True,
+    ticket_user_label: str = "",
+) -> str:
+    """Краткое превью сообщения для карточки тикета."""
+    import html
+    time_str = format_ticket_message_time(msg.get("created_at"))
+    if msg.get("is_admin"):
+        author = "🛠 Администратор"
+    else:
+        if viewer_is_admin and ticket_user_label:
+            author = f"👤 {ticket_user_label}"
+        elif viewer_is_admin:
+            author = "👤 Клиент"
+        else:
+            author = "👤 Вы"
+
+    content_type = msg.get("content_type", "text")
+    body = (msg.get("body") or "").strip()
+
+    if content_type == "text":
+        body_preview = html.escape(body[:140] + ("..." if len(body) > 140 else ""))
+        text_line = body_preview if body_preview else "<i>(текст)</i>"
+    else:
+        type_label = _CONTENT_PREVIEW.get(content_type, "📎 Вложение")
+        if body:
+            body_preview = html.escape(body[:100] + ("..." if len(body) > 100 else ""))
+            text_line = f"{type_label}: <i>{body_preview}</i>"
+        else:
+            text_line = f"<i>{type_label}</i>"
+    return f"[{time_str}] {author}:\n{text_line}"
+
+
+def render_ticket_history_text(
+    ticket: dict[str, Any],
+    messages: list[dict[str, Any]],
+    *,
+    page: int = 1,
+    total_pages: int = 1,
+    total_count: int = 0,
+    viewer_is_admin: bool = True,
+    ticket_user_label: str = "",
+) -> str:
+    """Полный экран истории сообщений с постраничной разбивкой."""
+    import html
+    ticket_id = ticket["id"]
+    cat = tickets_db.category_label(ticket.get("category", "other"))
+    status = "открыт" if ticket.get("status") == tickets_db.STATUS_OPEN else "закрыт"
+
+    header_lines = [
+        f"📜 <b>История переписки: Тикет #{ticket_id}</b>",
+        f"📁 Категория: <b>{cat}</b> · 📌 Статус: <b>{status}</b>",
+    ]
+    if viewer_is_admin and ticket_user_label:
+        header_lines.append(f"👤 Пользователь: {ticket_user_label} (<code>{ticket.get('tg_id')}</code>)")
+
+    if total_count == 0 or not messages:
+        header_lines += [
+            "━━━━━━━━━━━━━━━━",
+            "<i>В этом тикете пока нет сообщений.</i>",
+        ]
+        return "\n".join(header_lines)
+
+    header_lines += [
+        f"📄 Страница <b>{page} из {total_pages}</b> (сообщений: <b>{total_count}</b>)",
+        "━━━━━━━━━━━━━━━━",
+        "",
+    ]
+
+    msg_blocks: list[str] = []
+    for m in messages:
+        time_str = format_ticket_message_time(m.get("created_at"))
+        if m.get("is_admin"):
+            author = "🛠 <b>Администратор</b>"
+        else:
+            if viewer_is_admin and ticket_user_label:
+                author = f"👤 <b>{ticket_user_label}</b>"
+            elif viewer_is_admin:
+                author = "👤 <b>Клиент</b>"
+            else:
+                author = "👤 <b>Вы</b>"
+
+        content_type = m.get("content_type", "text")
+        body = (m.get("body") or "").strip()
+
+        if content_type == "text":
+            escaped_body = html.escape(body[:450] + ("... [обрезано]" if len(body) > 450 else ""))
+            content_display = escaped_body if escaped_body else "<i>(текст)</i>"
+        else:
+            type_label = _CONTENT_PREVIEW.get(content_type, "📎 Вложение")
+            if body:
+                escaped_body = html.escape(body[:350] + ("... [обрезано]" if len(body) > 350 else ""))
+                content_display = f"{type_label}: <i>{escaped_body}</i>"
+            else:
+                content_display = f"<i>{type_label}</i>"
+
+        msg_blocks.append(f"[{time_str}] {author}\n{content_display}")
+
+    return "\n".join(header_lines) + "\n\n────────────────\n\n".join(msg_blocks)
+
+
 def _admin_notification_kb(ticket_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [

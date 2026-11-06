@@ -19,6 +19,7 @@ from .keyboards import (
     support_menu_kb,
     ticket_category_kb,
     ticket_view_kb,
+    ticket_history_kb,
     ticket_session_kb,
 )
 from .messages import (
@@ -36,6 +37,7 @@ from services.subscription_search import match_subscription_by_email, normalize_
 from .ticket_chat import (
     clear_active_session,
     relay_ticket_message,
+    render_ticket_history_text,
     set_active_session,
     get_active_session,
 )
@@ -112,7 +114,14 @@ async def _enter_ticket_session(
     await state.set_state(UserStates.in_ticket_chat)
     await state.update_data(ticket_chat_id=ticket_id)
 
-    text = ticket_session_banner_text(ticket_id, ticket["category"], is_new=is_new)
+    msg_count = await tickets_db.count_messages_for_ticket(ticket_id)
+    recent_msgs = await tickets_db.get_recent_ticket_messages(ticket_id, limit=3) if msg_count > 0 else []
+    text = ticket_session_banner_text(
+        ticket_id,
+        ticket["category"],
+        is_new=is_new,
+        recent_messages=recent_msgs,
+    )
     kb = ticket_session_kb(ticket_id)
     if isinstance(cb, CallbackQuery):
         await safe_cb_answer(cb)
@@ -244,17 +253,62 @@ async def cb_ticket_view(cb: CallbackQuery, state: FSMContext):
         await safe_cb_answer(cb, "Тикет не найден", show_alert=True)
         return
     await state.set_state(None)
+    msg_count = await tickets_db.count_messages_for_ticket(ticket_id)
+    recent_msgs = await tickets_db.get_recent_ticket_messages(ticket_id, limit=3) if msg_count > 0 else []
     await safe_cb_answer(cb)
     await send_or_edit(
         cb,
-        ticket_view_text(ticket),
+        ticket_view_text(ticket, recent_messages=recent_msgs, msg_count=msg_count),
         ticket_view_kb(
             ticket_id,
             is_open=ticket["status"] == tickets_db.STATUS_OPEN,
             is_refund=ticket.get("category") == tickets_db.CATEGORY_REFUND,
             subscription_id=ticket.get("subscription_id"),
+            msg_count=msg_count,
         ),
     )
+
+
+@router.callback_query(F.data.regexp(r"^ticket_history:\d+(:\d+)?$"))
+async def cb_ticket_history(cb: CallbackQuery):
+    parts = cb.data.split(":")
+    ticket_id = int(parts[1])
+    page = int(parts[2]) if len(parts) > 2 else 1
+
+    ticket = await tickets_db.get_ticket_by_id(ticket_id)
+    if not ticket or ticket["tg_id"] != cb.from_user.id:
+        await safe_cb_answer(cb, "Тикет не найден", show_alert=True)
+        return
+
+    total_count = await tickets_db.count_messages_for_ticket(ticket_id)
+    is_open = (ticket["status"] == tickets_db.STATUS_OPEN)
+    PAGE_SIZE = 6
+    total_pages = max(1, (total_count + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = max(1, min(page, total_pages))
+
+    offset = (page - 1) * PAGE_SIZE
+    messages = await tickets_db.get_ticket_messages(
+        ticket_id,
+        limit=PAGE_SIZE,
+        offset=offset,
+        descending=False,
+    )
+    text = render_ticket_history_text(
+        ticket,
+        messages,
+        page=page,
+        total_pages=total_pages,
+        total_count=total_count,
+        viewer_is_admin=False,
+    )
+    kb = ticket_history_kb(
+        ticket_id,
+        page=page,
+        total_pages=total_pages,
+        is_open=is_open,
+    )
+    await safe_cb_answer(cb)
+    await send_or_edit(cb, text, kb)
 
 
 @router.callback_query(F.data.startswith("ticket_session:"))
@@ -274,14 +328,17 @@ async def cb_ticket_session_end(cb: CallbackQuery, state: FSMContext):
     await safe_cb_answer(cb, "Переписка завершена")
     ticket = await tickets_db.get_ticket_by_id(ticket_id)
     if ticket:
+        msg_count = await tickets_db.count_messages_for_ticket(ticket_id)
+        recent_msgs = await tickets_db.get_recent_ticket_messages(ticket_id, limit=3) if msg_count > 0 else []
         await send_or_edit(
             cb,
-            ticket_view_text(ticket),
+            ticket_view_text(ticket, recent_messages=recent_msgs, msg_count=msg_count),
             ticket_view_kb(
                 ticket_id,
                 is_open=ticket["status"] == tickets_db.STATUS_OPEN,
                 is_refund=ticket.get("category") == tickets_db.CATEGORY_REFUND,
                 subscription_id=ticket.get("subscription_id"),
+                msg_count=msg_count,
             ),
         )
 

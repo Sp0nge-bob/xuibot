@@ -355,6 +355,28 @@ async def get_open_tickets(
             return [dict(r) for r in rows]
 
 
+async def get_closed_tickets(
+    *,
+    category: str | None = None,
+    limit: int = 30,
+) -> List[Dict[str, Any]]:
+    clause = " WHERE t.status = ?"
+    params: list[Any] = [STATUS_CLOSED]
+    if category:
+        clause += " AND t.category = ?"
+        params.append(category)
+    params.append(limit)
+    async with get_db() as db:
+        async with db.execute(
+            _ticket_select_sql()
+            + clause
+            + " ORDER BY COALESCE(t.closed_at, t.last_message_at, t.created_at) DESC, t.id DESC LIMIT ?",
+            tuple(params),
+        ) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+
 async def close_ticket(ticket_id: int) -> bool:
     async with get_db() as db:
         cursor = await db.execute(
@@ -470,11 +492,67 @@ async def add_ticket_message(
         return cursor.lastrowid
 
 
-async def get_ticket_messages(ticket_id: int, limit: int = 50) -> List[Dict[str, Any]]:
+async def get_ticket_messages(
+    ticket_id: int,
+    limit: int = 50,
+    offset: int = 0,
+    descending: bool = False,
+) -> List[Dict[str, Any]]:
+    order = "DESC" if descending else "ASC"
+    async with get_db() as db:
+        async with db.execute(
+            f"""SELECT id, ticket_id, sender_tg_id, is_admin, content_type, body, file_id, created_at
+               FROM ticket_messages WHERE ticket_id = ? ORDER BY id {order} LIMIT ? OFFSET ?""",
+            (ticket_id, limit, offset),
+        ) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+
+async def count_messages_for_ticket(ticket_id: int) -> int:
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT COUNT(*) FROM ticket_messages WHERE ticket_id = ?",
+            (ticket_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            return int(row[0]) if row else 0
+
+
+async def count_media_messages_for_ticket(ticket_id: int) -> int:
+    async with get_db() as db:
+        async with db.execute(
+            """SELECT COUNT(*) FROM ticket_messages
+               WHERE ticket_id = ? AND file_id IS NOT NULL AND file_id != ''""",
+            (ticket_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            return int(row[0]) if row else 0
+
+
+async def get_recent_ticket_messages(ticket_id: int, limit: int = 3) -> List[Dict[str, Any]]:
+    """Последние limit сообщений в хронологическом (ASC) порядке."""
     async with get_db() as db:
         async with db.execute(
             """SELECT id, ticket_id, sender_tg_id, is_admin, content_type, body, file_id, created_at
-               FROM ticket_messages WHERE ticket_id = ? ORDER BY id ASC LIMIT ?""",
+               FROM (
+                   SELECT id, ticket_id, sender_tg_id, is_admin, content_type, body, file_id, created_at
+                   FROM ticket_messages WHERE ticket_id = ? ORDER BY id DESC LIMIT ?
+               ) ORDER BY id ASC""",
+            (ticket_id, limit),
+        ) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+
+async def get_ticket_media_messages(ticket_id: int, limit: int = 30) -> List[Dict[str, Any]]:
+    """Вложенные медиафайлы тикета."""
+    async with get_db() as db:
+        async with db.execute(
+            """SELECT id, ticket_id, sender_tg_id, is_admin, content_type, body, file_id, created_at
+               FROM ticket_messages
+               WHERE ticket_id = ? AND file_id IS NOT NULL AND file_id != ''
+               ORDER BY id ASC LIMIT ?""",
             (ticket_id, limit),
         ) as cur:
             rows = await cur.fetchall()

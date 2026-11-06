@@ -560,12 +560,19 @@ def ticket_view_kb(
     is_open: bool = True,
     is_refund: bool = False,
     subscription_id: int | None = None,
+    msg_count: int = 0,
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     if is_open:
         rows.append([InlineKeyboardButton(
             text="💬 Начать переписку",
             callback_data=f"ticket_session:{ticket_id}",
+        )])
+    if msg_count > 0:
+        hist_label = f"📜 Вся переписка ({msg_count})" if msg_count > 3 else "📜 Вся переписка"
+        rows.append([InlineKeyboardButton(
+            text=hist_label,
+            callback_data=f"ticket_history:{ticket_id}:1",
         )])
     if is_refund and subscription_id:
         back_data = f"manage_sub:{int(subscription_id)}"
@@ -580,8 +587,37 @@ def ticket_view_kb(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def ticket_history_kb(
+    ticket_id: int,
+    *,
+    page: int,
+    total_pages: int,
+    is_open: bool = True,
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if total_pages > 1:
+        nav: list[InlineKeyboardButton] = []
+        if page > 1:
+            nav.append(InlineKeyboardButton(text="◀️ Ранее", callback_data=f"ticket_history:{ticket_id}:{page - 1}"))
+        nav.append(InlineKeyboardButton(text=f"📄 {page}/{total_pages}", callback_data=f"ticket_history:{ticket_id}:{page}"))
+        if page < total_pages:
+            nav.append(InlineKeyboardButton(text="Позже ▶️", callback_data=f"ticket_history:{ticket_id}:{page + 1}"))
+        rows.append(nav)
+    if is_open:
+        rows.append([InlineKeyboardButton(
+            text="💬 Написать сообщение",
+            callback_data=f"ticket_session:{ticket_id}",
+        )])
+    rows.append([InlineKeyboardButton(text="« К тикету", callback_data=f"ticket_view:{ticket_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def ticket_session_kb(ticket_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="📜 История переписки",
+            callback_data=f"ticket_history:{ticket_id}:1",
+        )],
         [InlineKeyboardButton(
             text="⏹ Завершить переписку",
             callback_data=f"ticket_session_end:{ticket_id}",

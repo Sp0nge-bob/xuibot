@@ -1914,14 +1914,21 @@ def support_menu_text(tickets: list) -> str:
     )
 
 
-def ticket_view_text(ticket: Dict[str, Any]) -> str:
+def ticket_view_text(
+    ticket: Dict[str, Any],
+    *,
+    recent_messages: list[Dict[str, Any]] | None = None,
+    msg_count: int = 0,
+) -> str:
     from db.tickets import category_label, STATUS_OPEN
+    from bot.ticket_chat import format_ticket_message_snippet
     cat = category_label(ticket["category"])
     status = "открыт" if ticket.get("status") == STATUS_OPEN else "закрыт"
     lines = [
         f"📁 Категория: <b>{cat}</b>",
         f"📌 Статус: <b>{status}</b>",
         f"🕐 Создан: {(ticket.get('created_at') or '')[:16]}",
+        f"💬 Сообщений: <b>{msg_count}</b>",
     ]
     if ticket.get("client_email"):
         lines.append(f"👤 Клиент: <code>{ticket['client_email']}</code>")
@@ -1932,6 +1939,18 @@ def ticket_view_text(ticket: Dict[str, Any]) -> str:
             f"💰 Сумма: <b>{ticket.get('order_amount') or '—'} ₽</b>",
             f"🆔 TX Platega: <code>{ticket.get('platega_tx_id') or '—'}</code>",
         ]
+    if recent_messages:
+        lines.append("")
+        lines.append("━━━━━━━━━━━━━━━━")
+        if len(recent_messages) == 1:
+            lines.append("💬 <b>Сообщение:</b>")
+        elif msg_count <= len(recent_messages):
+            lines.append("💬 <b>Переписка:</b>")
+        else:
+            lines.append(f"💬 <b>Последние сообщения</b> (показано {len(recent_messages)} из {msg_count}):")
+        for m in recent_messages:
+            lines.append(format_ticket_message_snippet(m, viewer_is_admin=False))
+
     hint = (
         "Нажмите «Начать переписку», чтобы написать администратору."
         if ticket.get("status") == STATUS_OPEN
@@ -1940,13 +1959,30 @@ def ticket_view_text(ticket: Dict[str, Any]) -> str:
     return screen(f"🎫 <b>Тикет #{ticket['id']}</b>", "\n".join(lines), hint=hint)
 
 
-def ticket_session_banner_text(ticket_id: int, category: str, *, is_new: bool = False) -> str:
+def ticket_session_banner_text(
+    ticket_id: int,
+    category: str,
+    *,
+    is_new: bool = False,
+    recent_messages: list[Dict[str, Any]] | None = None,
+) -> str:
     from db.tickets import category_label
+    from bot.ticket_chat import format_ticket_message_snippet
     title = "🎫 <b>Новый тикет</b>" if is_new else "🔴 <b>Активная переписка</b>"
+    body_lines = [
+        f"Тикет <code>#{ticket_id}</code> · {category_label(category)}",
+    ]
+    if recent_messages:
+        body_lines.append("")
+        body_lines.append("━━━━━━━━━━━━━━━━")
+        body_lines.append("💬 <b>Последние сообщения:</b>")
+        for m in recent_messages:
+            body_lines.append(format_ticket_message_snippet(m, viewer_is_admin=False))
+        body_lines.append("━━━━━━━━━━━━━━━━")
+    body_lines.append("Отправляйте текст, фото или голосовые — всё дойдёт до администратора.")
     return screen(
         title,
-        f"Тикет <code>#{ticket_id}</code> · {category_label(category)}",
-        "Отправляйте текст, фото или голосовые — всё дойдёт до администратора.",
+        "\n".join(body_lines),
         hint="«Завершить переписку» — выйти из режима (тикет останется открытым).",
     )
 

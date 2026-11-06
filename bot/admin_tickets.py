@@ -4,9 +4,11 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
 from db import tickets as tickets_db
+from loguru import logger
 from .admin_keyboards import (
     admin_back_kb,
     admin_ticket_detail_kb,
+    admin_ticket_history_kb,
     admin_ticket_session_kb,
     admin_tickets_filter_kb,
     admin_tickets_kb,
@@ -14,9 +16,12 @@ from .admin_keyboards import (
 from .states import AdminStates
 from .ticket_chat import (
     clear_active_session,
-    relay_ticket_message,
-    set_active_session,
+    format_ticket_message_snippet,
+    format_ticket_message_time,
     get_active_session,
+    relay_ticket_message,
+    render_ticket_history_text,
+    set_active_session,
 )
 from .messages import refund_ticket_approved_user_text, refund_ticket_rejected_user_text
 from .ui_helpers import safe_cb_answer, send_or_edit
@@ -24,10 +29,11 @@ from .ui_helpers import safe_cb_answer, send_or_edit
 router = Router()
 
 _FILTER_LABELS = {
-    "all": "Все",
+    "all": "Все открытые",
     "refund": "Возврат",
     "support": "Поддержка",
     "other": "Другое",
+    "closed": "Архив (закрытые)",
 }
 
 _CAT_EMOJI = {
@@ -83,8 +89,11 @@ async def cb_admin_tickets_list(cb: CallbackQuery, state: FSMContext):
         return
     await state.set_state(None)
     filter_key = cb.data.split(":")[2]
-    category = _filter_category(filter_key)
-    rows = await tickets_db.get_open_tickets(category=category)
+    if filter_key == "closed":
+        rows = await tickets_db.get_closed_tickets(limit=30)
+    else:
+        category = _filter_category(filter_key)
+        rows = await tickets_db.get_open_tickets(category=category)
     for row in rows:
         row["unread"] = await tickets_db.count_unread_for_admin(row["id"])
     text = await _tickets_list_text(rows, filter_key)
@@ -101,20 +110,24 @@ async def cb_admin_ticket_detail(cb: CallbackQuery, state: FSMContext):
     await state.set_state(None)
     ticket_id = int(cb.data.split(":")[2])
     row = await tickets_db.get_ticket_by_id(ticket_id)
-    if not row or row.get("status") != tickets_db.STATUS_OPEN:
-        await safe_cb_answer(cb, "Тикет не найден или закрыт", show_alert=True)
+    if not row:
+        await safe_cb_answer(cb, "Тикет не найден", show_alert=True)
         return
 
     await tickets_db.mark_ticket_read_by_admin(ticket_id)
     label = _user_label(row.get("username"), row.get("first_name"), row["tg_id"])
     unread = await tickets_db.count_unread_for_admin(ticket_id)
-    msg_count = len(await tickets_db.get_ticket_messages(ticket_id))
+    msg_count = await tickets_db.count_messages_for_ticket(ticket_id)
+    has_media = (await tickets_db.count_media_messages_for_ticket(ticket_id)) > 0
+    is_open = (row.get("status") == tickets_db.STATUS_OPEN)
     cat = tickets_db.category_label(row["category"])
+    status_label = "открыт" if is_open else "закрыт"
     lines = [
         f"🎫 <b>Тикет #{ticket_id}</b>",
         "━━━━━━━━━━━━━━━━",
         "",
         f"📁 Категория: <b>{cat}</b>",
+        f"📌 Статус: <b>{status_label}</b>",
         f"👤 Пользователь: {label}",
         f"TG ID: <code>{row['tg_id']}</code>",
     ]
@@ -138,11 +151,31 @@ async def cb_admin_ticket_detail(cb: CallbackQuery, state: FSMContext):
     ]
     if unread:
         lines.append(f"🔴 Непрочитанных: <b>{unread}</b>")
+
+    if msg_count > 0:
+        recent_msgs = await tickets_db.get_recent_ticket_messages(ticket_id, limit=3)
+        lines.append("")
+        lines.append("━━━━━━━━━━━━━━━━")
+        if msg_count == 1:
+            lines.append("💬 <b>Сообщение:</b>")
+        elif msg_count <= len(recent_msgs):
+            lines.append("💬 <b>Переписка:</b>")
+        else:
+            lines.append(f"💬 <b>Последние сообщения</b> (показано {len(recent_msgs)} из {msg_count}):")
+        for m in recent_msgs:
+            lines.append(format_ticket_message_snippet(m, viewer_is_admin=True, ticket_user_label=label))
+
     await safe_cb_answer(cb)
     await send_or_edit(
         cb,
         "\n".join(lines),
-        admin_ticket_detail_kb(ticket_id, category=row.get("category")),
+        admin_ticket_detail_kb(
+            ticket_id,
+            category=row.get("category"),
+            is_open=is_open,
+            msg_count=msg_count,
+            has_media=has_media,
+        ),
     )
 
 
@@ -221,6 +254,123 @@ async def cb_admin_refund_reject(cb: CallbackQuery, state: FSMContext):
         await safe_cb_answer(cb, "Тикет не найден или уже закрыт", show_alert=True)
 
 
+PAGE_SIZE = 6
+
+
+@router.callback_query(F.data.regexp(r"^adm:ticket:hist:\d+(:\d+)?$"))
+async def cb_admin_ticket_history(cb: CallbackQuery):
+    from bot.admin import is_admin
+    if not is_admin(cb.from_user.id):
+        return
+    parts = cb.data.split(":")
+    ticket_id = int(parts[3])
+    page = int(parts[4]) if len(parts) > 4 else 1
+
+    row = await tickets_db.get_ticket_by_id(ticket_id)
+    if not row:
+        await safe_cb_answer(cb, "Тикет не найден", show_alert=True)
+        return
+
+    total_count = await tickets_db.count_messages_for_ticket(ticket_id)
+    has_media = (await tickets_db.count_media_messages_for_ticket(ticket_id)) > 0
+    is_open = (row.get("status") == tickets_db.STATUS_OPEN)
+    total_pages = max(1, (total_count + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = max(1, min(page, total_pages))
+
+    offset = (page - 1) * PAGE_SIZE
+    messages = await tickets_db.get_ticket_messages(
+        ticket_id,
+        limit=PAGE_SIZE,
+        offset=offset,
+        descending=False,
+    )
+    label = _user_label(row.get("username"), row.get("first_name"), row["tg_id"])
+    text = render_ticket_history_text(
+        row,
+        messages,
+        page=page,
+        total_pages=total_pages,
+        total_count=total_count,
+        viewer_is_admin=True,
+        ticket_user_label=label,
+    )
+    kb = admin_ticket_history_kb(
+        ticket_id,
+        page=page,
+        total_pages=total_pages,
+        is_open=is_open,
+        has_media=has_media,
+    )
+    await safe_cb_answer(cb)
+    await send_or_edit(cb, text, kb)
+
+
+@router.callback_query(F.data.regexp(r"^adm:ticket:media:\d+$"))
+async def cb_admin_ticket_media(cb: CallbackQuery):
+    from bot.admin import is_admin
+    if not is_admin(cb.from_user.id):
+        return
+    ticket_id = int(cb.data.split(":")[3])
+    row = await tickets_db.get_ticket_by_id(ticket_id)
+    if not row:
+        await safe_cb_answer(cb, "Тикет не найден", show_alert=True)
+        return
+
+    media_list = await tickets_db.get_ticket_media_messages(ticket_id)
+    if not media_list:
+        await safe_cb_answer(cb, "В тикете нет медиафайлов", show_alert=True)
+        return
+
+    await safe_cb_answer(cb, f"Отправляю {len(media_list)} файл(ов)...")
+    from bot import bot as tg_bot
+    label = _user_label(row.get("username"), row.get("first_name"), row["tg_id"])
+
+    sent_count = 0
+    for m in media_list:
+        ctype = m.get("content_type")
+        fid = m.get("file_id")
+        if not fid:
+            continue
+        time_str = format_ticket_message_time(m.get("created_at"))
+        sender_name = "Администратор" if m.get("is_admin") else label
+        caption = f"📎 Тикет #{ticket_id} | {sender_name} ({time_str})"
+        if m.get("body"):
+            caption += f"\n{m['body'][:900]}"
+        try:
+            if ctype == "photo":
+                await tg_bot.send_photo(cb.from_user.id, fid, caption=caption)
+            elif ctype == "video":
+                await tg_bot.send_video(cb.from_user.id, fid, caption=caption)
+            elif ctype == "voice":
+                await tg_bot.send_voice(cb.from_user.id, fid, caption=caption)
+            elif ctype == "video_note":
+                await tg_bot.send_video_note(cb.from_user.id, fid)
+                await tg_bot.send_message(cb.from_user.id, caption)
+            elif ctype == "sticker":
+                await tg_bot.send_sticker(cb.from_user.id, fid)
+                await tg_bot.send_message(cb.from_user.id, caption)
+            elif ctype == "document":
+                await tg_bot.send_document(cb.from_user.id, fid, caption=caption)
+            elif ctype == "audio":
+                await tg_bot.send_audio(cb.from_user.id, fid, caption=caption)
+            elif ctype == "animation":
+                await tg_bot.send_animation(cb.from_user.id, fid, caption=caption)
+            sent_count += 1
+        except Exception as e:
+            logger.warning("Failed to send media {} from ticket {}: {}", fid, ticket_id, e)
+
+    await cb.message.answer(
+        f"✅ Отправлено {sent_count} из {len(media_list)} вложений тикета #{ticket_id}.",
+        reply_markup=admin_ticket_detail_kb(
+            ticket_id,
+            category=row.get("category"),
+            is_open=(row.get("status") == tickets_db.STATUS_OPEN),
+            msg_count=await tickets_db.count_messages_for_ticket(ticket_id),
+            has_media=True,
+        ),
+    )
+
+
 @router.callback_query(F.data.startswith("adm:ticket:session:"))
 async def cb_admin_ticket_session(cb: CallbackQuery, state: FSMContext):
     from bot.admin import is_admin
@@ -238,14 +388,27 @@ async def cb_admin_ticket_session(cb: CallbackQuery, state: FSMContext):
     await tickets_db.mark_ticket_read_by_admin(ticket_id)
 
     label = _user_label(row.get("username"), row.get("first_name"), row["tg_id"])
-    text = (
-        f"🔴 <b>Переписка: тикет #{ticket_id}</b>\n"
-        f"👤 {label} · {tickets_db.category_label(row['category'])}\n\n"
-        "Отправляйте сообщения любого типа — они будут переданы клиенту.\n"
-        "«Завершить переписку» — выйти из режима."
-    )
+    cat = tickets_db.category_label(row["category"])
+    msg_count = await tickets_db.count_messages_for_ticket(ticket_id)
+    session_lines = [
+        f"🔴 <b>Переписка: тикет #{ticket_id}</b>",
+        f"👤 {label} · {cat}",
+    ]
+    if msg_count > 0:
+        recent_msgs = await tickets_db.get_recent_ticket_messages(ticket_id, limit=3)
+        session_lines.append("")
+        session_lines.append("━━━━━━━━━━━━━━━━")
+        session_lines.append(f"💬 <b>Последние сообщения</b> ({len(recent_msgs)} из {msg_count}):")
+        for m in recent_msgs:
+            session_lines.append(format_ticket_message_snippet(m, viewer_is_admin=True, ticket_user_label=label))
+        session_lines.append("━━━━━━━━━━━━━━━━")
+    session_lines += [
+        "",
+        "Отправляйте сообщения любого типа — они будут переданы клиенту.",
+        "«Завершить переписку» — выйти из режима.",
+    ]
     await safe_cb_answer(cb)
-    await send_or_edit(cb, text, admin_ticket_session_kb(ticket_id))
+    await send_or_edit(cb, "\n".join(session_lines), admin_ticket_session_kb(ticket_id))
     if prev and prev != ticket_id:
         await cb.message.answer(f"ℹ️ Переключились на тикет #{ticket_id}")
 
@@ -261,9 +424,17 @@ async def cb_admin_ticket_session_end(cb: CallbackQuery, state: FSMContext):
     await safe_cb_answer(cb, "Переписка завершена")
     row = await tickets_db.get_ticket_by_id(ticket_id)
     if row:
+        msg_count = await tickets_db.count_messages_for_ticket(ticket_id)
+        has_media = (await tickets_db.count_media_messages_for_ticket(ticket_id)) > 0
         await cb.message.answer(
             f"Тикет #{ticket_id} — сессия завершена.",
-            reply_markup=admin_ticket_detail_kb(ticket_id, category=row.get("category")),
+            reply_markup=admin_ticket_detail_kb(
+                ticket_id,
+                category=row.get("category"),
+                is_open=(row.get("status") == tickets_db.STATUS_OPEN),
+                msg_count=msg_count,
+                has_media=has_media,
+            ),
         )
 
 

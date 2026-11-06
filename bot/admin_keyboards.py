@@ -985,12 +985,15 @@ def admin_delete_confirm_kb(subscription_id: int, *, from_search: bool = False) 
 
 def admin_tickets_filter_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📋 Все", callback_data="adm:tickets:all")],
+        [InlineKeyboardButton(text="📋 Все открытые", callback_data="adm:tickets:all")],
         [
             InlineKeyboardButton(text="💸 Возврат", callback_data="adm:tickets:refund"),
             InlineKeyboardButton(text="🛠 Поддержка", callback_data="adm:tickets:support"),
         ],
-        [InlineKeyboardButton(text="📁 Другое", callback_data="adm:tickets:other")],
+        [
+            InlineKeyboardButton(text="📁 Другое", callback_data="adm:tickets:other"),
+            InlineKeyboardButton(text="📦 Архив", callback_data="adm:tickets:closed"),
+        ],
         [InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")],
     ])
 
@@ -1020,29 +1023,51 @@ def admin_tickets_kb(tickets: list, *, filter_key: str = "all") -> InlineKeyboar
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def admin_ticket_detail_kb(ticket_id: int, *, category: str | None = None) -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(
+def admin_ticket_detail_kb(
+    ticket_id: int,
+    *,
+    category: str | None = None,
+    is_open: bool = True,
+    msg_count: int = 0,
+    has_media: bool = False,
+) -> InlineKeyboardMarkup:
+    rows = []
+    if is_open:
+        rows.append([InlineKeyboardButton(
             text="💬 Начать переписку по тикету",
             callback_data=f"adm:ticket:session:{ticket_id}",
-        )],
-    ]
-    if category == "refund":
-        rows += [
-            [InlineKeyboardButton(
-                text="✅ Одобрить возврат",
-                callback_data=f"adm:ticket:refund_approve:{ticket_id}",
-            )],
-            [InlineKeyboardButton(
-                text="❌ Отклонить",
-                callback_data=f"adm:ticket:refund_reject:{ticket_id}",
-            )],
-        ]
-    else:
-        rows.append([InlineKeyboardButton(
-            text="✅ Закрыть тикет",
-            callback_data=f"adm:ticket:close:{ticket_id}",
         )])
+
+    if msg_count > 0:
+        hist_label = f"📜 Вся переписка ({msg_count})" if msg_count > 3 else "📜 Вся переписка"
+        hist_row = [InlineKeyboardButton(
+            text=hist_label,
+            callback_data=f"adm:ticket:hist:{ticket_id}:1",
+        )]
+        if has_media:
+            hist_row.append(InlineKeyboardButton(
+                text="📥 Медиафайлы",
+                callback_data=f"adm:ticket:media:{ticket_id}",
+            ))
+        rows.append(hist_row)
+
+    if is_open:
+        if category == "refund":
+            rows += [
+                [InlineKeyboardButton(
+                    text="✅ Одобрить возврат",
+                    callback_data=f"adm:ticket:refund_approve:{ticket_id}",
+                )],
+                [InlineKeyboardButton(
+                    text="❌ Отклонить",
+                    callback_data=f"adm:ticket:refund_reject:{ticket_id}",
+                )],
+            ]
+        else:
+            rows.append([InlineKeyboardButton(
+                text="✅ Закрыть тикет",
+                callback_data=f"adm:ticket:close:{ticket_id}",
+            )])
     rows += [
         [InlineKeyboardButton(text="« К списку", callback_data="adm:tickets:all")],
         [InlineKeyboardButton(text="« Админ-панель", callback_data="adm:menu")],
@@ -1050,8 +1075,49 @@ def admin_ticket_detail_kb(ticket_id: int, *, category: str | None = None) -> In
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def admin_ticket_history_kb(
+    ticket_id: int,
+    *,
+    page: int,
+    total_pages: int,
+    is_open: bool = True,
+    has_media: bool = False,
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if total_pages > 1:
+        nav: list[InlineKeyboardButton] = []
+        if page > 1:
+            nav.append(InlineKeyboardButton(text="◀️ Ранее", callback_data=f"adm:ticket:hist:{ticket_id}:{page - 1}"))
+        nav.append(InlineKeyboardButton(text=f"📄 {page}/{total_pages}", callback_data=f"adm:ticket:hist:{ticket_id}:{page}"))
+        if page < total_pages:
+            nav.append(InlineKeyboardButton(text="Позже ▶️", callback_data=f"adm:ticket:hist:{ticket_id}:{page + 1}"))
+        rows.append(nav)
+
+    action_row: list[InlineKeyboardButton] = []
+    if is_open:
+        action_row.append(InlineKeyboardButton(
+            text="💬 В переписку",
+            callback_data=f"adm:ticket:session:{ticket_id}",
+        ))
+    if has_media:
+        action_row.append(InlineKeyboardButton(
+            text="📥 Медиафайлы",
+            callback_data=f"adm:ticket:media:{ticket_id}",
+        ))
+    if action_row:
+        rows.append(action_row)
+
+    rows.append([InlineKeyboardButton(text="« К карточке тикета", callback_data=f"adm:ticket:{ticket_id}")])
+    rows.append([InlineKeyboardButton(text="« К списку", callback_data="adm:tickets:all")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def admin_ticket_session_kb(ticket_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="📜 История переписки",
+            callback_data=f"adm:ticket:hist:{ticket_id}:1",
+        )],
         [InlineKeyboardButton(
             text="⏹ Завершить переписку",
             callback_data=f"adm:ticket:session_end:{ticket_id}",
