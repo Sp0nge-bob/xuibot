@@ -283,8 +283,10 @@ async def start_bot():
             handle_signals=False,
             polling_timeout=2,
         )
-    except asyncio.CancelledError:
-        logger.info("Polling cancelled")
+    except (asyncio.CancelledError, AttributeError) as e:
+        if isinstance(e, AttributeError) and "'_abort'" not in str(e):
+            raise
+        logger.info("Polling stopped")
 
 
 async def stop_bot():

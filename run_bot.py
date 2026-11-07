@@ -37,8 +37,16 @@ async def _main() -> None:
         logger.critical("Критическая ошибка при запуске бота: {}", e)
         print(f"\n{e}")
         return
-    except asyncio.CancelledError:
+    except (asyncio.CancelledError, KeyboardInterrupt):
         pass
+    except AttributeError as e:
+        if "'_abort'" in str(e):
+            from loguru import logger
+            logger.debug("SSL abort cleanup during shutdown: {}", e)
+        else:
+            from loguru import logger
+            logger.exception("Непредвиденная ошибка в start_bot: {}", e)
+        return
     except Exception as e:
         from loguru import logger
         logger.exception("Непредвиденная ошибка в start_bot: {}", e)

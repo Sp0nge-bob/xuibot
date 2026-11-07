@@ -20,6 +20,34 @@ SHUTDOWN_POLLING_TIMEOUT = 2.0
 SHUTDOWN_TASK_TIMEOUT = 5.0
 
 
+def patch_sslproto_abort_bug() -> None:
+    """
+    CPython 3.11 bug (gh-109534): in asyncio.sslproto, _SSLProtocolTransport.abort()
+    calls self._ssl_protocol._abort() without checking if self._ssl_protocol is None.
+    When aiohttp closes transport during task cancellation / SIGTERM,
+    it raises AttributeError: 'NoneType' object has no attribute '_abort'.
+    """
+    import sys
+    if sys.version_info < (3, 12):
+        try:
+            import asyncio.sslproto
+            transport_cls = getattr(asyncio.sslproto, "_SSLProtocolTransport", None)
+            if transport_cls and hasattr(transport_cls, "abort"):
+                orig_abort = transport_cls.abort
+
+                def _safe_abort(self):
+                    proto = getattr(self, "_ssl_protocol", None)
+                    if proto is not None:
+                        try:
+                            orig_abort(self)
+                        except AttributeError:
+                            pass
+
+                transport_cls.abort = _safe_abort
+        except Exception:
+            pass
+
+
 def bind_event_loop(loop: asyncio.AbstractEventLoop) -> None:
     global _event_loop
     _event_loop = loop
@@ -72,6 +100,7 @@ def install_uvicorn_shutdown_hook() -> None:
     if _uvicorn_hook_installed:
         return
     _uvicorn_hook_installed = True
+    patch_sslproto_abort_bug()
 
     try:
         import uvicorn.server
@@ -105,6 +134,11 @@ async def graceful_shutdown(*, reason: str = "shutdown") -> None:
 
         stop_scheduler()
 
+        try:
+            await asyncio.wait_for(dp.stop_polling(), timeout=1.0)
+        except Exception:
+            pass
+
         if _bot_task and not _bot_task.done():
             _bot_task.cancel()
             try:
@@ -122,11 +156,6 @@ async def graceful_shutdown(*, reason: str = "shutdown") -> None:
             logger.warning("bot.session.close timeout ({}s)", SHUTDOWN_POLLING_TIMEOUT)
         except Exception as e:
             logger.debug("bot.session.close: {}", e)
-
-        try:
-            await asyncio.wait_for(dp.stop_polling(), timeout=1.0)
-        except Exception:
-            pass
 
         from bot.fsm_storage import close_fsm_storage
 
@@ -210,6 +239,7 @@ def install_shutdown_handlers() -> None:
     if _handlers_installed:
         return
     _handlers_installed = True
+    patch_sslproto_abort_bug()
 
     loop = asyncio.get_running_loop()
     bind_event_loop(loop)
