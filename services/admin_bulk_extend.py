@@ -7,7 +7,7 @@ from loguru import logger
 
 from db import database as db
 from services.admin_extend import admin_bulk_extend_notify_text
-from services.xui import bulk_adjust_client_days, is_bot_client_email
+from services.xui import bulk_adjust_client_days, bulk_enable_clients, is_bot_client_email
 
 
 async def bulk_add_days_to_all_active(days: int, *, admin_tg_id: int | None = None) -> dict[str, Any]:
@@ -37,6 +37,12 @@ async def bulk_add_days_to_all_active(days: int, *, admin_tg_id: int | None = No
         except Exception as e:
             logger.exception("bulkAdjust +{}d failed: {}", days, e)
             raise ValueError(f"Панель не приняла bulkAdjust: {e}") from e
+
+        # Гарантируем, что активные подписчики включены на панели
+        try:
+            await bulk_enable_clients(emails, enable=True)
+        except Exception as e:
+            logger.warning("bulk_enable_clients after extend failed: {}", e)
 
     db_updated = 0
     db_failed = 0

@@ -299,10 +299,12 @@ async def _del_orphans_on_all_nodes() -> dict[str, int]:
     stats["failed"] = int(orphan_stats.get("failed") or 0)
 
     now = utc_now().isoformat()
-    by_node = orphan_stats.get("by_node") or {}
+    primary = await nodes_db.get_primary_node()
+    primary_id = int(primary.get("id") or 0) if primary else None
     for node in nodes:
         node_id = int(node["id"])
-        node_err = "delOrphans failed" if by_node.get(node_id) is None else None
+        is_primary = (node_id == primary_id) or bool(node.get("is_primary"))
+        node_err = "delOrphans failed" if (is_primary and stats["failed"] > 0) else None
         try:
             await nodes_db.update_node(
                 node_id,
@@ -313,9 +315,8 @@ async def _del_orphans_on_all_nodes() -> dict[str, int]:
             logger.error("delOrphans: update_node {} failed: {}", node_id, e)
 
     logger.info(
-        "delOrphans: удалено {} на {} нодах (ошибок {})",
+        "delOrphans: удалено {} на Primary (ошибок {})",
         stats["purged"],
-        stats["nodes"],
         stats["failed"],
     )
     return stats

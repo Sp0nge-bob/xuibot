@@ -600,48 +600,47 @@ async def delete_orphan_clients_on_panel(api: AsyncApi) -> int:
     return deleted
 
 
+async def delete_orphan_clients_everywhere() -> dict[str, Any]:
+    """
+    POST clients/delOrphans строго на ★ Primary ноде.
+    В кластерном режиме 3x-ui Primary является единым источником правды для всех инбаундов и клиентов.
+    Вызов delOrphans на вторичных нодах удаляет клиентов, у которых нет локальных инбаундов на данной вторичной ноде,
+    и записывает их в tombstone, что ломает привязки клиентов на Primary.
+    """
+    from db import xui_nodes as nodes_db
+
+    primary = await nodes_db.get_primary_node()
+    primary_id = int(primary.get("id") or 0) if primary else 0
+    stats: dict[str, Any] = {
+        "nodes": 1,
+        "deleted": 0,
+        "failed": 0,
+        "by_node": {},
+    }
+    try:
+        api = await get_api()
+        removed = await delete_orphan_clients_on_panel(api)
+        stats["deleted"] = removed
+        stats["by_node"][primary_id] = removed
+        logger.info("clients/delOrphans на Primary (node #{}) → удалено {}", primary_id, removed)
+    except Exception as e:
+        stats["failed"] = 1
+        stats["by_node"][primary_id] = None
+        logger.error("clients/delOrphans на Primary (node #{}): {}", primary_id, e)
+    return stats
+
+
 async def delete_orphan_clients_on_nodes(
     nodes: list[dict],
     *,
     label: str = "nodes",
 ) -> dict[str, Any]:
-    """POST clients/delOrphans на указанных нодах."""
-    nodes = _dedupe_nodes_by_host(nodes)
-    stats: dict[str, Any] = {
-        "nodes": len(nodes),
-        "deleted": 0,
-        "failed": 0,
-        "by_node": {},
-    }
-    if not nodes:
-        return stats
-    sem = asyncio.Semaphore(settings.XUI_PANEL_CONCURRENCY)
-
-    async def _one(node: dict) -> None:
-        nid = int(node.get("id") or 0)
-        async with sem:
-            try:
-                api = await get_api_for_node(node) if node.get("host") else await get_api()
-                removed = await delete_orphan_clients_on_panel(api)
-                stats["by_node"][nid] = removed
-                stats["deleted"] += removed
-            except Exception as e:
-                stats["failed"] += 1
-                stats["by_node"][nid] = None
-                logger.error("clients/delOrphans на {} {}: {}", label, nid, e)
-
-    await asyncio.gather(*[_one(node) for node in nodes])
-    return stats
-
-
-async def delete_orphan_clients_everywhere() -> dict[str, Any]:
-    """POST clients/delOrphans на каждой включённой ноде (локально на каждой панели)."""
-    from db.xui_nodes import list_nodes
-
-    nodes = _dedupe_nodes_by_host(await list_nodes(enabled_only=True))
-    if not nodes:
-        nodes = [{"id": 0, "host": settings.XUI_HOST}]
-    return await delete_orphan_clients_on_nodes(nodes, label="all")
+    """
+    POST clients/delOrphans строго на Primary ноде.
+    Аргументы nodes и label сохранены для обратной совместимости сигнатуры; вызовы на вторичных нодах заблокированы.
+    """
+    del nodes, label
+    return await delete_orphan_clients_everywhere()
 
 
 def _parse_bulk_adjust_obj(response: Any) -> tuple[int, list[dict[str, Any]]]:
@@ -730,35 +729,109 @@ async def bulk_adjust_client_days(emails: list[str], days: int) -> dict[str, Any
     return result
 
 
-async def delete_depleted_clients_everywhere() -> dict[str, Any]:
-    """POST clients/delDepleted на каждой включённой ноде."""
-    from db.xui_nodes import list_nodes
+async def bulk_set_clients_enable(emails: list[str], enable: bool = True) -> dict[str, Any]:
+    """
+    POST clients/bulkEnable или clients/bulkDisable на ★ Primary.
+    Только tg/tgfree клиенты бота. Централизованно включает или отключает клиентов
+    во всех инбаундах на Primary с автоматическим push по кластеру 3x-ui.
+    """
+    clean: list[str] = []
+    seen: set[str] = set()
+    for raw in emails:
+        email = (raw or "").strip()
+        if not email or email in seen:
+            continue
+        _assert_bot_client_email(email)
+        seen.add(email)
+        clean.append(email)
 
-    nodes = _dedupe_nodes_by_host(await list_nodes(enabled_only=True))
-    if not nodes:
-        nodes = [{"id": 0, "host": settings.XUI_HOST}]
+    result: dict[str, Any] = {"changed": 0, "skipped": [], "emails": len(clean)}
+    if not clean:
+        return result
+
+    endpoint = "panel/api/clients/bulkEnable" if enable else "panel/api/clients/bulkDisable"
+    api = await get_api()
+    url = api.client._url(endpoint)
+    timeout_sec = max(30.0, float(settings.XUI_BULK_ADJUST_TIMEOUT_SEC))
+    timeout = httpx.Timeout(connect=20.0, read=timeout_sec, write=30.0, pool=20.0)
+    prev_retries = api.client.max_retries
+    api.client.max_retries = 1
+    await _throttle()
+    try:
+        response = await api.client._post(
+            url,
+            {"Accept": "application/json"},
+            {"emails": clean},
+            timeout=timeout,
+        )
+    except httpx.TimeoutException as e:
+        logger.warning(
+            "{} timeout after {:.0f}s emails={}: {}",
+            endpoint, timeout_sec, len(clean), e,
+        )
+        raise ValueError(
+            f"Панель не ответила за {int(timeout_sec)} с ({endpoint}). "
+        ) from e
+    finally:
+        api.client.max_retries = prev_retries
+
+    panel_cache.invalidate()
+    try:
+        body = response.json()
+    except Exception:
+        body = {}
+    obj = body.get("obj") if isinstance(body, dict) else {}
+    if isinstance(obj, dict):
+        result["changed"] = int(obj.get("changed") or 0)
+        skipped_raw = obj.get("skipped") or []
+        if isinstance(skipped_raw, list):
+            result["skipped"] = [
+                {"email": str(s.get("email") or ""), "reason": str(s.get("reason") or "")}
+                for s in skipped_raw if isinstance(s, dict)
+            ]
+    logger.info(
+        "{} emails={} changed={} skipped={}",
+        endpoint, len(clean), result["changed"], len(result["skipped"]),
+    )
+    return result
+
+
+async def bulk_enable_clients(emails: list[str], enable: bool = True) -> dict[str, Any]:
+    return await bulk_set_clients_enable(emails, enable=enable)
+
+
+async def bulk_disable_clients(emails: list[str]) -> dict[str, Any]:
+    return await bulk_set_clients_enable(emails, enable=False)
+
+
+async def delete_depleted_clients_everywhere() -> dict[str, Any]:
+    """
+    POST clients/delDepleted строго на ★ Primary ноде.
+    В кластерном режиме 3x-ui Primary управляет удалением истёкших клиентов централизованно
+    и синхронизирует состояние с узлами кластера. Вызов delDepleted напрямую на вторичных нодах
+    опасен: если локальные даты ноды ещё не обновились, она удаляет активных клиентов из своих инбаундов,
+    после чего Primary во время syncInboundClients отвязывает эти инбаунды и отключает клиентов.
+    """
+    from db import xui_nodes as nodes_db
+
+    primary = await nodes_db.get_primary_node()
+    primary_id = int(primary.get("id") or 0) if primary else 0
     stats: dict[str, Any] = {
-        "nodes": len(nodes),
+        "nodes": 1,
         "deleted": 0,
         "failed": 0,
         "by_node": {},
     }
-    sem = asyncio.Semaphore(settings.XUI_PANEL_CONCURRENCY)
-
-    async def _one(node: dict) -> None:
-        nid = int(node.get("id") or 0)
-        async with sem:
-            try:
-                api = await get_api_for_node(node) if node.get("host") else await get_api()
-                removed = await delete_depleted_clients_on_panel(api)
-                stats["by_node"][nid] = removed
-                stats["deleted"] += removed
-            except Exception as e:
-                stats["failed"] += 1
-                stats["by_node"][nid] = None
-                logger.error("clients/delDepleted на ноде {}: {}", nid, e)
-
-    await asyncio.gather(*[_one(node) for node in nodes])
+    try:
+        api = await get_api()
+        removed = await delete_depleted_clients_on_panel(api)
+        stats["deleted"] = removed
+        stats["by_node"][primary_id] = removed
+        logger.info("clients/delDepleted на Primary (node #{}) → удалено {}", primary_id, removed)
+    except Exception as e:
+        stats["failed"] = 1
+        stats["by_node"][primary_id] = None
+        logger.error("clients/delDepleted на Primary (node #{}): {}", primary_id, e)
     return stats
 
 
@@ -1702,27 +1775,36 @@ async def remove_client_everywhere(email: str) -> list[int]:
     return await ensure_client_absent_everywhere(email)
 
 
-async def disable_client(email: str, inbound_id: Optional[int] = None):
+async def disable_client(email: str, inbound_id: Optional[int] = None) -> bool:
+    """
+    Отключение клиента строго на ★ Primary ноде.
+    3x-ui кластер автоматически разносит отключение по всем связанным нодам (через nodePushPlan).
+    Прямое отключение на вторичных нодах исключено во избежание рассинхронизации.
+    """
     _assert_bot_client_email(email)
+    api = await get_api()
     try:
-        from db.xui_nodes import list_nodes
-        nodes = _dedupe_nodes_by_host(await list_nodes(enabled_only=True))
-    except Exception:
-        nodes = []
-    if not nodes:
-        nodes = [{"id": 0, "host": settings.XUI_HOST}]
-    for node in nodes:
-        try:
-            api = await get_api_for_node(node) if node.get("host") else await get_api()
-            info = await _unified_get_client_info(api, email)
-            if not info:
-                continue
-            client, _, _ = info
-            if client.enable:
-                await _unified_update_client(api, client, enable=False)
-                logger.info("Disabled client {} on node {}", email, node.get("id"))
-        except Exception as e:
-            logger.error("Failed to disable {} on node {}: {}", email, node.get("id"), e)
+        res = await bulk_set_clients_enable([email], enable=False)
+        if res.get("changed", 0) > 0:
+            logger.info("Disabled client {} on Primary via bulkDisable", email)
+            return True
+    except Exception as e:
+        logger.warning("bulkDisable failed for {}, falling back to unified update: {}", email, e)
+
+    try:
+        info = await _unified_get_client_info(api, email)
+        if not info:
+            logger.debug("disable_client: {} not found on Primary", email)
+            return False
+        client, _, _ = info
+        if client.enable:
+            await _unified_update_client(api, client, enable=False)
+            logger.info("Disabled client {} on Primary via _unified_update_client", email)
+            return True
+        return False
+    except Exception as e:
+        logger.error("Failed to disable {} on Primary: {}", email, e)
+        return False
 
 
 def sub_desired_state_from_db(sub: dict) -> dict:
