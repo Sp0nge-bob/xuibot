@@ -407,6 +407,13 @@ async def set_paid_limit_ip(value: int) -> int:
     return val
 
 
+async def get_limit_ip_for_email(email: str) -> int:
+    from config.trial import is_trial_email
+    if is_trial_email(email):
+        return await get_trial_limit_ip()
+    return await get_paid_limit_ip()
+
+
 async def is_trial_enabled() -> bool:
     raw = await get_setting(SETTING_TRIAL_ENABLED)
     if raw is None:
@@ -481,6 +488,13 @@ async def set_paid_default_traffic_gb(gb: int) -> int:
     val = max(0, int(gb))
     await set_setting(SETTING_PAID_DEFAULT_TRAFFIC_GB, str(val))
     return val
+
+
+async def get_traffic_gb_for_email(email: str) -> int:
+    from config.trial import is_trial_email
+    if is_trial_email(email):
+        return await get_trial_traffic_gb()
+    return await get_paid_default_traffic_gb()
 
 
 async def get_paid_limit_hwid() -> int:

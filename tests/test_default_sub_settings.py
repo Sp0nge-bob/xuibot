@@ -56,6 +56,12 @@ async def test_default_subscription_profile_defaults():
     assert await bot_settings.get_trial_traffic_gb() == 15
     assert await bot_settings.get_paid_default_traffic_gb() == 0
     assert await bot_settings.is_trial_enabled() is True
+    assert await bot_settings.get_limit_ip_for_email("tgfree12345") == 0
+    assert await bot_settings.get_limit_ip_for_email("tg123456") == 0
+    assert await bot_settings.get_traffic_gb_for_email("tgfree12345") == 15
+    assert await bot_settings.get_traffic_gb_for_email("tg123456") == 0
+    from services.limit_ip import resolve_limit_ip_for_email
+    assert await resolve_limit_ip_for_email("tg123456") == 0
 
 
 @pytest.mark.asyncio
@@ -120,6 +126,12 @@ async def test_trial_toggle_blocks_claiming():
     # Включаем обратно
     await bot_settings.set_trial_enabled(True)
     assert await bot_settings.is_trial_enabled() is True
+    assert await bot_settings.get_limit_ip_for_email("tgfree12345") == 0
+    assert await bot_settings.get_limit_ip_for_email("tg123456") == 0
+    assert await bot_settings.get_traffic_gb_for_email("tgfree12345") == 15
+    assert await bot_settings.get_traffic_gb_for_email("tg123456") == 0
+    from services.limit_ip import resolve_limit_ip_for_email
+    assert await resolve_limit_ip_for_email("tg123456") == 0
     assert await get_trial_button_visible(77777) is True
 
 

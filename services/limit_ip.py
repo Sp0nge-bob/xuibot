@@ -26,11 +26,17 @@ async def get_paid_limit_ip() -> int:
 
 
 async def resolve_limit_ip_for_email(email: str) -> int:
-    return await bot_settings_db.get_limit_ip_for_email(email)
+    try:
+        return await bot_settings_db.get_limit_ip_for_email(email)
+    except AttributeError:
+        return await (bot_settings_db.get_trial_limit_ip() if is_trial_email(email) else bot_settings_db.get_paid_limit_ip())
 
 
 async def resolve_limit_hwid_for_email(email: str) -> int:
-    return await bot_settings_db.get_limit_hwid_for_email(email)
+    try:
+        return await bot_settings_db.get_limit_hwid_for_email(email)
+    except AttributeError:
+        return await (bot_settings_db.get_trial_limit_hwid() if is_trial_email(email) else bot_settings_db.get_paid_limit_hwid())
 
 
 async def apply_limit_ip_settings_on_primary(*, kind: str | None = None) -> dict[str, int]:
