@@ -1979,28 +1979,55 @@ async def clear_client_hwids_on_panel(email: str) -> bool:
         return False
 
 
+def _sub_sort_val(val: Any) -> int:
+    if val is None or val == 0:
+        return 1
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return 1
+
+
 async def get_inbound_options(api: AsyncApi | None = None) -> list[dict]:
-    """Получить легковесный список инбаундов через panel/api/inbounds/options (id, remark, protocol, port)."""
+    """Получить список инбаундов, отсортированный по subSortIndex (порядок в подписке 3x-ui)."""
     if api is None:
         api = await get_api()
-    url = api.client._url("panel/api/inbounds/options")
+    if not api:
+        return []
+
+    # 1. Запрашиваем panel/api/inbounds/list, где всегда присутствует поле subSortIndex
+    url = api.client._url("panel/api/inbounds/list")
     await _throttle()
+    raw_inbounds = []
     try:
         resp = await api.client._get(url, {"Accept": "application/json"})
-        data = resp.json()
-        opts = data.get(ApiFields.OBJ) or []
-        if isinstance(opts, list) and opts:
-            return opts
+        if resp.status_code == 200:
+            raw_inbounds = resp.json().get(ApiFields.OBJ) or []
     except Exception as e:
-        logger.debug("inbounds/options failed, falling back: {}", e)
-    inbounds = await list_inbounds(api)
-    return [
-        {
+        logger.debug("inbounds/list failed for get_inbound_options: {}", e)
+
+    # 2. Если list не вернул данных, пробуем options
+    if not raw_inbounds:
+        url_opt = api.client._url("panel/api/inbounds/options")
+        try:
+            resp_opt = await api.client._get(url_opt, {"Accept": "application/json"})
+            if resp_opt.status_code == 200:
+                raw_inbounds = resp_opt.json().get(ApiFields.OBJ) or []
+        except Exception as e:
+            logger.debug("inbounds/options fallback failed: {}", e)
+
+    items = []
+    for ib in raw_inbounds:
+        sub_sort = ib.get("subSortIndex") if isinstance(ib, dict) else getattr(ib, "subSortIndex", None)
+        items.append({
             "id": getattr(ib, "id", None) or (ib.get("id") if isinstance(ib, dict) else None),
             "remark": getattr(ib, "remark", "") or (ib.get("remark", "") if isinstance(ib, dict) else ""),
             "protocol": getattr(ib, "protocol", "") or (ib.get("protocol", "") if isinstance(ib, dict) else ""),
             "port": getattr(ib, "port", 0) or (ib.get("port", 0) if isinstance(ib, dict) else 0),
-        }
-        for ib in inbounds
-    ]
+            "subSortIndex": _sub_sort_val(sub_sort),
+        })
+
+    # Сортировка: subSortIndex ASC (меньшие первыми, 0/null -> 1), при равенстве id ASC
+    items.sort(key=lambda x: (x.get("subSortIndex", 1), int(x.get("id") or 0)))
+    return items
 

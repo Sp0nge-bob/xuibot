@@ -223,3 +223,35 @@ async def test_clear_and_get_client_hwids():
             ok = await clear_client_hwids_on_panel("tg999")
             assert ok is True
             mock_delete.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_get_inbound_options_sub_sort_index_ordering():
+    from services.xui import get_inbound_options
+
+    mock_client = Mock()
+    mock_client._url = lambda p: f"http://127.0.0.1/{p}"
+    mock_client._get = AsyncMock()
+
+    mock_resp = Mock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "success": True,
+        "obj": [
+            {"id": 1, "remark": "Inbound 1", "protocol": "vless", "port": 443, "subSortIndex": 2},
+            {"id": 2, "remark": "Inbound 2 Priority", "protocol": "vless", "port": 8443, "subSortIndex": -1},
+            {"id": 3, "remark": "Inbound 3 Default", "protocol": "vless", "port": 9443, "subSortIndex": 0},
+        ],
+    }
+    mock_client._get.return_value = mock_resp
+    mock_api = Mock(client=mock_client)
+
+    opts = await get_inbound_options(mock_api)
+    assert len(opts) == 3
+    # Ordered: -1 (Inbound 2) -> 1 (Inbound 3) -> 2 (Inbound 1)
+    assert opts[0]["id"] == 2
+    assert opts[0]["subSortIndex"] == -1
+    assert opts[1]["id"] == 3
+    assert opts[1]["subSortIndex"] == 1
+    assert opts[2]["id"] == 1
+    assert opts[2]["subSortIndex"] == 2
