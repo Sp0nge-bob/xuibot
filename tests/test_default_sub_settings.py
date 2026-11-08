@@ -267,3 +267,29 @@ async def test_get_inbound_options_sub_sort_index_ordering():
     assert opts[1]["subSortIndex"] == 1
     assert opts[2]["id"] == 1
     assert opts[2]["subSortIndex"] == 2
+
+
+@pytest.mark.asyncio
+async def test_provision_client_resolves_all_settings():
+    from services.xui import provision_client
+
+    with patch("services.xui.get_api", AsyncMock(return_value=Mock())), \
+         patch("services.xui._unified_get_client_info", AsyncMock(return_value=None)), \
+         patch("services.xui._unified_add_client", AsyncMock()) as mock_add, \
+         patch("services.xui.build_sub_link", AsyncMock(return_value="happ://sub/123")):
+
+        email, sub_id, link = await provision_client(
+            tg_id=12345,
+            plan_days=30,
+            traffic_gb=0,
+            client_email="tg12345",
+        )
+        assert email == "tg12345"
+        assert sub_id is not None
+        assert link == "happ://sub/123"
+        mock_add.assert_awaited_once()
+        call_kwargs = mock_add.await_args.kwargs
+        assert "limit_ip" in call_kwargs
+        assert "limit_hwid" in call_kwargs
+        assert "total_gb" in call_kwargs
+
