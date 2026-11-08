@@ -2131,11 +2131,14 @@ async def cb_sub_link(cb: CallbackQuery):
 
 @router.callback_query(F.data.startswith("sub_info:"))
 async def cb_sub_info(cb: CallbackQuery):
-    await safe_cb_answer(cb)
-    sub_id = int(cb.data.split(":", 1)[1])
-    sub = await db.get_subscription_by_id(sub_id)
-    if not sub or sub["tg_id"] != cb.from_user.id:
-        await safe_cb_answer(cb, "Подписка не найдена", show_alert=True)
+    parts = (cb.data or "").split(":")
+    if len(parts) < 2:
+        await safe_cb_answer(cb)
+        return
+    try:
+        sub_id = int(parts[1])
+    except ValueError:
+        await safe_cb_answer(cb)
         return
 
     from .tickets import show_subscription_detail

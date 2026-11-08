@@ -523,14 +523,31 @@ async def show_subscription_detail(
         await dismiss_faq_view(target.bot, target.message.chat.id)
 
     sub = await db.get_subscription_by_id(sub_id)
-    if not sub or sub["tg_id"] != tg_id or not sub.get("is_active"):
-        text, kb = no_subscription_text(), no_subscription_kb()
-        if isinstance(target, CallbackQuery):
-            await safe_cb_answer(target, "Подписка не найдена", show_alert=True)
-            await send_or_edit(target, text, kb)
-        else:
-            await target.answer(text, reply_markup=kb)
-        return
+    sub_tg = int(sub.get("tg_id") or 0) if sub else 0
+    if not sub or sub_tg != tg_id or not sub.get("is_active"):
+        # Если tg_id у подписки пустой (создана на сайте), проверяем привязку по email
+        if sub and sub_tg == 0 and sub.get("is_active"):
+            sub_email = (sub.get("email_account") or sub.get("client_email") or "").strip().lower()
+            if sub_email:
+                async with db.get_db() as conn:
+                    async with conn.execute(
+                        "SELECT 1 FROM email_accounts WHERE email = ? AND tg_id = ? LIMIT 1",
+                        (sub_email, tg_id)
+                    ) as cur:
+                        if await cur.fetchone():
+                            await conn.execute("UPDATE subscriptions SET tg_id = ? WHERE id = ?", (tg_id, sub_id))
+                            await conn.commit()
+                            sub["tg_id"] = tg_id
+                            sub_tg = tg_id
+
+        if not sub or sub_tg != tg_id or not sub.get("is_active"):
+            text, kb = no_subscription_text(), no_subscription_kb()
+            if isinstance(target, CallbackQuery):
+                await safe_cb_answer(target, "Подписка не найдена", show_alert=True)
+                await send_or_edit(target, text, kb)
+            else:
+                await target.answer(text, reply_markup=kb)
+            return
 
     if isinstance(target, CallbackQuery):
         await safe_cb_answer(target)
