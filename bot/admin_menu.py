@@ -55,13 +55,11 @@ ADMIN_HUBS: dict[str, HubDef] = {
     "vpn": {
         "root_label": "🖧 VPN",
         "title": "🖧 VPN и панели",
-        "description": "Ноды 3x-ui, инбаунды, лимиты подключений и массовое продление.",
+        "description": "Ноды 3x-ui, профили дефолт-подписок, Happ и массовое продление.",
         "items": [
             ("🖧 Ноды", "adm:nodes"),
-            ("📡 Inbounds", "adm:inbounds"),
             ("📋 Дефолт-подписка", "adm:default_sub"),
             ("⏰ Добавить дни всем", "adm:bulk_days"),
-            ("📱 Лимит IP", "adm:limit_ip"),
             ("🔐 Happ", "adm:happ_crypto"),
         ],
     },
