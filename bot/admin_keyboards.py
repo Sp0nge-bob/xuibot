@@ -810,6 +810,10 @@ def admin_user_detail_kb(
             text="🔄 Перегенерировать ссылку",
             callback_data=f"adm:sub:rotate:{subscription_id}",
         )],
+        [InlineKeyboardButton(
+            text="📱 Сброс HWID устройств",
+            callback_data=f"adm:sub:clear_hwid:{subscription_id}",
+        )],
     ]
     rows.append([
         InlineKeyboardButton(
@@ -1202,14 +1206,23 @@ def admin_promo_detail_kb(
     *,
     is_active: bool,
     is_grant: bool = False,
+    uses_count: int = 0,
 ) -> InlineKeyboardMarkup:
-    del is_grant  # тип учитывается в подменю редактирования
     toggle = "⏸ Выкл" if is_active else "✅ Вкл"
-    return InlineKeyboardMarkup(inline_keyboard=[
+    rows: list[list[InlineKeyboardButton]] = [
         [InlineKeyboardButton(
             text="✏️ Редактирование",
             callback_data=f"adm:promo:edit_menu:{promo_id}",
         )],
+    ]
+    if is_grant:
+        rows.append([
+            InlineKeyboardButton(
+                text=f"👥 Активации ({uses_count})",
+                callback_data=f"adm:promo:uses:{promo_id}:0",
+            ),
+        ])
+    rows.extend([
         [
             InlineKeyboardButton(text=toggle, callback_data=f"adm:promo:toggle:{promo_id}"),
             InlineKeyboardButton(text="🗑 Удалить", callback_data=f"adm:promo:del:{promo_id}"),
@@ -1218,6 +1231,81 @@ def admin_promo_detail_kb(
             InlineKeyboardButton(text="« Промокоды", callback_data="adm:promos"),
             InlineKeyboardButton(text="« Админ", callback_data="adm:menu"),
         ],
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_promo_uses_kb(
+    promo_id: int,
+    uses: list[dict],
+    page: int,
+    total_pages: int,
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for u in uses:
+        is_revoked = bool(u.get("is_revoked"))
+        status_icon = "🚫 " if is_revoked else "✅ "
+        uname = u.get("username")
+        user_label = f"@{uname}" if uname else f"ID {u['tg_id']}"
+        date = str(u.get("used_at") or "")[:10]
+        label = f"{status_icon}{user_label} ({date})"
+        rows.append([
+            InlineKeyboardButton(
+                text=label,
+                callback_data=f"adm:promo:use:{u['use_id']}",
+            )
+        ])
+
+    nav_row: list[InlineKeyboardButton] = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton(text="« Назад", callback_data=f"adm:promo:uses:{promo_id}:{page - 1}"))
+    if total_pages > 1:
+        nav_row.append(InlineKeyboardButton(text=f"· {page + 1}/{total_pages} ·", callback_data=f"adm:promo:uses:{promo_id}:{page}"))
+    if page < total_pages - 1:
+        nav_row.append(InlineKeyboardButton(text="Вперёд »", callback_data=f"adm:promo:uses:{promo_id}:{page + 1}"))
+    if nav_row:
+        rows.append(nav_row)
+
+    rows.append([
+        InlineKeyboardButton(text="« К промокоду", callback_data=f"adm:promo:{promo_id}"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_promo_use_detail_kb(
+    use: dict,
+) -> InlineKeyboardMarkup:
+    use_id = int(use["use_id"])
+    promo_id = int(use["promo_id"])
+    is_revoked = bool(use.get("is_revoked"))
+    rows: list[list[InlineKeyboardButton]] = []
+    if not is_revoked:
+        rows.append([
+            InlineKeyboardButton(
+                text="🚫 Отозвать тариф",
+                callback_data=f"adm:promo:revoke:{use_id}:confirm",
+            )
+        ])
+    rows.append([
+        InlineKeyboardButton(text="« К списку активаций", callback_data=f"adm:promo:uses:{promo_id}:0"),
+        InlineKeyboardButton(text="« К промокоду", callback_data=f"adm:promo:{promo_id}"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_promo_revoke_confirm_kb(
+    use_id: int,
+    promo_id: int,
+) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="⚠️ Да, отозвать тариф",
+            callback_data=f"adm:promo:revoke:{use_id}:do",
+        )],
+        [InlineKeyboardButton(
+            text="« Отмена",
+            callback_data=f"adm:promo:use:{use_id}",
+        )],
     ])
 
 

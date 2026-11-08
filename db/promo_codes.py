@@ -64,6 +64,14 @@ async def init_promo_tables():
             await db.execute(
                 "ALTER TABLE promo_uses ADD COLUMN subscription_id INTEGER"
             )
+        if "is_revoked" not in use_cols:
+            await db.execute(
+                "ALTER TABLE promo_uses ADD COLUMN is_revoked INTEGER NOT NULL DEFAULT 0"
+            )
+        if "revoked_at" not in use_cols:
+            await db.execute(
+                "ALTER TABLE promo_uses ADD COLUMN revoked_at TIMESTAMP"
+            )
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_promo_uses_subscription "
             "ON promo_uses(subscription_id)"
@@ -467,3 +475,87 @@ async def find_grant_use_heuristic_for_subscription(
             best = r
             best_delta = delta
     return best or rows[0]
+
+
+async def list_promo_uses_detailed(
+    promo_id: int,
+    limit: int = 10,
+    offset: int = 0,
+) -> List[Dict[str, Any]]:
+    """Список активаций промокода с информацией о пользователе и подписке."""
+    async with get_db() as db:
+        async with db.execute(
+            """SELECT u.id AS use_id, u.promo_id, u.tg_id, u.order_id,
+                      u.subscription_id, u.used_at,
+                      COALESCE(u.is_revoked, 0) AS is_revoked,
+                      u.revoked_at,
+                      us.username, us.first_name,
+                      s.sub_id, s.end_date, s.client_email, s.is_active AS sub_is_active
+               FROM promo_uses u
+               LEFT JOIN users us ON us.tg_id = u.tg_id
+               LEFT JOIN subscriptions s ON s.id = u.subscription_id
+               WHERE u.promo_id = ?
+               ORDER BY u.used_at DESC, u.id DESC
+               LIMIT ? OFFSET ?""",
+            (promo_id, limit, offset),
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
+
+async def count_promo_uses_detailed(promo_id: int) -> int:
+    """Общее количество активаций конкретного промокода."""
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT COUNT(*) FROM promo_uses WHERE promo_id = ?",
+            (promo_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            return int(row[0]) if row else 0
+
+
+async def get_promo_use_by_id(use_id: int) -> Optional[Dict[str, Any]]:
+    """Детальная информация об одной активации промокода."""
+    async with get_db() as db:
+        async with db.execute(
+            """SELECT u.id AS use_id, u.promo_id, u.tg_id, u.order_id,
+                      u.subscription_id, u.used_at,
+                      COALESCE(u.is_revoked, 0) AS is_revoked,
+                      u.revoked_at,
+                      p.code, p.promo_type, p.plan_ids, p.discount_type, p.discount_value,
+                      us.username, us.first_name,
+                      s.sub_id, s.end_date, s.client_email, s.is_active AS sub_is_active
+               FROM promo_uses u
+               JOIN promo_codes p ON p.id = u.promo_id
+               LEFT JOIN users us ON us.tg_id = u.tg_id
+               LEFT JOIN subscriptions s ON s.id = u.subscription_id
+               WHERE u.id = ?""",
+            (use_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
+async def mark_promo_use_revoked(use_id: int) -> bool:
+    """Пометить активацию как отозванную."""
+    async with get_db() as db:
+        cur = await db.execute(
+            """UPDATE promo_uses
+               SET is_revoked = 1, revoked_at = CURRENT_TIMESTAMP
+               WHERE id = ? AND COALESCE(is_revoked, 0) = 0""",
+            (use_id,),
+        )
+        await db.commit()
+        return cur.rowcount > 0
+
+
+async def decrement_promo_used_count(promo_id: int) -> bool:
+    """Уменьшить счетчик использований промокода при отзыве."""
+    async with get_db() as db:
+        cur = await db.execute(
+            """UPDATE promo_codes
+               SET used_count = MAX(0, COALESCE(used_count, 0) - 1)
+               WHERE id = ?""",
+            (promo_id,),
+        )
+        await db.commit()
+        return cur.rowcount > 0

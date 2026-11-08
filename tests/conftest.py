@@ -9,6 +9,7 @@ os.environ["PYTEST_RUNNING"] = "1"
 os.environ.setdefault("BOT_TOKEN", "0:pytest")
 os.environ.setdefault("PLATEGA_MERCHANT_ID", "00000000-0000-0000-0000-000000000000")
 os.environ.setdefault("PLATEGA_SECRET", "pytest-secret")
+os.environ.setdefault("SECRET_KEY", "pytest_super_secret_key_1234567890_test")
 os.environ.setdefault("XUI_HOST", "https://example.test/")
 
 import pytest

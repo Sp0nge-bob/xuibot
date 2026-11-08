@@ -59,6 +59,7 @@ ADMIN_HUBS: dict[str, HubDef] = {
         "items": [
             ("🖧 Ноды", "adm:nodes"),
             ("📡 Inbounds", "adm:inbounds"),
+            ("📋 Дефолт-подписка", "adm:default_sub"),
             ("⏰ Добавить дни всем", "adm:bulk_days"),
             ("📱 Лимит IP", "adm:limit_ip"),
             ("🔐 Happ", "adm:happ_crypto"),

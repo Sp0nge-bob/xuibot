@@ -92,7 +92,17 @@ class Settings(BaseSettings):
 
     # 3x-ui limitIp: одновременные уникальные IP (0 = без лимита)
     TRIAL_LIMIT_IP: int = 0
-    PAID_LIMIT_IP: int = 5
+    PAID_LIMIT_IP: int = 0
+
+    # 3x-ui limitHwid: макс. кол-во HWID устройств (0 = без лимита)
+    TRIAL_LIMIT_HWID: int = 3
+    PAID_LIMIT_HWID: int = 0
+
+    # Дефолтные параметры трафика и срока
+    TRIAL_DEFAULT_TRAFFIC_GB: int = 15
+    PAID_DEFAULT_TRAFFIC_GB: int = 0
+    TRIAL_DEFAULT_DAYS: int = 3
+    TRIAL_DEFAULT_ENABLED: bool = True
 
     # ID инбаундов в подписке (через запятую). Первый — главный на ★ Primary.
     # Пример: 1,13,16,25,28

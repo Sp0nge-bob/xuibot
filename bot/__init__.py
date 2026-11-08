@@ -30,6 +30,7 @@ from .admin_logs import router as admin_logs_router
 from .admin_faq import router as admin_faq_router
 from .admin_happ_crypto import router as admin_happ_crypto_router
 from .admin_limit_ip import router as admin_limit_ip_router
+from .admin_default_sub import router as admin_default_sub_router
 from .admin_legal import router as admin_legal_router
 from .admin_diagnostics import router as admin_diagnostics_router
 from .admin_reboot import router as admin_reboot_router
@@ -125,6 +126,7 @@ dp.include_router(admin_logs_router)
 dp.include_router(admin_faq_router)
 dp.include_router(admin_happ_crypto_router)
 dp.include_router(admin_limit_ip_router)
+dp.include_router(admin_default_sub_router)
 dp.include_router(admin_legal_router)
 dp.include_router(admin_diagnostics_router)
 dp.include_router(admin_broadcast_router)

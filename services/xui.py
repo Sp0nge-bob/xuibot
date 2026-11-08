@@ -24,6 +24,13 @@ from py3xui import AsyncApi, Client
 from py3xui.api.api_base import ApiFields
 from loguru import logger
 
+# Разрешаем динамические поля (limitHwid, limit_hwid) в модели Client
+Client.model_config["extra"] = "allow"
+try:
+    Client.model_rebuild(force=True)
+except Exception:
+    pass
+
 from config.settings import settings
 from db.bot_settings import get_subscription_inbound_ids
 from services.panel_cache import get_panel_cache, invalidate_panel_cache, panel_cache
@@ -347,10 +354,16 @@ async def _unified_get_client_info(
         group = str(client_payload.get("group") or "")
         if isinstance(inbound_ids, list) and inbound_ids:
             client_payload.setdefault("inboundId", inbound_ids[0])
-        return Client.model_validate(client_payload), [int(x) for x in inbound_ids], group
+        c = Client.model_validate(client_payload)
+        c_hwid = client_payload.get("limitHwid", client_payload.get("limit_hwid", 0))
+        setattr(c, "limit_hwid", int(c_hwid or 0))
+        return c, [int(x) for x in inbound_ids], group
 
     if isinstance(obj, dict):
-        return Client.model_validate(obj), [], str(obj.get("group") or "")
+        c = Client.model_validate(obj)
+        c_hwid = obj.get("limitHwid", obj.get("limit_hwid", 0))
+        setattr(c, "limit_hwid", int(c_hwid or 0))
+        return c, [], str(obj.get("group") or "")
 
     return None
 
@@ -375,6 +388,7 @@ def _unified_add_client_body(
     client_uuid: str = "",
     enable: bool = True,
     limit_ip: int = 0,
+    limit_hwid: int = 0,
     group: str | None = None,
 ) -> dict[str, Any]:
     resolved_uuid = _resolve_valid_uuid4(client_uuid, sub_id)
@@ -385,6 +399,7 @@ def _unified_add_client_body(
         "expiryTime": expiry_time,
         "tgId": _tg_id_from_email(email),
         "limitIp": limit_ip,
+        "limitHwid": limit_hwid,
         "enable": enable,
     }
     if sub_id:
@@ -405,6 +420,7 @@ async def _unified_add_client(
     client_uuid: str = "",
     enable: bool = True,
     limit_ip: int = 0,
+    limit_hwid: int = 0,
 ) -> Client:
     _assert_bot_client_email(email)
     target_group = await _get_client_target_group(email)
@@ -416,6 +432,7 @@ async def _unified_add_client(
         client_uuid=client_uuid,
         enable=enable,
         limit_ip=limit_ip,
+        limit_hwid=limit_hwid,
         group=target_group,
     )
     url = api.client._url("panel/api/clients/add")
@@ -425,13 +442,13 @@ async def _unified_add_client(
         "inboundIds": inbound_ids,
     })
     logger.success(
-        "clients/add {} → inboundIds {} expiryTime={} (subId={}, group={})",
-        email, inbound_ids, expiry_time, sub_id, payload.get("group") or "—",
+        "clients/add {} → inboundIds {} expiryTime={} (subId={}, group={}, limitHwid={})",
+        email, inbound_ids, expiry_time, sub_id, payload.get("group") or "—", limit_hwid,
     )
-    if target_group:
-        await _assign_client_group(api, email, group=target_group)
     panel_cache.invalidate()
-    return Client.model_validate(payload)
+    c = Client.model_validate(payload)
+    setattr(c, "limit_hwid", limit_hwid)
+    return c
 
 
 async def _unified_update_client(api: AsyncApi, client: Client, **overrides: Any) -> None:
@@ -441,12 +458,16 @@ async def _unified_update_client(api: AsyncApi, client: Client, **overrides: Any
     limit_ip = overrides.get("limitIp", overrides.get("limit_ip"))
     if limit_ip is None:
         limit_ip = client.limit_ip or 0
+    limit_hwid = overrides.get("limitHwid", overrides.get("limit_hwid"))
+    if limit_hwid is None:
+        limit_hwid = getattr(client, "limit_hwid", 0) or 0
     data: dict[str, Any] = {
         "email": client.email,
         "totalGB": int(overrides.get("totalGB", overrides.get("total_gb", client.total_gb or 0))),
         "expiryTime": int(expiry),
         "tgId": _tg_id_from_email(client.email),
         "limitIp": int(limit_ip),
+        "limitHwid": int(limit_hwid),
         "enable": bool(overrides.get("enable", client.enable)),
     }
     if sub:
@@ -1034,6 +1055,28 @@ async def find_client_on_panel_by_sub_id(api: AsyncApi, sub_id: str) -> Optional
         return None
     sub_id_clean = str(sub_id).strip()
 
+    # 0. Быстрый индексированный прямой поиск по subId (3x-ui /panel/api/clients/get/subId/:subId)
+    try:
+        url = api.client._url(f"panel/api/clients/get/subId/{sub_id_clean}")
+        await _throttle()
+        resp = await api.client._get(url, {"Accept": "application/json"})
+        data = resp.json()
+        raw_items = data.get(ApiFields.OBJ) or []
+        if isinstance(raw_items, dict):
+            raw_items = [raw_items]
+        for item in raw_items:
+            if isinstance(item, dict):
+                c_data = item.get("client") if isinstance(item.get("client"), dict) else item
+                inbound_ids = item.get("inboundIds") or []
+                if isinstance(inbound_ids, list) and inbound_ids:
+                    c_data.setdefault("inboundId", inbound_ids[0])
+                c = Client.model_validate(c_data)
+                c_hwid = c_data.get("limitHwid", c_data.get("limit_hwid", 0))
+                setattr(c, "limit_hwid", int(c_hwid or 0))
+                return c
+    except Exception as e:
+        logger.debug("direct get/subId/{} lookup failed, falling back: {}", sub_id_clean, e)
+
     # 1. Проверяем через unified endpoint 3x-ui panel/api/clients/list
     try:
         url = api.client._url("panel/api/clients/list")
@@ -1485,6 +1528,7 @@ async def reactivate_client_on_primary(
     expiry_time: int,
     total_gb: int = 0,
     limit_ip: int | None = None,
+    limit_hwid: int | None = None,
 ) -> str:
     """
     Включить существующего клиента на основной: новый срок, трафик, enable=True.
@@ -1494,11 +1538,12 @@ async def reactivate_client_on_primary(
     info = await _unified_get_client_info(api, email)
     if not info:
         raise ValueError(f"Клиент {email} не найден на основной для реактивации")
-    from services.limit_ip import resolve_limit_ip_for_email
+    from services.limit_ip import resolve_limit_ip_for_email, resolve_limit_hwid_for_email
 
     client, _, current_group = info
     resolved_sub_id = (sub_id or client.sub_id or "").strip() or secrets.token_urlsafe(12)[:16]
     resolved_limit = limit_ip if limit_ip is not None else await resolve_limit_ip_for_email(email)
+    resolved_hwid = limit_hwid if limit_hwid is not None else await resolve_limit_hwid_for_email(email)
     await _unified_update_client(
         api,
         client,
@@ -1507,6 +1552,7 @@ async def reactivate_client_on_primary(
         subId=resolved_sub_id,
         enable=True,
         limitIp=resolved_limit,
+        limitHwid=resolved_hwid,
         current_group=current_group,
     )
     missing = await try_attach_missing_inbounds(api, email, sub_id=resolved_sub_id)
@@ -1515,7 +1561,7 @@ async def reactivate_client_on_primary(
             "После реактивации {} не хватает инбаундов {} — догонит синк нод",
             email, missing,
         )
-    logger.success("Reactivated {} expiry={} enable=True", email, expiry_time)
+    logger.success("Reactivated {} expiry={} enable=True limitHwid={}", email, expiry_time, resolved_hwid)
     return resolved_sub_id
 
 
@@ -1542,7 +1588,10 @@ async def provision_client(
     api = await get_api()
     email = client_email or f"tg{tg_id}"
     _assert_bot_client_email(email)
-    inbound_ids = await get_subscription_inbound_ids()
+    from db.bot_settings import get_inbound_ids_for_email, get_limit_hwid_for_email
+    inbound_ids = await get_inbound_ids_for_email(email)
+    if not inbound_ids:
+        inbound_ids = await get_subscription_inbound_ids()
     if not inbound_ids:
         raise ValueError("Нет инбаундов для создания подписки")
 
@@ -1557,6 +1606,7 @@ async def provision_client(
     from services.limit_ip import resolve_limit_ip_for_email
 
     limit_ip = await resolve_limit_ip_for_email(email)
+    limit_hwid = await get_limit_hwid_for_email(email)
 
     if not skip_preclean:
         info = await _unified_get_client_info(api, email)
@@ -1567,6 +1617,7 @@ async def provision_client(
                 expiry_time=expiry_time,
                 total_gb=total_gb,
                 limit_ip=limit_ip,
+                limit_hwid=limit_hwid,
             )
             sub_link = await build_sub_link(resolved_sub_id)
             return email, resolved_sub_id, sub_link
@@ -1584,6 +1635,7 @@ async def provision_client(
             total_gb=total_gb,
             inbound_ids=inbound_ids,
             limit_ip=limit_ip,
+            limit_hwid=limit_hwid,
         )
 
     try:
@@ -1887,3 +1939,68 @@ async def sync_client_state_on_node(
 
 # обратная совместимость для импортов
 replicate_client_on_node = sync_client_state_on_node
+
+
+async def get_client_hwids_on_panel(email: str) -> list[dict]:
+    """Список зарегистрированных HWID устройств клиента (3x-ui v3.2+)."""
+    api = await get_api()
+    url = api.client._url(f"panel/api/clients/hwids/{email}")
+    await _throttle()
+    try:
+        resp = await api.client._post(url, {"Accept": "application/json"}, {})
+        data = resp.json()
+        return data.get(ApiFields.OBJ) or []
+    except Exception as e:
+        logger.warning("get_client_hwids_on_panel failed for {}: {}", email, e)
+        return []
+
+
+async def clear_client_hwids_on_panel(email: str) -> bool:
+    """Очистить привязанные HWID устройства клиента на основной панели."""
+    import httpx
+    api = await get_api()
+    url = api.client._url(f"panel/api/clients/hwids/{email}")
+    headers = api.client._generate_headers({"Accept": "application/json"})
+    verify = (
+        api.client._custom_certificate_path
+        if (getattr(api.client, "_use_tls_verify", True) and getattr(api.client, "_custom_certificate_path", None))
+        else getattr(api.client, "_use_tls_verify", True)
+    )
+    await _throttle()
+    try:
+        async with httpx.AsyncClient(cookies=api.client.cookies, verify=verify, follow_redirects=True) as client:
+            resp = await client.delete(url, headers=headers)
+        resp.raise_for_status()
+        await api.client._check_response(resp)
+        logger.info("Cleared HWIDs for {} on Primary", email)
+        return True
+    except Exception as e:
+        logger.warning("clear_client_hwids_on_panel failed for {}: {}", email, e)
+        return False
+
+
+async def get_inbound_options(api: AsyncApi | None = None) -> list[dict]:
+    """Получить легковесный список инбаундов через panel/api/inbounds/options (id, remark, protocol, port)."""
+    if api is None:
+        api = await get_api()
+    url = api.client._url("panel/api/inbounds/options")
+    await _throttle()
+    try:
+        resp = await api.client._get(url, {"Accept": "application/json"})
+        data = resp.json()
+        opts = data.get(ApiFields.OBJ) or []
+        if isinstance(opts, list) and opts:
+            return opts
+    except Exception as e:
+        logger.debug("inbounds/options failed, falling back: {}", e)
+    inbounds = await list_inbounds(api)
+    return [
+        {
+            "id": getattr(ib, "id", None) or (ib.get("id") if isinstance(ib, dict) else None),
+            "remark": getattr(ib, "remark", "") or (ib.get("remark", "") if isinstance(ib, dict) else ""),
+            "protocol": getattr(ib, "protocol", "") or (ib.get("protocol", "") if isinstance(ib, dict) else ""),
+            "port": getattr(ib, "port", 0) or (ib.get("port", 0) if isinstance(ib, dict) else 0),
+        }
+        for ib in inbounds
+    ]
+

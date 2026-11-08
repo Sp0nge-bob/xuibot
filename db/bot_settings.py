@@ -18,6 +18,14 @@ SETTING_BACKUP_INTERVAL = "backup_interval"
 SETTING_HAPP_CRYPTO_MODE = "happ_crypto_mode"
 SETTING_TRIAL_LIMIT_IP = "trial_limit_ip"
 SETTING_PAID_LIMIT_IP = "paid_limit_ip"
+SETTING_TRIAL_ENABLED = "trial_enabled"
+SETTING_TRIAL_DAYS = "trial_days"
+SETTING_TRIAL_TRAFFIC_GB = "trial_traffic_gb"
+SETTING_TRIAL_LIMIT_HWID = "trial_limit_hwid"
+SETTING_TRIAL_INBOUND_IDS = "trial_inbound_ids"
+SETTING_PAID_DEFAULT_TRAFFIC_GB = "paid_default_traffic_gb"
+SETTING_PAID_LIMIT_HWID = "paid_limit_hwid"
+SETTING_PAID_INBOUND_IDS = "paid_inbound_ids"
 SETTING_PRIVACY_POLICY_URL = "privacy_policy_url"
 SETTING_TERMS_OF_SERVICE_URL = "terms_of_service_url"
 SETTING_REFUND_POLICY_URL = "refund_policy_url"
@@ -397,6 +405,146 @@ async def set_paid_limit_ip(value: int) -> int:
     val = max(0, int(value))
     await set_setting(SETTING_PAID_LIMIT_IP, str(val))
     return val
+
+
+async def is_trial_enabled() -> bool:
+    raw = await get_setting(SETTING_TRIAL_ENABLED)
+    if raw is None:
+        return bool(getattr(settings, "TRIAL_DEFAULT_ENABLED", True))
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+async def set_trial_enabled(enabled: bool) -> bool:
+    await set_setting(SETTING_TRIAL_ENABLED, "1" if enabled else "0")
+    return enabled
+
+
+async def get_trial_days() -> int:
+    raw = await get_setting(SETTING_TRIAL_DAYS)
+    if raw is None:
+        return max(1, int(getattr(settings, "TRIAL_DEFAULT_DAYS", 3)))
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 3
+
+
+async def set_trial_days(days: int) -> int:
+    val = max(1, int(days))
+    await set_setting(SETTING_TRIAL_DAYS, str(val))
+    return val
+
+
+async def get_trial_traffic_gb() -> int:
+    raw = await get_setting(SETTING_TRIAL_TRAFFIC_GB)
+    if raw is None:
+        return max(0, int(getattr(settings, "TRIAL_DEFAULT_TRAFFIC_GB", 15)))
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 15
+
+
+async def set_trial_traffic_gb(gb: int) -> int:
+    val = max(0, int(gb))
+    await set_setting(SETTING_TRIAL_TRAFFIC_GB, str(val))
+    return val
+
+
+async def get_trial_limit_hwid() -> int:
+    raw = await get_setting(SETTING_TRIAL_LIMIT_HWID)
+    if raw is None:
+        return max(0, int(getattr(settings, "TRIAL_LIMIT_HWID", 3)))
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 3
+
+
+async def set_trial_limit_hwid(limit: int) -> int:
+    val = max(0, int(limit))
+    await set_setting(SETTING_TRIAL_LIMIT_HWID, str(val))
+    return val
+
+
+async def get_paid_default_traffic_gb() -> int:
+    raw = await get_setting(SETTING_PAID_DEFAULT_TRAFFIC_GB)
+    if raw is None:
+        return max(0, int(getattr(settings, "PAID_DEFAULT_TRAFFIC_GB", 0)))
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 0
+
+
+async def set_paid_default_traffic_gb(gb: int) -> int:
+    val = max(0, int(gb))
+    await set_setting(SETTING_PAID_DEFAULT_TRAFFIC_GB, str(val))
+    return val
+
+
+async def get_paid_limit_hwid() -> int:
+    raw = await get_setting(SETTING_PAID_LIMIT_HWID)
+    if raw is None:
+        return max(0, int(getattr(settings, "PAID_LIMIT_HWID", 0)))
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 0
+
+
+async def set_paid_limit_hwid(limit: int) -> int:
+    val = max(0, int(limit))
+    await set_setting(SETTING_PAID_LIMIT_HWID, str(val))
+    return val
+
+
+async def get_trial_inbound_ids() -> List[int]:
+    raw = await get_setting(SETTING_TRIAL_INBOUND_IDS)
+    if raw and raw.strip():
+        return _parse_inbound_ids(raw)
+    return await get_subscription_inbound_ids()
+
+
+async def set_trial_inbound_ids(inbound_ids: List[int]) -> str:
+    val = ",".join(str(x) for x in inbound_ids)
+    await set_setting(SETTING_TRIAL_INBOUND_IDS, val)
+    return val
+
+
+async def clear_trial_inbound_ids_override() -> None:
+    await delete_setting(SETTING_TRIAL_INBOUND_IDS)
+
+
+async def get_paid_inbound_ids() -> List[int]:
+    raw = await get_setting(SETTING_PAID_INBOUND_IDS)
+    if raw and raw.strip():
+        return _parse_inbound_ids(raw)
+    return await get_subscription_inbound_ids()
+
+
+async def set_paid_inbound_ids(inbound_ids: List[int]) -> str:
+    val = ",".join(str(x) for x in inbound_ids)
+    await set_setting(SETTING_PAID_INBOUND_IDS, val)
+    return val
+
+
+async def clear_paid_inbound_ids_override() -> None:
+    await delete_setting(SETTING_PAID_INBOUND_IDS)
+
+
+async def get_inbound_ids_for_email(email: str) -> List[int]:
+    from config.trial import is_trial_email
+    if is_trial_email(email):
+        return await get_trial_inbound_ids()
+    return await get_paid_inbound_ids()
+
+
+async def get_limit_hwid_for_email(email: str) -> int:
+    from config.trial import is_trial_email
+    if is_trial_email(email):
+        return await get_trial_limit_hwid()
+    return await get_paid_limit_hwid()
 
 
 async def _sync_documents_with_env_on_startup(env_path: Optional["Path"] = None) -> None:

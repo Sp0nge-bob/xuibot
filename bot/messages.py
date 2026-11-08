@@ -2340,3 +2340,57 @@ def admin_promo_detail_text(p: dict) -> str:
         f"На пользователя: <b>{per_user_str}</b> раз\n"
         f"Действует до: {valid_str}"
     )
+
+
+def admin_promo_uses_text(
+    promo: dict,
+    uses: list[dict],
+    page: int,
+    total_pages: int,
+    total_count: int,
+) -> str:
+    lines = [
+        f"👥 <b>Активации промокода <code>{promo.get('code')}</code></b>",
+        f"Всего активаций: <b>{total_count}</b> (стр. {page + 1}/{total_pages})",
+        "━━━━━━━━━━━━━━━━",
+        "",
+    ]
+    if not uses:
+        lines.append("<i>Активаций пока нет.</i>")
+    else:
+        for idx, u in enumerate(uses, 1):
+            is_rev = bool(u.get("is_revoked"))
+            status = "🚫 <b>ОТОЗВАН</b>" if is_rev else "✅ Активен"
+            uname = f"@{u['username']}" if u.get("username") else f"ID <code>{u['tg_id']}</code>"
+            date = str(u.get("used_at") or "")[:19]
+            lines.append(f"{idx}. {uname} — {status} (<code>{date}</code>)")
+    lines.append("\n<i>Выберите пользователя ниже для информации или отзыва тарифа.</i>")
+    return "\n".join(lines)
+
+
+def admin_promo_use_detail_text(use: dict) -> str:
+    is_rev = bool(use.get("is_revoked"))
+    status = "🚫 <b>Отозван</b>" if is_rev else "✅ <b>Активен</b>"
+    uname = f"@{use['username']}" if use.get("username") else "—"
+    fname = use.get("first_name") or "—"
+    end_date = use.get("end_date") or "—"
+    lines = [
+        f"🎫 <b>Активация #{use['use_id']} (промокод <code>{use.get('code')}</code>)</b>",
+        "━━━━━━━━━━━━━━━━",
+        f"👤 Пользователь: {uname} ({fname})",
+        f"🆔 Telegram ID: <code>{use['tg_id']}</code>",
+        f"📅 Дата активации: <code>{str(use.get('used_at') or '')[:19]}</code>",
+        f"📊 Статус: {status}",
+    ]
+    if is_rev:
+        lines.append(f"⏰ Дата отзыва: <code>{str(use.get('revoked_at') or '')[:19]}</code>")
+    if use.get("subscription_id"):
+        sub_active = "✅ да" if use.get("sub_is_active") else "❌ нет"
+        lines.extend([
+            "",
+            f"🔑 Подписка ID: <b>#{use['subscription_id']}</b>",
+            f"👤 Email клиента: <code>{use.get('client_email') or '—'}</code>",
+            f"⏱ Окончание подписки: <code>{end_date}</code>",
+            f"⚡ Подписка активна: {sub_active}",
+        ])
+    return "\n".join(lines)

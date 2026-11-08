@@ -9,6 +9,7 @@ from config.trial import (
 )
 from db import database as db
 from db import trial_grants as trial_db
+from db import bot_settings as bot_settings_db
 from db.bot_settings import get_subscription_inbound_count
 from services.fulfillment import (
     FulfillmentResult,
@@ -22,7 +23,11 @@ from services.fulfillment_text import (
     sub_link_caption_lines,
     sub_link_standalone_message,
 )
-from services.limit_ip import format_connections_limit_line, get_trial_limit_ip
+from services.limit_ip import (
+    format_connections_limit_line,
+    format_hwid_limit_line,
+    get_trial_limit_ip,
+)
 from services.node_sync import schedule_secondary_sync
 from services.subscription_admin import admin_reset_all_trials, admin_reset_trial_for_user
 from services.xui import provision_client
@@ -30,6 +35,8 @@ from utils.utc import days_from_now_ms, ms_to_utc_iso, parse_utc
 
 
 async def get_trial_button_visible(tg_id: int, *, active_subs: list[dict] | None = None) -> bool:
+    if not await bot_settings_db.is_trial_enabled():
+        return False
     ok, _ = await trial_db.can_claim_trial(tg_id, active_subs=active_subs)
     return ok
 
@@ -50,20 +57,27 @@ def _get_trial_lock(tg_id: int) -> asyncio.Lock:
 
 
 async def claim_trial(tg_id: int) -> FulfillmentResult:
+    if not await bot_settings_db.is_trial_enabled():
+        raise ValueError("Пробный период временно отключен администратором.")
+
     async with _get_trial_lock(tg_id):
         ok, reason = await trial_db.can_claim_trial(tg_id)
         if not ok:
             raise ValueError(reason)
 
+        trial_days = await bot_settings_db.get_trial_days()
+        trial_traffic_gb = await bot_settings_db.get_trial_traffic_gb()
+        limit_hwid = await bot_settings_db.get_trial_limit_hwid()
+
         email = trial_client_email(tg_id)
-        end_ms = days_from_now_ms(TRIAL_DAYS)
+        end_ms = days_from_now_ms(trial_days)
         end_iso = ms_to_utc_iso(end_ms)
         import uuid
         new_client_uuid = str(uuid.uuid4())
         email, sub_id, sub_link = await provision_client(
             tg_id=tg_id,
-            plan_days=TRIAL_DAYS,
-            traffic_gb=TRIAL_TRAFFIC_GB,
+            plan_days=trial_days,
+            traffic_gb=trial_traffic_gb,
             client_email=email,
             client_uuid=new_client_uuid,
             target_expiry_ms=end_ms,
@@ -76,23 +90,25 @@ async def claim_trial(tg_id: int) -> FulfillmentResult:
             client_email=email,
             client_uuid=new_client_uuid,
             sub_id=sub_id,
-            days=TRIAL_DAYS,
-            traffic_gb=TRIAL_TRAFFIC_GB,
+            days=trial_days,
+            traffic_gb=trial_traffic_gb,
             end_date=end_iso,
         )
         await trial_db.record_trial_grant(tg_id, sub_db_id)
         schedule_secondary_sync(sub_db_id)
 
-    inbound_count = await get_subscription_inbound_count()
+    inbound_count = len(await bot_settings_db.get_trial_inbound_ids())
     limit_ip = await get_trial_limit_ip()
     end_date = parse_utc(end_iso).strftime("%d.%m.%Y")
+    traffic_str = f"{trial_traffic_gb} ГБ" if trial_traffic_gb > 0 else "без лимита"
     lines = [
         "✅ <b>Пробный период активирован!</b>",
         "━━━━━━━━━━━━━━━━",
         "",
-        f"⏱ Срок: <b>{TRIAL_DAYS} дн.</b> (до {end_date})",
-        f"📊 Трафик: <b>{TRIAL_TRAFFIC_GB} ГБ</b>",
+        f"⏱ Срок: <b>{trial_days} дн.</b> (до {end_date})",
+        f"📊 Трафик: <b>{traffic_str}</b>",
         format_connections_limit_line(limit_ip),
+        format_hwid_limit_line(limit_hwid),
         f"👤 Клиент: <code>{email}</code>",
         qr_and_sync_footer(inbound_count),
         "",

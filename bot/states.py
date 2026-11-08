@@ -43,6 +43,10 @@ class AdminStates(StatesGroup):
     waiting_broadcast_message = State()
     waiting_bulk_days_custom = State()
     waiting_email_bonus_days = State()
+    waiting_default_sub_days = State()
+    waiting_default_sub_traffic = State()
+    waiting_default_sub_limit_ip = State()
+    waiting_default_sub_limit_hwid = State()
 
 
 class AdminPricingStates(StatesGroup):

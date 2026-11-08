@@ -775,6 +775,21 @@ async def add_grant_bonus_days(subscription_id: int, days: int) -> None:
         await db.commit()
 
 
+async def subtract_grant_bonus_days(subscription_id: int, days: int) -> None:
+    """Уменьшить grant_bonus_days при отзыве grant-промокода."""
+    extra = int(days)
+    if extra <= 0:
+        return
+    async with get_db() as db:
+        await db.execute(
+            """UPDATE subscriptions
+               SET grant_bonus_days = MAX(0, COALESCE(grant_bonus_days, 0) - ?)
+               WHERE id = ?""",
+            (extra, subscription_id),
+        )
+        await db.commit()
+
+
 async def extend_subscription_record(subscription_id: int, additional_days: int) -> str:
     from utils.utc import add_days_utc, parse_utc, utc_now
 

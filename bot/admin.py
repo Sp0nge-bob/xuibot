@@ -27,6 +27,8 @@ from .messages import (
     admin_plans_text,
     admin_promos_text,
     admin_promo_detail_text,
+    admin_promo_uses_text,
+    admin_promo_use_detail_text,
     admin_sub_orders_list_text,
     admin_trial_menu_text,
     admin_trial_reset_all_confirm_text,
@@ -62,6 +64,9 @@ from .admin_keyboards import (
     admin_plans_kb,
     admin_promos_kb,
     admin_promo_detail_kb,
+    admin_promo_uses_kb,
+    admin_promo_use_detail_kb,
+    admin_promo_revoke_confirm_kb,
     admin_promo_type_kb,
     admin_promo_grant_plans_kb,
     admin_users_kb,
@@ -824,6 +829,28 @@ async def cb_admin_rotate_link_do(cb: CallbackQuery, state: FSMContext):
     )
 
 
+@router.callback_query(F.data.regexp(r"^adm:sub:clear_hwid:\d+$"))
+async def cb_admin_sub_clear_hwid(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    sub_id = int(cb.data.rsplit(":", 1)[1])
+    sub = await db.get_subscription_by_id(sub_id)
+    if not sub:
+        await safe_cb_answer(cb, "Подписка не найдена", show_alert=True)
+        return
+    email = str(sub.get("client_email") or "")
+    if not email:
+        await safe_cb_answer(cb, "У подписки нет email клиента", show_alert=True)
+        return
+    from services.xui import clear_client_hwids_on_panel
+    ok = await clear_client_hwids_on_panel(email)
+    if ok:
+        await safe_cb_answer(cb, "✅ Привязки HWID устройств клиента очищены на панели 3x-ui!", show_alert=True)
+    else:
+        await safe_cb_answer(cb, "⚠️ Не удалось очистить HWID (проверьте логи панели)", show_alert=True)
+    await cb_admin_user_detail(cb, state)
+
+
 @router.callback_query(F.data.startswith("adm:del_sub:") & ~F.data.startswith("adm:del_sub:confirm:"))
 async def cb_admin_delete_sub_confirm(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
@@ -1168,11 +1195,16 @@ async def msg_promo_valid_days_step(message: Message, state: FSMContext):
     )
 
 
-def _promo_detail_kb(promo: dict):
+async def _promo_detail_kb(promo: dict):
+    is_grant = promo_db.is_grant_promo(promo)
+    uses_count = 0
+    if is_grant:
+        uses_count = await promo_db.count_promo_uses_detailed(int(promo["id"]))
     return admin_promo_detail_kb(
         int(promo["id"]),
         is_active=bool(promo.get("is_active")),
-        is_grant=promo_db.is_grant_promo(promo),
+        is_grant=is_grant,
+        uses_count=uses_count,
     )
 
 
@@ -1184,7 +1216,7 @@ async def _show_promo_detail(cb: CallbackQuery, promo_id: int, *, notice: str = 
     text = admin_promo_detail_text(promo)
     if notice:
         text = f"{text}\n\n{notice}"
-    await send_or_edit(cb, text, _promo_detail_kb(promo))
+    await send_or_edit(cb, text, await _promo_detail_kb(promo))
 
 
 @router.callback_query(F.data.regexp(r"^adm:promo:\d+$"))
@@ -1198,7 +1230,7 @@ async def cb_admin_promo_detail(cb: CallbackQuery, state: FSMContext):
         await safe_cb_answer(cb, "Промокод не найден", show_alert=True)
         return
     await safe_cb_answer(cb)
-    await send_or_edit(cb, admin_promo_detail_text(promo), _promo_detail_kb(promo))
+    await send_or_edit(cb, admin_promo_detail_text(promo), await _promo_detail_kb(promo))
 
 
 @router.callback_query(F.data.regexp(r"^adm:promo:edit_menu:\d+$"))
@@ -1267,7 +1299,7 @@ async def msg_promo_edit_code(message: Message, state: FSMContext):
     await state.clear()
     await message.answer(
         admin_promo_detail_text(promo) + "\n\n✅ Код обновлён",
-        reply_markup=_promo_detail_kb(promo),
+        reply_markup=await _promo_detail_kb(promo),
     )
 
 
@@ -1341,7 +1373,7 @@ async def msg_promo_edit_discount(message: Message, state: FSMContext):
     await state.clear()
     await message.answer(
         admin_promo_detail_text(promo) + "\n\n✅ Скидка обновлена",
-        reply_markup=_promo_detail_kb(promo),
+        reply_markup=await _promo_detail_kb(promo),
     )
 
 
@@ -1387,7 +1419,7 @@ async def cb_admin_promo_edit_grant_plan(cb: CallbackQuery, state: FSMContext):
     await send_or_edit(
         cb,
         admin_promo_detail_text(promo) + "\n\n✅ Тариф обновлён",
-        _promo_detail_kb(promo),
+        await _promo_detail_kb(promo),
     )
 
 
@@ -1441,7 +1473,7 @@ async def msg_promo_edit_max_uses(message: Message, state: FSMContext):
     await state.clear()
     await message.answer(
         admin_promo_detail_text(promo) + "\n\n✅ Лимит обновлён",
-        reply_markup=_promo_detail_kb(promo),
+        reply_markup=await _promo_detail_kb(promo),
     )
 
 
@@ -1495,7 +1527,7 @@ async def msg_promo_edit_per_user(message: Message, state: FSMContext):
     await state.clear()
     await message.answer(
         admin_promo_detail_text(promo) + "\n\n✅ Лимит на пользователя обновлён",
-        reply_markup=_promo_detail_kb(promo),
+        reply_markup=await _promo_detail_kb(promo),
     )
 
 
@@ -1549,7 +1581,7 @@ async def msg_promo_edit_valid_days(message: Message, state: FSMContext):
     await state.clear()
     await message.answer(
         admin_promo_detail_text(promo) + "\n\n✅ Срок обновлён",
-        reply_markup=_promo_detail_kb(promo),
+        reply_markup=await _promo_detail_kb(promo),
     )
 
 
@@ -1569,7 +1601,7 @@ async def cb_admin_promo_toggle(cb: CallbackQuery):
     await send_or_edit(
         cb,
         admin_promo_detail_text(promo),
-        _promo_detail_kb(promo),
+        await _promo_detail_kb(promo),
     )
 
 
@@ -1585,6 +1617,108 @@ async def cb_admin_promo_delete(cb: CallbackQuery):
     promos = await promo_db.list_promo_codes()
     await safe_cb_answer(cb, "Удалён")
     await send_or_edit(cb, admin_promos_text(promos), admin_promos_kb(promos))
+
+
+@router.callback_query(F.data.regexp(r"^adm:promo:uses:\d+:\d+$"))
+async def cb_admin_promo_uses(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    parts = cb.data.split(":")
+    promo_id = int(parts[3])
+    page = int(parts[4])
+    promo = await promo_db.get_promo_by_id(promo_id)
+    if not promo:
+        await safe_cb_answer(cb, "Промокод не найден", show_alert=True)
+        return
+
+    limit = 10
+    total = await promo_db.count_promo_uses_detailed(promo_id)
+    total_pages = max(1, (total + limit - 1) // limit) if total else 1
+    page = max(0, min(page, total_pages - 1))
+    offset = page * limit
+    uses = await promo_db.list_promo_uses_detailed(promo_id, limit=limit, offset=offset)
+
+    await safe_cb_answer(cb)
+    text = admin_promo_uses_text(promo, uses, page=page, total_pages=total_pages, total_count=total)
+    kb = admin_promo_uses_kb(promo_id, uses, page=page, total_pages=total_pages)
+    await send_or_edit(cb, text, kb)
+
+
+@router.callback_query(F.data.regexp(r"^adm:promo:use:\d+$"))
+async def cb_admin_promo_use_detail(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    use_id = int(cb.data.split(":")[3])
+    use = await promo_db.get_promo_use_by_id(use_id)
+    if not use:
+        await safe_cb_answer(cb, "Запись активации не найдена", show_alert=True)
+        return
+    await safe_cb_answer(cb)
+    text = admin_promo_use_detail_text(use)
+    kb = admin_promo_use_detail_kb(use)
+    await send_or_edit(cb, text, kb)
+
+
+@router.callback_query(F.data.regexp(r"^adm:promo:revoke:\d+:confirm$"))
+async def cb_admin_promo_revoke_confirm(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    use_id = int(cb.data.split(":")[3])
+    use = await promo_db.get_promo_use_by_id(use_id)
+    if not use:
+        await safe_cb_answer(cb, "Запись активации не найдена", show_alert=True)
+        return
+    if use.get("is_revoked"):
+        await safe_cb_answer(cb, "Тариф уже отозван", show_alert=True)
+        return
+
+    uname = f"@{use['username']}" if use.get("username") else f"ID {use['tg_id']}"
+    code = use.get("code") or "—"
+    text = (
+        "⚠️ <b>Подтверждение отзыва тарифа</b>\n"
+        "━━━━━━━━━━━━━━━━\n\n"
+        f"Пользователь: <b>{uname}</b> (<code>{use['tg_id']}</code>)\n"
+        f"Промокод: <code>{code}</code>\n"
+        f"Активация #{use_id}\n\n"
+        "При отзыве:\n"
+        "• Бонусный срок тарифа будет вычтен из подписки\n"
+        "• Если срок истечёт, клиент будет отключён на 3x-ui панели\n"
+        "• Счётчик использований промокода уменьшится на 1\n"
+        "• Пользователю будет отправлено уведомление в боте\n\n"
+        "Вы действительно хотите отозвать тариф?"
+    )
+    await safe_cb_answer(cb)
+    kb = admin_promo_revoke_confirm_kb(use_id, int(use["promo_id"]))
+    await send_or_edit(cb, text, kb)
+
+
+@router.callback_query(F.data.regexp(r"^adm:promo:revoke:\d+:do$"))
+async def cb_admin_promo_revoke_do(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    use_id = int(cb.data.split(":")[3])
+    await safe_cb_answer(cb, "Отзываем тариф…")
+    from services.grant_revoke import revoke_grant_promo_use
+    try:
+        await revoke_grant_promo_use(
+            use_id,
+            admin_tg_id=cb.from_user.id,
+            bot_instance=cb.bot,
+        )
+    except ValueError as e:
+        await safe_cb_answer(cb, f"Ошибка: {e}", show_alert=True)
+        return
+    except Exception as e:
+        logger.exception("Revoke grant promo use failed: {}", e)
+        await safe_cb_answer(cb, f"Сбой: {e}", show_alert=True)
+        return
+
+    await safe_cb_answer(cb, "✅ Тариф успешно отозван!", show_alert=True)
+    use = await promo_db.get_promo_use_by_id(use_id)
+    if use:
+        text = admin_promo_use_detail_text(use)
+        kb = admin_promo_use_detail_kb(use)
+        await send_or_edit(cb, text, kb)
 
 
 async def _active_trial_count() -> int:

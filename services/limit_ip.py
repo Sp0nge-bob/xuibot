@@ -11,6 +11,12 @@ def format_connections_limit_line(limit: int) -> str:
     return f"📱 Одновременных подключений: <b>{limit}</b>"
 
 
+def format_hwid_limit_line(limit: int) -> str:
+    if limit <= 0:
+        return "🔒 Лимит устройств (HWID): <b>без лимита</b>"
+    return f"🔒 Лимит устройств (HWID): <b>{limit}</b>"
+
+
 async def get_trial_limit_ip() -> int:
     return await bot_settings_db.get_trial_limit_ip()
 
@@ -20,9 +26,11 @@ async def get_paid_limit_ip() -> int:
 
 
 async def resolve_limit_ip_for_email(email: str) -> int:
-    if is_trial_email(email):
-        return await get_trial_limit_ip()
-    return await get_paid_limit_ip()
+    return await bot_settings_db.get_limit_ip_for_email(email)
+
+
+async def resolve_limit_hwid_for_email(email: str) -> int:
+    return await bot_settings_db.get_limit_hwid_for_email(email)
 
 
 async def apply_limit_ip_settings_on_primary(*, kind: str | None = None) -> dict[str, int]:
