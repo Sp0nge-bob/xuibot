@@ -56,7 +56,7 @@ async def apply_limit_ip_settings_on_primary(*, kind: str | None = None) -> dict
     stats = {"updated": 0, "skipped": 0, "missing": 0, "failed": 0}
 
     for sub in await db.get_all_active_subscriptions():
-        email = str(sub.get("client_email") or "")
+        email = str(sub.get("client_email") or sub.get("email_account") or "").strip()
         if not email:
             continue
         is_trial = is_trial_email(email)

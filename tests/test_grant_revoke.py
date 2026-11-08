@@ -255,3 +255,29 @@ async def test_revoke_grant_promo_use_twice_raises():
 async def test_revoke_invalid_use_id_raises():
     with pytest.raises(ValueError, match="не найдена"):
         await revoke_grant_promo_use(use_id=999999)
+
+
+@pytest.mark.asyncio
+async def test_revoke_grant_promo_web_user_null_tg_id():
+    """Проверка отзыва промокода, активированного веб-пользователем (tg_id=None)."""
+    promo = await promo_db.create_promo_code(
+        code="GRANT_WEB_TEST",
+        discount_type="grant",
+        discount_value=0,
+        plan_ids=["1m"],
+        promo_type="grant",
+    )
+    # Записываем активацию без tg_id с email_account
+    async with db.get_db() as conn:
+        await conn.execute(
+            """INSERT INTO promo_uses (promo_id, tg_id, email_account, used_at)
+               VALUES (?, NULL, 'webuser@caelix.test', CURRENT_TIMESTAMP)""",
+            (promo["id"],),
+        )
+        await conn.commit()
+    uses = await promo_db.list_promo_uses_detailed(promo["id"])
+    use_id = uses[0]["use_id"]
+
+    res = await revoke_grant_promo_use(use_id=use_id, admin_tg_id=999)
+    assert res["success"] is True
+    assert res["tg_id"] is None

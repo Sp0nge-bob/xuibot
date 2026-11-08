@@ -21,7 +21,7 @@ async def bulk_add_days_to_all_active(days: int, *, admin_tg_id: int | None = No
     emails: list[str] = []
     seen: set[str] = set()
     for sub in subs:
-        email = str(sub.get("client_email") or "").strip()
+        email = str(sub.get("client_email") or sub.get("email_account") or "").strip()
         if not email or email in seen or not is_bot_client_email(email):
             continue
         seen.add(email)
@@ -52,10 +52,12 @@ async def bulk_add_days_to_all_active(days: int, *, admin_tg_id: int | None = No
         try:
             await db.extend_subscription_record(int(sub["id"]), days)
             db_updated += 1
-            tg_id = int(sub["tg_id"])
-            if tg_id not in notify_seen:
-                notify_seen.add(tg_id)
-                notify_ids.append(tg_id)
+            raw_tg = sub.get("tg_id")
+            if raw_tg:
+                tg_id = int(raw_tg)
+                if tg_id not in notify_seen:
+                    notify_seen.add(tg_id)
+                    notify_ids.append(tg_id)
         except Exception as e:
             db_failed += 1
             logger.error("Bulk extend DB sub #{}: {}", sub.get("id"), e)

@@ -1544,6 +1544,14 @@ async def reactivate_client_on_primary(
     resolved_sub_id = (sub_id or client.sub_id or "").strip() or secrets.token_urlsafe(12)[:16]
     resolved_limit = limit_ip if limit_ip is not None else await resolve_limit_ip_for_email(email)
     resolved_hwid = limit_hwid if limit_hwid is not None else await resolve_limit_hwid_for_email(email)
+    if total_gb <= 0:
+        try:
+            from db.bot_settings import get_traffic_gb_for_email
+            cfg_traffic = await get_traffic_gb_for_email(email)
+            if cfg_traffic > 0:
+                total_gb = cfg_traffic * 1024 * 1024 * 1024
+        except Exception:
+            pass
     await _unified_update_client(
         api,
         client,
@@ -1588,13 +1596,22 @@ async def provision_client(
     api = await get_api()
     email = client_email or f"tg{tg_id}"
     _assert_bot_client_email(email)
-    from db.bot_settings import get_inbound_ids_for_email, get_limit_hwid_for_email
+    from db.bot_settings import (
+        get_inbound_ids_for_email,
+        get_limit_hwid_for_email,
+        get_traffic_gb_for_email,
+    )
     inbound_ids = await get_inbound_ids_for_email(email)
     if not inbound_ids:
         inbound_ids = await get_subscription_inbound_ids()
     if not inbound_ids:
         raise ValueError("Нет инбаундов для создания подписки")
 
+    if traffic_gb <= 0:
+        try:
+            traffic_gb = await get_traffic_gb_for_email(email)
+        except Exception:
+            traffic_gb = 0
     total_gb = traffic_gb * 1024 * 1024 * 1024 if traffic_gb > 0 else 0
     if target_expiry_ms is not None:
         expiry_time = target_expiry_ms

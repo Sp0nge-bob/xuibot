@@ -356,20 +356,28 @@ async def _show_admin_user_sub_detail(
     if isinstance(target, CallbackQuery):
         await safe_cb_answer(target)
 
-    user = await db.get_or_create_user(sub["tg_id"])
-    label = _user_label(user.get("username"), user.get("first_name"), sub["tg_id"])
+    raw_tg = sub.get("tg_id")
+    if not raw_tg and sub.get("email_account"):
+        acc = await db.get_email_account_by_email(sub["email_account"])
+        if acc and acc.get("tg_id"):
+            raw_tg = acc["tg_id"]
+    sub_tg_id = int(raw_tg) if raw_tg else 0
+    user = (await db.get_user(sub_tg_id)) if sub_tg_id else {}
+    if not user and sub_tg_id:
+        user = await db.get_or_create_user(sub_tg_id)
+    label = _user_label(user.get("username"), user.get("first_name"), sub_tg_id or sub.get("email_account") or "web")
     kind = subscription_kind_label(sub.get("client_email"))
     paid_orders = await db.get_paid_orders_for_subscription(sub_id, limit=50)
     last_order = paid_orders[0] if paid_orders else None
     last_order = await enrich_order_with_referrer(last_order)
     grant_use = await promo_db.find_grant_use_heuristic_for_subscription(
-        tg_id=int(sub["tg_id"]),
+        tg_id=sub_tg_id,
         subscription_id=sub_id,
         start_date=str(sub.get("start_date") or "") or None,
     )
     trial_grant = None
-    if is_trial_email(sub.get("client_email")):
-        g = await trial_db.get_last_trial_grant(int(sub["tg_id"]))
+    if is_trial_email(sub.get("client_email")) and sub_tg_id:
+        g = await trial_db.get_last_trial_grant(sub_tg_id)
         if g:
             g_sub = g.get("subscription_id")
             if g_sub is None or int(g_sub) == sub_id:
@@ -378,7 +386,7 @@ async def _show_admin_user_sub_detail(
     text = admin_user_sub_detail_text(
         kind=kind,
         label=label,
-        tg_id=int(sub["tg_id"]),
+        tg_id=sub_tg_id,
         sub_id=sub_id,
         client_email=str(sub.get("client_email") or ""),
         end_date=str(sub.get("end_date") or ""),
@@ -653,14 +661,20 @@ async def _admin_do_extend_and_notify(
     sub = result["subscription"]
     new_end = result["new_end_iso"]
     notified = False
-    try:
-        await app_bot.send_message(
-            int(sub["tg_id"]),
-            admin_extend_notify_text(days=days, new_end_date=new_end),
-        )
-        notified = True
-    except Exception as e:
-        logger.warning("Admin extend notify tg_id={}: {}", sub.get("tg_id"), e)
+    raw_sub_tg = sub.get("tg_id")
+    if not raw_sub_tg and sub.get("email_account"):
+        acc = await db.get_email_account_by_email(sub["email_account"])
+        if acc and acc.get("tg_id"):
+            raw_sub_tg = acc["tg_id"]
+    if raw_sub_tg:
+        try:
+            await app_bot.send_message(
+                int(raw_sub_tg),
+                admin_extend_notify_text(days=days, new_end_date=new_end),
+            )
+            notified = True
+        except Exception as e:
+            logger.warning("Admin extend notify tg_id={}: {}", raw_sub_tg, e)
 
     text = admin_extend_done_text(days=days, new_end=new_end, notified=notified)
     kb = admin_user_detail_kb(
@@ -796,22 +810,28 @@ async def cb_admin_rotate_link_do(cb: CallbackQuery, state: FSMContext):
 
     sub = result["subscription"]
     notified = False
-    try:
-        from bot import bot as app_bot
-        from .keyboards import fulfillment_success_kb
+    raw_sub_tg = sub.get("tg_id")
+    if not raw_sub_tg and sub.get("email_account"):
+        acc = await db.get_email_account_by_email(sub["email_account"])
+        if acc and acc.get("tg_id"):
+            raw_sub_tg = acc["tg_id"]
+    if raw_sub_tg:
+        try:
+            from bot import bot as app_bot
+            from .keyboards import fulfillment_success_kb
 
-        await app_bot.send_message(
-            int(sub["tg_id"]),
-            admin_rotate_link_notify_text(link=result["link"]),
-            reply_markup=fulfillment_success_kb(
-                happ_url=result.get("happ_url"),
-                incy_url=result.get("incy_url"),
-                sub_id=sub_id,
-            ),
-        )
-        notified = True
-    except Exception as e:
-        logger.warning("Admin rotate notify tg_id={}: {}", sub.get("tg_id"), e)
+            await app_bot.send_message(
+                int(raw_sub_tg),
+                admin_rotate_link_notify_text(link=result["link"]),
+                reply_markup=fulfillment_success_kb(
+                    happ_url=result.get("happ_url"),
+                    incy_url=result.get("incy_url"),
+                    sub_id=sub_id,
+                ),
+            )
+            notified = True
+        except Exception as e:
+            logger.warning("Admin rotate notify tg_id={}: {}", raw_sub_tg, e)
 
     await send_or_edit(
         cb,
@@ -838,7 +858,7 @@ async def cb_admin_sub_clear_hwid(cb: CallbackQuery, state: FSMContext):
     if not sub:
         await safe_cb_answer(cb, "Подписка не найдена", show_alert=True)
         return
-    email = str(sub.get("client_email") or "")
+    email = str(sub.get("client_email") or sub.get("email_account") or "").strip()
     if not email:
         await safe_cb_answer(cb, "У подписки нет email клиента", show_alert=True)
         return

@@ -48,7 +48,7 @@ async def revoke_grant_promo_use(
     new_end_iso = None
 
     if sub:
-        email = str(sub.get("client_email") or "")
+        email = str(sub.get("client_email") or sub.get("email_account") or "").strip()
         paid_orders = await db.get_paid_orders_for_subscription(sub["id"], limit=1)
         full_revoke = (sub.get("order_id") is None and not paid_orders)
 
@@ -72,7 +72,13 @@ async def revoke_grant_promo_use(
     await promo_db.decrement_promo_used_count(promo_id)
 
     code_name = use.get("code") or "—"
-    tg_id = int(use["tg_id"])
+    raw_tg = use.get("tg_id")
+    tg_id = int(raw_tg) if raw_tg and int(raw_tg) > 0 else None
+    if not tg_id and use.get("email_account"):
+        acc = await db.get_email_account_by_email(use["email_account"])
+        if acc and acc.get("tg_id"):
+            tg_id = int(acc["tg_id"])
+
     logger.info(
         "Admin {} revoked grant use_id={} (code={}, tg_id={}, action={})",
         admin_tg_id, use_id, code_name, tg_id, action_taken,

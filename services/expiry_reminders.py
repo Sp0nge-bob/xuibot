@@ -46,7 +46,13 @@ async def send_expiry_reminders() -> dict[str, int]:
 
     by_tg: dict[int, list[dict[str, Any]]] = defaultdict(list)
     for sub in subs:
-        by_tg[int(sub["tg_id"])].append(sub)
+        raw_tg = sub.get("tg_id")
+        if not raw_tg and sub.get("email_account"):
+            acc = await db.get_email_account_by_email(sub["email_account"])
+            if acc and acc.get("tg_id"):
+                raw_tg = acc["tg_id"]
+        if raw_tg:
+            by_tg[int(raw_tg)].append(sub)
 
     from bot.keyboards import expiry_reminder_kb
     from bot.sender import send_message

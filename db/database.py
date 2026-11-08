@@ -216,6 +216,24 @@ async def _init_db_impl():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS client_hwid_devices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT NOT NULL,
+                fingerprint TEXT NOT NULL,
+                device_os TEXT,
+                os_version TEXT,
+                user_agent TEXT,
+                device_model TEXT,
+                first_seen TIMESTAMP,
+                last_seen TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(email, fingerprint)
+            )
+        """)
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_hwid_email ON client_hwid_devices(email)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_hwid_os ON client_hwid_devices(device_os)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_hwid_ua ON client_hwid_devices(user_agent)")
         await _create_indexes(db)
         await db.commit()
 
@@ -926,6 +944,19 @@ async def sync_web_subscriptions_for_user(tg_id: int) -> None:
         pass
 
 
+async def get_email_account_by_email(email: str) -> Optional[Dict[str, Any]]:
+    """Получить запись аккаунта по email из email_accounts."""
+    if not email:
+        return None
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT * FROM email_accounts WHERE email = ? LIMIT 1",
+            (email.strip().lower(),),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
 async def get_active_subscriptions(tg_id: int) -> List[Dict[str, Any]]:
     await sync_web_subscriptions_for_user(tg_id)
     async with get_db() as db:
@@ -940,7 +971,7 @@ async def get_active_subscriptions(tg_id: int) -> List[Dict[str, Any]]:
             return [dict(r) for r in rows]
 
 _SYNC_SUB_COLS = (
-    "id, tg_id, order_id, client_email, client_uuid, sub_id, "
+    "id, tg_id, order_id, client_email, email_account, client_uuid, sub_id, "
     "start_date, end_date, traffic_limit_gb, is_active, display_name"
 )
 

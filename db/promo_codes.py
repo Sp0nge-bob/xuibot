@@ -52,7 +52,7 @@ async def init_promo_tables():
             CREATE TABLE IF NOT EXISTS promo_uses (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 promo_id INTEGER NOT NULL,
-                tg_id INTEGER NOT NULL,
+                tg_id INTEGER,
                 order_id INTEGER,
                 used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(promo_id) REFERENCES promo_codes(id)
@@ -63,6 +63,10 @@ async def init_promo_tables():
         if "subscription_id" not in use_cols:
             await db.execute(
                 "ALTER TABLE promo_uses ADD COLUMN subscription_id INTEGER"
+            )
+        if "email_account" not in use_cols:
+            await db.execute(
+                "ALTER TABLE promo_uses ADD COLUMN email_account TEXT"
             )
         if "is_revoked" not in use_cols:
             await db.execute(
