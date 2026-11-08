@@ -9,6 +9,7 @@ from loguru import logger
 from config.plans import get_plan
 from db import database as db
 from db import tickets as tickets_db
+from utils.utc import utc_iso_to_ms
 from services.node_sync import schedule_secondary_sync
 from services.xui import (
     disable_client,
@@ -78,8 +79,7 @@ async def apply_refund_reversal(order: dict[str, Any]) -> dict[str, Any]:
         }
 
     new_end_iso, still_active = await db.shrink_subscription_record(sub_id, plan["days"])
-    new_end = datetime.fromisoformat(new_end_iso.replace("Z", ""))
-    new_expiry_ms = int(new_end.timestamp() * 1000)
+    new_expiry_ms = utc_iso_to_ms(new_end_iso)
 
     if still_active:
         if await get_unified_panel_client(email):

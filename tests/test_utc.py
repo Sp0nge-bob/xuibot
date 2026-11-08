@@ -65,3 +65,21 @@ def test_add_days_utc_month_boundary():
 
 def test_days_from_now_ms_from_zero():
     assert days_from_now_ms(30, from_ms=0) == 30 * _MS_PER_DAY
+
+
+def test_sub_desired_state_from_db_utc():
+    from services.xui import sub_desired_state_from_db
+
+    sub = {
+        "sub_id": "test_sid_123",
+        "end_date": "2026-12-18 18:31:04",
+        "is_active": 1,
+        "traffic_limit_gb": 100,
+    }
+    state = sub_desired_state_from_db(sub)
+    expected_ms = int(datetime(2026, 12, 18, 18, 31, 4, tzinfo=timezone.utc).timestamp() * 1000)
+    assert state["expiry_ms"] == expected_ms
+    assert state["sub_id"] == "test_sid_123"
+    assert state["total_gb"] == 100 * 1024 * 1024 * 1024
+    assert state["enable"] is True
+

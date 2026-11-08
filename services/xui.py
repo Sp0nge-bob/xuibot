@@ -1359,11 +1359,11 @@ async def update_client_limit_ip_on_primary(email: str, limit_ip: int) -> str:
     info = await _unified_get_client_info(api, email)
     if not info:
         return "missing"
-    client, _, _ = info
+    client, _, current_group = info
     target = max(0, int(limit_ip))
     if (client.limit_ip or 0) == target:
         return "skipped"
-    await _unified_update_client(api, client, limitIp=target)
+    await _unified_update_client(api, client, limitIp=target, current_group=current_group)
     logger.info("limitIp {} → {} on primary", email, target)
     return "updated"
 
@@ -1496,7 +1496,7 @@ async def reactivate_client_on_primary(
         raise ValueError(f"Клиент {email} не найден на основной для реактивации")
     from services.limit_ip import resolve_limit_ip_for_email
 
-    client, _, _ = info
+    client, _, current_group = info
     resolved_sub_id = (sub_id or client.sub_id or "").strip() or secrets.token_urlsafe(12)[:16]
     resolved_limit = limit_ip if limit_ip is not None else await resolve_limit_ip_for_email(email)
     await _unified_update_client(
@@ -1507,6 +1507,7 @@ async def reactivate_client_on_primary(
         subId=resolved_sub_id,
         enable=True,
         limitIp=resolved_limit,
+        current_group=current_group,
     )
     missing = await try_attach_missing_inbounds(api, email, sub_id=resolved_sub_id)
     if missing:
@@ -1796,9 +1797,9 @@ async def disable_client(email: str, inbound_id: Optional[int] = None) -> bool:
         if not info:
             logger.debug("disable_client: {} not found on Primary", email)
             return False
-        client, _, _ = info
+        client, _, current_group = info
         if client.enable:
-            await _unified_update_client(api, client, enable=False)
+            await _unified_update_client(api, client, enable=False, current_group=current_group)
             logger.info("Disabled client {} on Primary via _unified_update_client", email)
             return True
         return False
@@ -1808,15 +1809,17 @@ async def disable_client(email: str, inbound_id: Optional[int] = None) -> bool:
 
 
 def sub_desired_state_from_db(sub: dict) -> dict:
-    end = datetime.fromisoformat(str(sub["end_date"]).replace("Z", ""))
-    now = datetime.utcnow()
+    from utils.utc import utc_iso_to_ms, utc_now_ms
+
+    expiry_ms = utc_iso_to_ms(str(sub["end_date"]))
+    now_ms = utc_now_ms()
     traffic_gb = int(sub.get("traffic_limit_gb") or 0)
     total_gb = traffic_gb * 1024 * 1024 * 1024 if traffic_gb > 0 else 0
     return {
         "sub_id": sub.get("sub_id") or "",
-        "expiry_ms": int(end.timestamp() * 1000),
+        "expiry_ms": expiry_ms,
         "total_gb": total_gb,
-        "enable": bool(sub.get("is_active")) and end > now,
+        "enable": bool(sub.get("is_active")) and expiry_ms > now_ms,
     }
 
 
@@ -1860,7 +1863,7 @@ async def sync_client_state_on_node(
         )
         return "missing"
 
-    client, _, _ = info
+    client, _, current_group = info
     if not _client_needs_replica_update(
         client,
         expiry_ms=expiry_ms,
@@ -1877,6 +1880,7 @@ async def sync_client_state_on_node(
         totalGB=total_gb,
         subId=sub_id or client.sub_id or "",
         enable=enable,
+        current_group=current_group,
     )
     return "updated"
 

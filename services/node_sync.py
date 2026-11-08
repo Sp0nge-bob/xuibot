@@ -139,7 +139,7 @@ async def ensure_subscription_on_primary(sub: dict[str, Any]) -> str:
     from services.limit_ip import resolve_limit_ip_for_email
 
     desired_limit = await resolve_limit_ip_for_email(email)
-    client, _, _ = info
+    client, _, current_group = info
     needs_limit = (client.limit_ip or 0) != desired_limit
     if needs_limit or _client_needs_replica_update(
         client,
@@ -156,6 +156,7 @@ async def ensure_subscription_on_primary(sub: dict[str, Any]) -> str:
             subId=state["sub_id"] or client.sub_id or "",
             enable=state["enable"],
             limitIp=desired_limit,
+            current_group=current_group,
         )
         logger.info("Sync primary: обновлён {} (expiry/трафик из БД)", email)
         return "updated"
