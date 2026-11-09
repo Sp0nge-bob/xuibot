@@ -133,7 +133,7 @@ async def _admin_menu_context() -> tuple[dict[str, int], str]:
     summary = await nodes_db.nodes_summary()
     primary = await nodes_db.get_primary_node()
     primary_name = primary["name"] if primary else "—"
-    primary_inbounds = primary.get("inbound_ids") if primary else "—"
+    paid_ibs = await bot_settings_db.get_paid_inbound_ids()
     nodes_line = (
         f"🖧 Ноды: <b>{summary['total']}</b> "
         f"(healthy <b>{summary['healthy']}</b>/<b>{summary['enabled']}</b>)"
@@ -143,7 +143,7 @@ async def _admin_menu_context() -> tuple[dict[str, int], str]:
         "━━━━━━━━━━━━━━━━\n\n"
         f"{_admin_stats_block(stats, usage_line=usage_line)}\n\n"
         f"{nodes_line}\n"
-        f"★ Основная: <b>{primary_name}</b> · inbounds: <code>{primary_inbounds or '—'}</code>\n"
+        f"★ Основная: <b>{primary_name}</b> · шаблоны: <b>{len(paid_ibs)} инб.</b>\n"
         f"Группа 3x-ui: <code>{settings.XUI_CLIENT_GROUP}</code>\n\n"
         "<i>Выберите раздел ниже</i>"
     )

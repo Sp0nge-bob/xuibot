@@ -220,7 +220,7 @@ async def node_detail_text(node: dict) -> str:
         f"Host: <code>{_short_host(node['host'], 64)}</code>",
     ]
     if is_primary:
-        lines.append(f"Inbounds подписки: <code>{node.get('inbound_ids') or '—'}</code>")
+        lines.append("Инбаунды подписки: <i>управляются в «Дефолт-подписка»</i>")
     lines += [
         f"Привязка бота: {'✅ активна' if node.get('is_enabled') else '⭕ отвязана'}",
         "<i>Отвязка не выключает панель 3x-ui — бот просто не синхронизирует её.</i>",
@@ -352,17 +352,6 @@ async def _save_node_from_draft(
 
 
 async def _proceed_after_node_auth(message: Message, state: FSMContext) -> None:
-    data = await state.get_data()
-    if await _node_will_be_primary(data):
-        await state.set_state(AdminStates.waiting_node_inbounds)
-        await message.answer(
-            "ID инбаундов подписки через запятую\n"
-            "(только ★ основная; на ноды уйдёт через панель):\n"
-            "Пример: <code>1,16</code>",
-            parse_mode="HTML",
-            reply_markup=node_wizard_cancel_kb(),
-        )
-        return
     await _save_node_from_draft(message, state, inbound_ids=[])
 
 
@@ -790,10 +779,37 @@ async def cb_nodes_dedupe(cb: CallbackQuery):
 async def cb_nodes_health_all(cb: CallbackQuery):
     if not is_admin(cb.from_user.id):
         return
-    await safe_cb_answer(cb, "Проверяем все ноды…")
-    await check_all_nodes_health()
+    await safe_cb_answer(cb, "Запущена проверка нод…")
+    await send_or_edit(
+        cb,
+        "🩺 <b>Проверка доступности всех нод 3x-ui...</b>\n\n"
+        "<i>Пингуем серверы и проверяем API, пожалуйста, подождите...</i>",
+    )
+    results = await check_all_nodes_health()
+    healthy_cnt = sum(1 for r in results if r.get("ok"))
+    total_cnt = len(results)
+
+    report_lines = []
+    if total_cnt > 0 and healthy_cnt == total_cnt:
+        report_lines.append(f"✅ <b>Все ноды доступны ({healthy_cnt}/{total_cnt})!</b>")
+    else:
+        report_lines.append(f"⚠️ <b>Результат проверки: {healthy_cnt} из {total_cnt} нод онлайн</b>")
+
+    report_lines.append("")
+    for r in results:
+        name = r.get("name") or f"Нода #{r.get('node_id')}"
+        if r.get("ok"):
+            lat = r.get("latency_ms")
+            lat_str = f" · {lat} ms" if lat is not None else ""
+            report_lines.append(f"🟢 <b>{name}</b> — онлайн{lat_str}")
+        else:
+            err = r.get("error") or "не отвечает"
+            report_lines.append(f"🔴 <b>{name}</b> — ошибка: <i>{err[:60]}</i>")
+
+    report_box = "\n".join(report_lines)
     text, nodes, sync_disabled = await _nodes_list_bundle()
-    await send_or_edit(cb, text, nodes_list_kb(nodes, sync_disabled=sync_disabled))
+    full_text = f"{report_box}\n━━━━━━━━━━━━━━━━\n\n{text}"
+    await send_or_edit(cb, full_text, nodes_list_kb(nodes, sync_disabled=sync_disabled))
 
 
 @router.callback_query(F.data == "adm:nodes:sync")
