@@ -293,3 +293,28 @@ async def test_provision_client_resolves_all_settings():
         assert "limit_hwid" in call_kwargs
         assert "total_gb" in call_kwargs
 
+
+@pytest.mark.asyncio
+async def test_prune_phantom_inbound_ids():
+    """Проверка автоматической очистки фантомных ID инбаундов после миграции или удаления нод."""
+    # Задаем списки с устаревшими ID (13, 21, 35, 38, 41)
+    await bot_settings.set_paid_inbound_ids([1, 4, 5, 6, 9, 13, 21, 35, 38, 41])
+    await bot_settings.set_trial_inbound_ids([1, 4, 13, 21])
+    await bot_settings.set_subscription_inbound_ids([1, 4, 5, 13, 35])
+
+    # Доступные на новой панели ID
+    active_panel_ids = {1, 4, 5, 6, 9, 2, 7, 8}
+
+    pruned = await bot_settings.prune_phantom_inbound_ids(active_panel_ids)
+
+    assert pruned["paid_removed"] == [13, 21, 35, 38, 41]
+    assert pruned["trial_removed"] == [13, 21]
+
+    # Проверяем, что в базе остались только существующие ID
+    assert await bot_settings.get_paid_inbound_ids() == [1, 4, 5, 6, 9]
+    assert await bot_settings.get_trial_inbound_ids() == [1, 4]
+
+    raw_sub = await bot_settings.get_setting(bot_settings.SETTING_SUBSCRIPTION_INBOUNDS)
+    assert raw_sub == "1,4,5"
+
+

@@ -547,6 +547,59 @@ async def clear_paid_inbound_ids_override() -> None:
     await delete_setting(SETTING_PAID_INBOUND_IDS)
 
 
+async def prune_phantom_inbound_ids(valid_inbound_ids: set[int]) -> dict[str, list[int]]:
+    """
+    Удаляет фантомные ID инбаундов (которых нет на активной панели 3x-ui)
+    из настроек trial, paid, default и xui_nodes.
+    Возвращает словарь со списками удалённых ID.
+    """
+    if not valid_inbound_ids:
+        return {"paid_removed": [], "trial_removed": []}
+
+    paid = await get_paid_inbound_ids()
+    dead_paid = [x for x in paid if x not in valid_inbound_ids]
+    if dead_paid:
+        clean_paid = [x for x in paid if x in valid_inbound_ids]
+        if clean_paid:
+            await set_paid_inbound_ids(clean_paid)
+
+    trial = await get_trial_inbound_ids()
+    dead_trial = [x for x in trial if x not in valid_inbound_ids]
+    if dead_trial:
+        clean_trial = [x for x in trial if x in valid_inbound_ids]
+        if clean_trial:
+            await set_trial_inbound_ids(clean_trial)
+
+    # Чистка runtime subscription_inbounds
+    raw_sub = await get_setting(SETTING_SUBSCRIPTION_INBOUNDS)
+    if raw_sub and raw_sub.strip():
+        sub_ids = _parse_inbound_ids(raw_sub)
+        clean_sub = [x for x in sub_ids if x in valid_inbound_ids]
+        if clean_sub != sub_ids and clean_sub:
+            await set_subscription_inbound_ids(clean_sub)
+
+    # Чистка Primary ноды xui_nodes
+    try:
+        from db import xui_nodes as nodes_db
+        primary = await nodes_db.get_primary_node()
+        if primary and primary.get("id"):
+            raw_node_ibs = primary.get("inbound_ids") or []
+            if isinstance(raw_node_ibs, str):
+                node_ibs = [int(x.strip()) for x in raw_node_ibs.split(",") if x.strip().isdigit()]
+            else:
+                node_ibs = [int(x) for x in raw_node_ibs if str(x).isdigit()]
+            clean_node_ibs = [x for x in node_ibs if x in valid_inbound_ids]
+            if clean_node_ibs != node_ibs and clean_node_ibs:
+                await nodes_db.update_node(int(primary["id"]), inbound_ids=clean_node_ibs)
+    except Exception:
+        pass
+
+    return {
+        "paid_removed": sorted(dead_paid),
+        "trial_removed": sorted(dead_trial),
+    }
+
+
 async def get_inbound_ids_for_email(email: str) -> List[int]:
     from config.trial import is_trial_email
     if is_trial_email(email):

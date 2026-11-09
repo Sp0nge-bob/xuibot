@@ -42,6 +42,20 @@ async def _render_default_sub_screen(
     except Exception:
         all_inbounds = []
 
+    available_ids = {int(ib.get("id")) for ib in all_inbounds if ib.get("id") is not None}
+    if available_ids:
+        pruned = await bot_settings_db.prune_phantom_inbound_ids(available_ids)
+        if pruned["paid_removed"] or pruned["trial_removed"]:
+            paid_inbounds = await bot_settings_db.get_paid_inbound_ids()
+            trial_inbounds = await bot_settings_db.get_trial_inbound_ids()
+            notes: list[str] = []
+            if pruned["paid_removed"]:
+                notes.append(f"платная: {', '.join(str(x) for x in pruned['paid_removed'])}")
+            if pruned["trial_removed"]:
+                notes.append(f"триал: {', '.join(str(x) for x in pruned['trial_removed'])}")
+            prune_msg = f"🧹 <i>Удалены неактуальные ID инбаундов ({'; '.join(notes)})</i>"
+            notice = f"{notice}\n{prune_msg}" if notice else prune_msg
+
     lines = [
         "📋 <b>Дефолт-подписка клиента (Шаблоны)</b>",
         "━━━━━━━━━━━━━━━━",
@@ -143,6 +157,16 @@ async def _render_default_sub_screen(
                 )
             ])
 
+    # Кнопка ручной очистки, если вдруг остались фантомные ID
+    phantom_in_active = set(active_inbounds) - available_ids if available_ids else set()
+    if phantom_in_active:
+        kb_rows.append([
+            InlineKeyboardButton(
+                text=f"🧹 Удалить устаревшие ID ({len(phantom_in_active)} шт.)",
+                callback_data=f"adm:default_sub:prune:{tab}",
+            )
+        ])
+
     # Кнопка применения лимитов к существующим клиентам
     kb_rows.append([
         InlineKeyboardButton(
@@ -224,6 +248,24 @@ async def cb_default_sub_toggle_ib(cb: CallbackQuery, state: FSMContext):
         await bot_settings_db.set_paid_inbound_ids(sorted(current_ids))
 
     await safe_cb_answer(cb)
+    await _render_default_sub_screen(cb, tab=tab)
+
+
+@router.callback_query(F.data.startswith("adm:default_sub:prune:"))
+async def cb_default_sub_prune(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    tab = cb.data.split(":")[3]
+    try:
+        all_inbounds = await get_inbound_options()
+    except Exception:
+        all_inbounds = []
+    available_ids = {int(ib.get("id")) for ib in all_inbounds if ib.get("id") is not None}
+    if not available_ids:
+        await safe_cb_answer(cb, "Панель 3x-ui недоступна, очистка отложена", show_alert=True)
+        return
+    pruned = await bot_settings_db.prune_phantom_inbound_ids(available_ids)
+    await safe_cb_answer(cb, "Устаревшие инбаунды успешно удалены!")
     await _render_default_sub_screen(cb, tab=tab)
 
 
