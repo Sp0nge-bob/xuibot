@@ -10,6 +10,7 @@ from loguru import logger
 from config.settings import settings
 from db import database as db
 from db import xui_nodes as nodes_db
+from db import bot_settings as bot_settings_db
 from db import promo_codes as promo_db
 from db.promo_codes import PROMO_TYPE_GRANT
 from db.plan_prices import set_plan_price
