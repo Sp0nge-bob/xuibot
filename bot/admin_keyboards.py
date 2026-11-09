@@ -653,6 +653,13 @@ def diagnostics_kb(
             callback_data="adm:diagnostics:recs",
         )])
 
+    rows.append([
+        InlineKeyboardButton(
+            text="🧪 Тест оплаты (E2E)" if view != "sim_pay" else "• 🧪 Тест оплаты (E2E)",
+            callback_data="adm:diagnostics:sim_pay",
+        )
+    ])
+
     refresh_cb = (
         f"adm:diagnostics:{view}:refresh"
         if view != "summary"

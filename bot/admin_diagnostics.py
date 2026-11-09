@@ -24,7 +24,7 @@ _CACHE_TTL_SEC = 45.0
 _report_cache: dict[str, Any] | None = None
 _cache_at: float = 0.0
 
-_VALID_SECTIONS = frozenset({"proc", "web", "vpn", "store", "recs"})
+_VALID_SECTIONS = frozenset({"proc", "web", "vpn", "store", "recs", "sim_pay"})
 
 
 def _parse_diagnostics_cb(data: str) -> tuple[str, bool]:
@@ -102,6 +102,7 @@ def _loading_text(view: str) -> str:
         "vpn": "VPN",
         "store": "хранилище",
         "recs": "рекомендации",
+        "sim_pay": "пайплайн оплаты (E2E)",
     }
     label = labels.get(view, "данные")
     return screen(
@@ -124,9 +125,38 @@ async def _show_diagnostics(
     if refresh:
         _invalidate_cache()
 
-    await safe_cb_answer(cb, "Обновляем…" if refresh else None)
     recs_count = len((_report_cache or {}).get("recommendations") or [])
     has_issues = not (_report_cache or {}).get("overall_ok", True)
+
+    if view == "sim_pay":
+        await safe_cb_answer(cb, "Симулируем платёж...")
+        await send_or_edit(
+            cb,
+            screen("🧪 <b>Симуляция оплаты</b>", "Проверяем сквозной путь платежа (БД → Platega → Webhook → HMAC → 3x-ui)…"),
+            diagnostics_kb(view=view, has_issues=has_issues, recs_count=recs_count),
+        )
+        try:
+            from services.payment_simulation import (
+                run_payment_pipeline_simulation,
+                format_simulation_report_html,
+            )
+            sim_report = await run_payment_pipeline_simulation()
+            sim_text = format_simulation_report_html(sim_report)
+            await send_or_edit(
+                cb,
+                sim_text,
+                diagnostics_kb(view=view, has_issues=not sim_report.overall_ok, recs_count=recs_count),
+            )
+        except Exception as e:
+            logger.exception("Payment simulation failed: {}", e)
+            await send_or_edit(
+                cb,
+                screen("❌ <b>Ошибка симуляции оплаты</b>", f"<code>{type(e).__name__}: {str(e)[:200]}</code>"),
+                diagnostics_kb(view=view, has_issues=True, recs_count=recs_count),
+            )
+        return
+
+    await safe_cb_answer(cb, "Обновляем…" if refresh else None)
     await send_or_edit(
         cb,
         _loading_text(view),
