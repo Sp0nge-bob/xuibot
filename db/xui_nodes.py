@@ -408,10 +408,11 @@ async def get_secondary_nodes(*, healthy_only: bool = False) -> list[dict[str, A
 
 
 async def get_primary_inbound_ids() -> list[int]:
-    primary = await get_primary_node()
-    if not primary:
+    try:
+        from db.bot_settings import get_subscription_inbound_ids
+        return await get_subscription_inbound_ids()
+    except Exception:
         return settings.subscription_inbound_ids()
-    return parse_inbound_ids(primary.get("inbound_ids") or "")
 
 
 async def create_node(

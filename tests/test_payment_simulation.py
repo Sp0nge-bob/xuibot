@@ -30,6 +30,11 @@ async def test_run_payment_pipeline_simulation_structure():
         assert step.latency_ms >= 0
         assert step.details
 
+    # Проверяем, что критические локальные шаги (БД и HMAC) выполняются успешно
+    by_id = {s.step_id: s for s in report.steps}
+    assert by_id["db_order"].status == "ok", f"DB step failed: {by_id['db_order'].details}"
+    assert by_id["security_dedup"].status == "ok", f"Security step failed: {by_id['security_dedup'].details}"
+
     html = format_simulation_report_html(report)
     assert "Диагностика пайплайна оплаты" in html
     assert "База данных" in html

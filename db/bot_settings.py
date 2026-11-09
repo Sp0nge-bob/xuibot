@@ -114,14 +114,10 @@ async def get_subscription_inbound_ids_from_settings() -> List[int]:
 
 
 async def get_subscription_inbound_ids() -> List[int]:
-    """Инбаунды подписки — только с ★ основной ноды (админка), иначе bot_settings / .env."""
-    try:
-        from db.xui_nodes import get_primary_inbound_ids
-        primary_ids = await get_primary_inbound_ids()
-        if primary_ids:
-            return primary_ids
-    except Exception:
-        pass
+    """Инбаунды подписки — из bot_settings (paid/sub) или .env, без устаревшей привязки к xui_nodes."""
+    stored_paid = await get_setting(SETTING_PAID_INBOUND_IDS)
+    if stored_paid and stored_paid.strip():
+        return _parse_inbound_ids(stored_paid)
     return await get_subscription_inbound_ids_from_settings()
 
 

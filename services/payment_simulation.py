@@ -15,8 +15,8 @@ from typing import Any, List
 import httpx
 from loguru import logger
 
-from config import settings
-import db
+from config.settings import settings
+from db import database as db
 from db.connection import get_db
 from db.webhook_dedup import try_acquire_webhook
 from db.bot_settings import get_paid_inbound_ids
