@@ -5,24 +5,31 @@ from config.trial import is_trial_email
 from services.subscription_labels import subscription_short_label
 
 
-def group_subscriptions_by_tg(users: list[dict[str, Any]]) -> dict[int, list[dict]]:
-    by_tg: dict[int, list[dict]] = {}
+def group_subscriptions_by_tg(users: list[dict[str, Any]]) -> dict[Any, list[dict]]:
+    by_tg: dict[Any, list[dict]] = {}
     for u in users:
-        by_tg.setdefault(u["tg_id"], []).append(u)
+        tg_id = u.get("tg_id")
+        key = tg_id if tg_id else f"web:{u.get('email_account') or u.get('client_email') or u.get('subscription_id') or u.get('id')}"
+        by_tg.setdefault(key, []).append(u)
     return by_tg
 
 
 def unique_tg_users_from_subs(users: list[dict[str, Any]]) -> list[dict[str, Any]]:
     by_tg = group_subscriptions_by_tg(users)
     result: list[dict[str, Any]] = []
-    for tg_id, subs in by_tg.items():
+    for key, subs in by_tg.items():
         subs_sorted = sorted(subs, key=lambda s: s.get("end_date") or "", reverse=True)
         top = subs_sorted[0]
+        tg_id = top.get("tg_id")
         result.append({
             "tg_id": tg_id,
+            "subscription_id": top.get("subscription_id") or top.get("id"),
+            "email_account": top.get("email_account"),
+            "client_email": top.get("client_email"),
+            "display_name": top.get("display_name"),
             "username": top.get("username"),
             "first_name": top.get("first_name"),
-            "end_date": top["end_date"],
+            "end_date": top.get("end_date"),
             "sub_count": len(subs),
         })
     result.sort(key=lambda u: u.get("end_date") or "", reverse=True)
@@ -41,10 +48,12 @@ def split_connected_users(users: list[dict[str, Any]]) -> tuple[list[dict], list
 
 
 def tg_user_label(u: dict[str, Any]) -> str:
-    label = u.get("username") or u.get("first_name") or str(u["tg_id"])
-    if u.get("username"):
-        label = f"@{u['username']}"
-    return label
+    tg_id = u.get("tg_id")
+    if tg_id:
+        if u.get("username"):
+            return f"@{u['username']}"
+        return u.get("first_name") or str(tg_id)
+    return u.get("email_account") or u.get("client_email") or u.get("display_name") or "Web клиент"
 
 
 def admin_users_menu_text(*, paid_count: int, trial_count: int) -> str:

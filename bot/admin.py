@@ -401,10 +401,10 @@ async def _show_admin_user_sub_detail(
     category = (await state.get_data()).get("admin_user_category")
     kb = admin_user_detail_kb(
         sub_id,
-        sub["tg_id"],
+        sub_tg_id or None,
         from_search=from_search,
         category=category,
-        from_picker=from_picker,
+        from_picker=from_picker and bool(sub_tg_id),
         has_orders=bool(paid_orders),
     )
     if isinstance(target, CallbackQuery):
@@ -522,16 +522,29 @@ async def msg_admin_user_search(message: Message, state: FSMContext):
 
     unique_users = unique_tg_users_from_subs(subs)
     if len(unique_users) == 1:
-        tg_id = unique_users[0]["tg_id"]
-        user_subs = group_subscriptions_by_tg(subs)[tg_id]
-        await _show_admin_user_subs_picker(
-            message,
-            state,
-            tg_id,
-            subs=user_subs,
-            from_search=True,
-        )
-        return
+        top_user = unique_users[0]
+        tg_id = top_user.get("tg_id")
+        if tg_id:
+            user_subs = group_subscriptions_by_tg(subs)[tg_id]
+            await _show_admin_user_subs_picker(
+                message,
+                state,
+                tg_id,
+                subs=user_subs,
+                from_search=True,
+            )
+            return
+        else:
+            sub_id = top_user.get("subscription_id")
+            if sub_id:
+                await _show_admin_user_sub_detail(
+                    message,
+                    state,
+                    sub_id=sub_id,
+                    from_search=True,
+                    from_picker=False,
+                )
+                return
 
     await message.answer(
         admin_users_search_text(query, unique_users),
@@ -539,11 +552,16 @@ async def msg_admin_user_search(message: Message, state: FSMContext):
     )
 
 
-@router.callback_query(F.data.regexp(r"^adm:tg:\d+$"))
+@router.callback_query(F.data.startswith("adm:tg:"))
 async def cb_admin_tg_user(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
         return
-    tg_id = int(cb.data.split(":")[2])
+    parts = (cb.data or "").split(":")
+    raw_id = parts[2] if len(parts) > 2 else ""
+    if not raw_id.isdigit() or int(raw_id) <= 0:
+        await safe_cb_answer(cb, "Клиент не привязан к Telegram", show_alert=True)
+        return
+    tg_id = int(raw_id)
     data = await state.get_data()
     from_search = bool(data.get("admin_user_from_search"))
     await _show_admin_user_subs_picker(cb, state, tg_id, from_search=from_search)
@@ -566,7 +584,8 @@ async def cb_admin_user_detail(cb: CallbackQuery, state: FSMContext):
     if not sub or not sub.get("is_active"):
         await safe_cb_answer(cb, "Подписка не найдена", show_alert=True)
         return
-    from_picker = data.get("admin_user_picker_tg_id") == sub["tg_id"]
+    picker_tg = data.get("admin_user_picker_tg_id")
+    from_picker = bool(picker_tg) and (picker_tg == sub.get("tg_id"))
     await _show_admin_user_sub_detail(
         cb,
         state,
@@ -680,7 +699,7 @@ async def _admin_do_extend_and_notify(
     text = admin_extend_done_text(days=days, new_end=new_end, notified=notified)
     kb = admin_user_detail_kb(
         sub_id,
-        int(sub["tg_id"]),
+        int(raw_sub_tg) if raw_sub_tg else None,
         from_search=False,
         from_picker=False,
     )
@@ -869,7 +888,17 @@ async def cb_admin_sub_clear_hwid(cb: CallbackQuery, state: FSMContext):
         await safe_cb_answer(cb, "✅ Привязки HWID устройств клиента очищены на панели 3x-ui!", show_alert=True)
     else:
         await safe_cb_answer(cb, "⚠️ Не удалось очистить HWID (проверьте логи панели)", show_alert=True)
-    await cb_admin_user_detail(cb, state)
+    data = await state.get_data()
+    from_search = bool(data.get("admin_user_from_search"))
+    picker_tg = data.get("admin_user_picker_tg_id")
+    from_picker = bool(picker_tg) and (picker_tg == sub.get("tg_id"))
+    await _show_admin_user_sub_detail(
+        cb,
+        state,
+        sub_id=sub_id,
+        from_search=from_search,
+        from_picker=from_picker,
+    )
 
 
 @router.callback_query(F.data.startswith("adm:del_sub:") & ~F.data.startswith("adm:del_sub:confirm:"))
@@ -1853,7 +1882,12 @@ async def msg_admin_trial_reset_search(message: Message, state: FSMContext):
 async def cb_admin_trial_reset_confirm(cb: CallbackQuery):
     if not is_admin(cb.from_user.id):
         return
-    tg_id = int(cb.data.split(":")[2])
+    parts = (cb.data or "").split(":")
+    raw_id = parts[2] if len(parts) > 2 else ""
+    if not raw_id.isdigit() or int(raw_id) <= 0:
+        await safe_cb_answer(cb, "Клиент не привязан к Telegram", show_alert=True)
+        return
+    tg_id = int(raw_id)
     user = await db.get_or_create_user(tg_id)
     label = _user_label(user.get("username"), user.get("first_name"), tg_id)
     await safe_cb_answer(cb)

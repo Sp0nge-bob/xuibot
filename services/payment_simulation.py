@@ -395,6 +395,10 @@ async def run_payment_pipeline_simulation() -> PaymentSimulationReport:
             await db_conn.execute(
                 "DELETE FROM webhook_events WHERE tx_id LIKE 'probe_sim_diag_%'",
             )
+            await db_conn.execute(
+                "DELETE FROM payment_inbox WHERE tx_id LIKE 'probe_sim_diag_%' OR tx_id = ? OR tx_id LIKE 'sim_diag_%'",
+                (sim_tx_id,),
+            )
             await db_conn.commit()
     except Exception as e:
         logger.warning("Payment simulation clean-up failed for {}: {}", sim_tx_id, e)

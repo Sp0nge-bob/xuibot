@@ -51,6 +51,9 @@ async def test_payment_simulation_cleans_up_records():
             count_orders = (await cur.fetchone())[0]
         async with db_conn.execute("SELECT COUNT(*) FROM webhook_events WHERE tx_id LIKE 'sim_diag_%'") as cur:
             count_events = (await cur.fetchone())[0]
+        async with db_conn.execute("SELECT COUNT(*) FROM payment_inbox WHERE tx_id LIKE 'probe_sim_diag_%' OR tx_id LIKE 'sim_diag_%'") as cur:
+            count_inbox = (await cur.fetchone())[0]
 
     assert count_orders == 0
     assert count_events == 0
+    assert count_inbox == 0

@@ -2,6 +2,7 @@
 import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
+import time
 import uuid
 
 import aiosqlite
@@ -199,3 +200,56 @@ async def test_bot002_http_ack_contains_real_committed_body_even_without_queue_s
     response = await app.platega_webhook(request, None, None)
     assert response.status_code == 200
     assert (await inbox.claim_event()).payload == payload
+
+
+@pytest.mark.asyncio
+async def test_bot002_non_confirmed_unhandled_job_is_rejected_without_infinite_retry(inbox_db, monkeypatch):
+    from services import fulfillment_queue as queue
+    from services.payment_processor import PaymentProcessResult
+    from unittest.mock import AsyncMock
+    inbox, get_db = inbox_db
+
+    # Simulate a probe or unhandled PENDING callback
+    await inbox.persist_event("probe-tx", "PENDING", {"status": "PENDING"})
+    claim = await inbox.claim_event()
+    assert claim is not None
+
+    # Job is not handled (e.g. order not found)
+    monkeypatch.setattr(queue, "_process_job", AsyncMock(return_value=PaymentProcessResult(handled=False)))
+    await queue._process_claim(claim)
+
+    async with get_db() as connection:
+        async with connection.execute("SELECT state,error_code FROM payment_inbox WHERE tx_id='probe-tx'") as cursor:
+            row = await cursor.fetchone()
+    assert row == ("rejected", "NON_CONFIRMED_UNHANDLED")
+
+
+@pytest.mark.asyncio
+async def test_bot002_confirmed_unhandled_job_rejected_after_max_attempts(inbox_db, monkeypatch):
+    from services import fulfillment_queue as queue
+    from services.payment_processor import PaymentProcessResult
+    from unittest.mock import AsyncMock
+    inbox, get_db = inbox_db
+
+    await inbox.persist_event("confirmed-stuck-tx", "CONFIRMED", {"status": "CONFIRMED"})
+    monkeypatch.setattr(queue, "_process_job", AsyncMock(return_value=PaymentProcessResult(handled=False)))
+    monkeypatch.setattr(queue.settings, "FULFILLMENT_RETRY_ATTEMPTS", 2)
+
+    # Attempt 1: unhandled -> remains pending
+    claim1 = await inbox.claim_event(now=100)
+    assert claim1.attempts == 1
+    await queue._process_claim(claim1)
+    async with get_db() as connection:
+        async with connection.execute("SELECT state FROM payment_inbox WHERE tx_id='confirmed-stuck-tx'") as cursor:
+            assert await cursor.fetchone() == ("pending",)
+
+    # Attempt 2: reaches max attempts (2) -> rejected
+    claim2 = await inbox.claim_event(now=time.time() + 1000)
+    assert claim2 is not None
+    assert claim2.attempts == 2
+    await queue._process_claim(claim2)
+    async with get_db() as connection:
+        async with connection.execute("SELECT state,error_code FROM payment_inbox WHERE tx_id='confirmed-stuck-tx'") as cursor:
+            row = await cursor.fetchone()
+    assert row == ("rejected", "MAX_ATTEMPTS_EXCEEDED")
+

@@ -1139,10 +1139,10 @@ async def search_connected_users(query: str, limit: int = 25) -> List[Dict[str, 
         q = q[1:]
 
     base_sql = """
-        SELECT s.id AS subscription_id, u.tg_id, u.username, u.first_name,
-               s.end_date, s.client_email, s.sub_id, s.display_name
+        SELECT s.id AS subscription_id, s.tg_id, u.username, u.first_name,
+               s.end_date, s.client_email, s.sub_id, s.display_name, s.email_account
         FROM subscriptions s
-        JOIN users u ON u.tg_id = s.tg_id
+        LEFT JOIN users u ON u.tg_id = s.tg_id
         WHERE s.is_active = 1
     """
     async with get_db() as db:
@@ -1151,28 +1151,36 @@ async def search_connected_users(query: str, limit: int = 25) -> List[Dict[str, 
 
         email_q = normalize_email_query(q)
         if email_q:
-            sql = base_sql + " AND LOWER(s.client_email) = LOWER(?) ORDER BY s.end_date DESC LIMIT ?"
-            params: tuple = (email_q, limit)
+            sql = base_sql + """
+                AND (
+                    LOWER(s.client_email) = LOWER(?)
+                    OR LOWER(COALESCE(s.email_account, '')) = LOWER(?)
+                )
+                ORDER BY s.end_date DESC LIMIT ?
+            """
+            params: tuple = (email_q, email_q, limit)
         elif q.isdigit():
             from config.trial import trial_client_email
-            tg_id = int(q)
+            target_id = int(q)
             sql = base_sql + (
-                " AND (u.tg_id = ? OR s.client_email = ? OR s.client_email = ?"
+                " AND (s.tg_id = ? OR s.id = ? OR s.client_email = ? OR s.client_email = ?"
                 " OR s.client_email LIKE ?)"
                 " ORDER BY s.end_date DESC LIMIT ?"
             )
-            params = (tg_id, f"tg{tg_id}", trial_client_email(tg_id), f"tg{tg_id}_%", limit)
+            params = (target_id, target_id, f"tg{target_id}", trial_client_email(target_id), f"tg{target_id}_%", limit)
         else:
             pattern = f"%{q}%"
             sql = base_sql + """
                 AND (
                     LOWER(COALESCE(u.username, '')) LIKE LOWER(?)
                     OR LOWER(COALESCE(u.first_name, '')) LIKE LOWER(?)
-                    OR LOWER(s.client_email) LIKE LOWER(?)
+                    OR LOWER(COALESCE(s.client_email, '')) LIKE LOWER(?)
+                    OR LOWER(COALESCE(s.email_account, '')) LIKE LOWER(?)
+                    OR LOWER(COALESCE(s.display_name, '')) LIKE LOWER(?)
                 )
                 ORDER BY s.end_date DESC LIMIT ?
             """
-            params = (pattern, pattern, pattern, limit)
+            params = (pattern, pattern, pattern, pattern, pattern, limit)
         async with db.execute(sql, params) as cur:
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
@@ -1190,8 +1198,9 @@ async def count_connected_users(*, trial_only: Optional[bool] = None) -> int:
     clause = _connected_users_trial_clause(trial_only)
     async with get_db() as db:
         async with db.execute(
-            f"""SELECT COUNT(DISTINCT s.tg_id) FROM subscriptions s
-                INNER JOIN users u ON u.tg_id = s.tg_id
+            f"""SELECT COUNT(DISTINCT COALESCE(s.tg_id, s.email_account, s.client_email, s.id))
+                FROM subscriptions s
+                LEFT JOIN users u ON u.tg_id = s.tg_id
                 WHERE s.is_active = 1{clause}""",
         ) as cur:
             return (await cur.fetchone())[0]
@@ -1205,13 +1214,15 @@ async def get_connected_tg_users(
     clause = _connected_users_trial_clause(trial_only)
     async with get_db() as db:
         async with db.execute(
-            f"""SELECT u.tg_id, u.username, u.first_name,
-                      MAX(s.end_date) AS end_date,
-                      COUNT(s.id) AS sub_count
+            f"""SELECT s.tg_id, u.username, u.first_name,
+                       s.email_account, s.client_email, s.display_name,
+                       s.id AS subscription_id,
+                       MAX(s.end_date) AS end_date,
+                       COUNT(s.id) AS sub_count
                FROM subscriptions s
-               JOIN users u ON u.tg_id = s.tg_id
+               LEFT JOIN users u ON u.tg_id = s.tg_id
                WHERE s.is_active = 1{clause}
-               GROUP BY u.tg_id
+               GROUP BY COALESCE(s.tg_id, s.email_account, s.client_email, s.id)
                ORDER BY end_date DESC
                LIMIT ?""",
             (limit,),
@@ -1246,12 +1257,11 @@ async def get_connected_users(
 ) -> List[Dict[str, Any]]:
     clause = _connected_users_trial_clause(trial_only)
     async with get_db() as db:
-
         async with db.execute(
-            f"""SELECT s.id AS subscription_id, u.tg_id, u.username, u.first_name,
-                      s.end_date, s.client_email, s.sub_id, s.display_name
+            f"""SELECT s.id AS subscription_id, s.tg_id, u.username, u.first_name,
+                      s.end_date, s.client_email, s.sub_id, s.display_name, s.email_account
                FROM subscriptions s
-               JOIN users u ON u.tg_id = s.tg_id
+               LEFT JOIN users u ON u.tg_id = s.tg_id
                WHERE s.is_active = 1{clause}
                ORDER BY s.end_date DESC
                LIMIT ?""",

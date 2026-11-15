@@ -709,13 +709,21 @@ def admin_users_menu_kb(*, paid_count: int, trial_count: int) -> InlineKeyboardM
 
 
 def _admin_tg_user_button_label(u: dict) -> str:
-    label = u.get("username") or u.get("first_name") or str(u["tg_id"])
+    tg_id = u.get("tg_id")
+    if tg_id:
+        label = u.get("username") or u.get("first_name") or str(tg_id)
+        if u.get("username") and not label.startswith("@"):
+            label = f"@{label}"
+        icon = "👤"
+    else:
+        label = u.get("email_account") or u.get("client_email") or u.get("display_name") or "Web клиент"
+        icon = "🌐"
     if len(label) > 16:
         label = label[:13] + "..."
     end = (u.get("end_date") or "")[:10]
     sub_count = int(u.get("sub_count") or 1)
-    suffix = f" · {sub_count} подп." if sub_count > 1 else f" · {end}"
-    return f"👤 {label}{suffix}"
+    suffix = f" · {sub_count} подп." if sub_count > 1 else (f" · {end}" if end else "")
+    return f"{icon} {label}{suffix}"
 
 
 def admin_users_kb(
@@ -731,9 +739,11 @@ def admin_users_kb(
             callback_data="adm:users:search",
         )])
     for u in users:
+        tg_id = u.get("tg_id")
+        cb_data = f"adm:tg:{tg_id}" if tg_id else f"adm:user:{u.get('subscription_id') or u.get('id')}"
         rows.append([InlineKeyboardButton(
             text=_admin_tg_user_button_label(u),
-            callback_data=f"adm:tg:{u['tg_id']}",
+            callback_data=cb_data,
         )])
     back = "adm:users:search" if from_search else "adm:users"
     rows.append([InlineKeyboardButton(text="« Назад", callback_data=back)])
@@ -744,9 +754,11 @@ def admin_users_kb(
 def admin_users_search_kb(users: list) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     for u in users:
+        tg_id = u.get("tg_id")
+        cb_data = f"adm:tg:{tg_id}" if tg_id else f"adm:user:{u.get('subscription_id') or u.get('id')}:search"
         rows.append([InlineKeyboardButton(
             text=_admin_tg_user_button_label(u),
-            callback_data=f"adm:tg:{u['tg_id']}",
+            callback_data=cb_data,
         )])
     rows.append([InlineKeyboardButton(text="🔍 Новый поиск", callback_data="adm:users:search")])
     rows.append([InlineKeyboardButton(text="« К категориям", callback_data="adm:users")])
@@ -782,7 +794,7 @@ def admin_user_subs_kb(
 
 def admin_user_detail_kb(
     subscription_id: int,
-    tg_id: int,
+    tg_id: int | None,
     *,
     from_search: bool = False,
     category: str | None = None,
@@ -790,7 +802,7 @@ def admin_user_detail_kb(
     has_orders: bool = False,
 ) -> InlineKeyboardMarkup:
     del has_orders  # кнопка чеков всегда — пустой список тоже информативен
-    if from_picker:
+    if from_picker and tg_id:
         back = f"adm:tg:{tg_id}"
     elif from_search:
         back = "adm:users:search"
@@ -822,16 +834,21 @@ def admin_user_detail_kb(
             callback_data=f"adm:sub:clear_hwid:{subscription_id}",
         )],
     ]
-    rows.append([
-        InlineKeyboardButton(
-            text="🔄 Сброс пробного",
-            callback_data=f"adm:trial_reset:{tg_id}",
-        ),
+    action_row = []
+    if tg_id:
+        action_row.append(
+            InlineKeyboardButton(
+                text="🔄 Сброс пробного",
+                callback_data=f"adm:trial_reset:{tg_id}",
+            )
+        )
+    action_row.append(
         InlineKeyboardButton(
             text="🗑 Удалить",
             callback_data=f"adm:del_sub:{subscription_id}",
-        ),
-    ])
+        )
+    )
+    rows.append(action_row)
     rows.append([
         InlineKeyboardButton(text="« К списку", callback_data=back),
         InlineKeyboardButton(text="« Админ", callback_data="adm:menu"),

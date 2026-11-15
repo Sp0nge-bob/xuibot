@@ -201,6 +201,7 @@ async def _process_claim(claim: payment_inbox.InboxClaim) -> None:
     processing = asyncio.create_task(_process_job(job))
     heartbeat = asyncio.create_task(_renew_lease(claim))
     state, error_code = "pending", "UNHANDLED"
+    norm_status = (claim.status or "").upper()
     try:
         done, _ = await asyncio.wait((processing, heartbeat), return_when=asyncio.FIRST_COMPLETED)
         if heartbeat in done:
@@ -210,6 +211,11 @@ async def _process_claim(claim: payment_inbox.InboxClaim) -> None:
             state, error_code = "rejected", "INVALID_PAYMENT"
         elif result is not None and result.handled:
             state, error_code = "completed", None
+        else:
+            if norm_status != "CONFIRMED":
+                state, error_code = "rejected", "NON_CONFIRMED_UNHANDLED"
+            elif claim.attempts >= max(1, int(settings.FULFILLMENT_RETRY_ATTEMPTS)):
+                state, error_code = "rejected", "MAX_ATTEMPTS_EXCEEDED"
     except asyncio.CancelledError:
         # Keep the lease on shutdown: an external request may already be in flight.
         # Another process recovers the event after its deadline, with operation idempotency.
@@ -217,6 +223,8 @@ async def _process_claim(claim: payment_inbox.InboxClaim) -> None:
     except Exception as error:
         error_code = "PROCESSING_FAILED"
         logger.error("Durable webhook processing failed: {}", type(error).__name__)
+        if claim.attempts >= max(1, int(settings.FULFILLMENT_RETRY_ATTEMPTS)):
+            state, error_code = "rejected", "MAX_ATTEMPTS_EXCEEDED"
     finally:
         processing.cancel()
         heartbeat.cancel()
