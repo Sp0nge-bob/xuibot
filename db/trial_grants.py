@@ -76,10 +76,15 @@ async def can_claim_trial(
 
     grant = await get_last_trial_grant(tg_id)
     if grant:
-        granted_at = datetime.fromisoformat(str(grant["granted_at"]).replace("Z", ""))
-        if granted_at >= datetime.utcnow() - timedelta(days=TRIAL_COOLDOWN_DAYS):
-            next_at = granted_at + timedelta(days=TRIAL_COOLDOWN_DAYS)
-            return False, f"Пробный период уже использован. Снова доступен с {next_at.strftime('%d.%m.%Y')}."
+        try:
+            from utils.utc import parse_utc, utc_now
+
+            granted_at = parse_utc(str(grant["granted_at"]))
+            if granted_at >= utc_now() - timedelta(days=TRIAL_COOLDOWN_DAYS):
+                next_at = granted_at + timedelta(days=TRIAL_COOLDOWN_DAYS)
+                return False, f"Пробный период уже использован. Снова доступен с {next_at.strftime('%d.%m.%Y')}."
+        except Exception:
+            pass
 
     subs = active_subs if active_subs is not None else await db.get_active_subscriptions(tg_id)
     for sub in subs:

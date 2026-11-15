@@ -462,16 +462,18 @@ async def find_grant_use_heuristic_for_subscription(
         return rows[0]
 
     try:
-        start = datetime.fromisoformat(str(start_date).replace("Z", ""))
-    except ValueError:
+        from utils.utc import parse_utc
+
+        start = parse_utc(str(start_date))
+    except Exception:
         return rows[0]
 
     best = None
     best_delta = None
     for r in rows:
         try:
-            used = datetime.fromisoformat(str(r.get("used_at") or "").replace("Z", ""))
-        except ValueError:
+            used = parse_utc(str(r.get("used_at") or ""))
+        except Exception:
             continue
         delta = abs((used - start).total_seconds())
         # ±2 суток

@@ -78,9 +78,11 @@ async def _validate_promo_common(
     valid_until = promo.get("valid_until")
     if valid_until:
         try:
-            if datetime.fromisoformat(valid_until.replace("Z", "")) < utc_now():
+            from utils.utc import parse_utc
+
+            if parse_utc(valid_until) < utc_now():
                 return "Срок действия промокода истёк"
-        except ValueError:
+        except Exception:
             pass
 
     max_uses = promo.get("max_uses")

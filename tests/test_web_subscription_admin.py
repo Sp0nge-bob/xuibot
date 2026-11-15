@@ -200,3 +200,51 @@ async def test_show_admin_user_sub_detail_with_none_tg_id(mock_admin, monkeypatc
     callbacks = [b.callback_data for row in kb.inline_keyboard for b in row]
     assert "adm:tg:None" not in callbacks
     assert "adm:trial_reset:None" not in callbacks
+
+
+@pytest.mark.asyncio
+async def test_find_grant_use_heuristic_mismatched_timezones(monkeypatch):
+    """Проверка устойчивости эвристики grant к offset-naive и offset-aware датам."""
+    from db import promo_codes as p_db
+
+    fake_rows = [
+        {
+            "use_id": 1,
+            "tg_id": 999,
+            "used_at": "2026-11-15T12:00:00+00:00",  # aware
+            "subscription_id": None,
+            "promo_id": 10,
+            "code": "GRANTTEST",
+            "plan_ids": "1m",
+            "promo_type": "grant",
+        }
+    ]
+
+    monkeypatch.setattr(p_db, "get_grant_uses_for_subscription", AsyncMock(return_value=[]))
+
+    class FakeCursor:
+        async def fetchall(self):
+            return fake_rows
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            pass
+
+    class FakeDB:
+        def execute(self, *args, **kwargs):
+            return FakeCursor()
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            pass
+
+    monkeypatch.setattr(p_db, "get_db", lambda: FakeDB())
+
+    # start_date is naive SQLite timestamp
+    res = await p_db.find_grant_use_heuristic_for_subscription(
+        tg_id=999,
+        subscription_id=97,
+        start_date="2026-11-15 12:10:00",
+    )
+    assert res is not None
+    assert res["code"] == "GRANTTEST"

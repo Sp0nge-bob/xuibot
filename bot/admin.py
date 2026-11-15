@@ -371,11 +371,15 @@ async def _show_admin_user_sub_detail(
     paid_orders = await db.get_paid_orders_for_subscription(sub_id, limit=50)
     last_order = paid_orders[0] if paid_orders else None
     last_order = await enrich_order_with_referrer(last_order)
-    grant_use = await promo_db.find_grant_use_heuristic_for_subscription(
-        tg_id=sub_tg_id,
-        subscription_id=sub_id,
-        start_date=str(sub.get("start_date") or "") or None,
-    )
+    try:
+        grant_use = await promo_db.find_grant_use_heuristic_for_subscription(
+            tg_id=sub_tg_id,
+            subscription_id=sub_id,
+            start_date=str(sub.get("start_date") or "") or None,
+        )
+    except Exception as e:
+        logger.warning("Failed to find grant use heuristic for sub_id={}: {}", sub_id, e)
+        grant_use = None
     trial_grant = None
     if is_trial_email(sub.get("client_email")) and sub_tg_id:
         g = await trial_db.get_last_trial_grant(sub_tg_id)
