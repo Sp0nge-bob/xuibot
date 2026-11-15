@@ -37,8 +37,12 @@ async def safe_cb_answer(
         await cb.answer(text, show_alert=show_alert)
     except TelegramBadRequest as e:
         msg = str(e).lower()
-        if "query is too old" in msg or "query id is invalid" in msg:
-            logger.debug("Просроченный callback проигнорирован: {}", cb.data)
+        if (
+            "query is too old" in msg
+            or "query id is invalid" in msg
+            or "query is already answered" in msg
+        ):
+            logger.debug("Просроченный или уже отвеченный callback проигнорирован: {}", cb.data)
         else:
             raise
     except (TelegramNetworkError, asyncio.TimeoutError) as e:

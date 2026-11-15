@@ -586,13 +586,24 @@ async def cb_admin_user_detail(cb: CallbackQuery, state: FSMContext):
         return
     picker_tg = data.get("admin_user_picker_tg_id")
     from_picker = bool(picker_tg) and (picker_tg == sub.get("tg_id"))
-    await _show_admin_user_sub_detail(
-        cb,
-        state,
-        sub_id=sub_id,
-        from_search=from_search,
-        from_picker=from_picker,
-    )
+    try:
+        await _show_admin_user_sub_detail(
+            cb,
+            state,
+            sub_id=sub_id,
+            from_search=from_search,
+            from_picker=from_picker,
+        )
+    except Exception as e:
+        logger.exception("Failed to show admin user sub detail for sub_id={}: {}", sub_id, e)
+        try:
+            if cb.message:
+                await cb.message.answer(
+                    f"⚠️ Ошибка при открытии подписки #{sub_id}:\n<code>{html.escape(str(e))}</code>"
+                )
+        except Exception:
+            pass
+        await safe_cb_answer(cb, f"Ошибка: {e}", show_alert=True)
 
 
 @router.callback_query(F.data.regexp(r"^adm:network:\d+$"))
@@ -892,13 +903,24 @@ async def cb_admin_sub_clear_hwid(cb: CallbackQuery, state: FSMContext):
     from_search = bool(data.get("admin_user_from_search"))
     picker_tg = data.get("admin_user_picker_tg_id")
     from_picker = bool(picker_tg) and (picker_tg == sub.get("tg_id"))
-    await _show_admin_user_sub_detail(
-        cb,
-        state,
-        sub_id=sub_id,
-        from_search=from_search,
-        from_picker=from_picker,
-    )
+    try:
+        await _show_admin_user_sub_detail(
+            cb,
+            state,
+            sub_id=sub_id,
+            from_search=from_search,
+            from_picker=from_picker,
+        )
+    except Exception as e:
+        logger.exception("Failed to show admin user sub detail for sub_id={}: {}", sub_id, e)
+        try:
+            if cb.message:
+                await cb.message.answer(
+                    f"⚠️ Ошибка при открытии подписки #{sub_id}:\n<code>{html.escape(str(e))}</code>"
+                )
+        except Exception:
+            pass
+        await safe_cb_answer(cb, f"Ошибка: {e}", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("adm:del_sub:") & ~F.data.startswith("adm:del_sub:confirm:"))

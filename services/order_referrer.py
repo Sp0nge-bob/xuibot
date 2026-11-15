@@ -16,7 +16,10 @@ async def enrich_order_with_referrer(order: dict[str, Any] | None) -> dict[str, 
         return order
     if (order.get("promo_code") or "").strip():
         return order
-    if int(order.get("discount_amount") or 0) <= 0:
+    try:
+        if float(order.get("discount_amount") or 0) <= 0:
+            return order
+    except (TypeError, ValueError):
         return order
     if order.get("referrer_tg_id") is not None:
         return order

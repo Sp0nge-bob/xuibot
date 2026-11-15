@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import atexit
 import json
+import logging
 import os
 import sys
 from contextlib import contextmanager
@@ -11,6 +12,26 @@ from pathlib import Path
 from typing import Iterator
 
 from loguru import logger
+
+
+class InterceptHandler(logging.Handler):
+    """Перехват стандартного logging (aiogram, uvicorn и т.д.) в loguru."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            level = logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+
+        frame = logging.currentframe()
+        depth = 2
+        while frame and frame.f_code.co_filename == logging.__file__:
+            frame = frame.f_back
+            depth += 1
+
+        logger.opt(depth=depth, exception=record.exc_info).log(
+            level, record.getMessage()
+        )
 
 _INITIALIZED = False
 _LOG_FILE: Path | None = None
@@ -314,6 +335,13 @@ def init_logging(
     )
 
     atexit.register(_atexit_archive)
+
+    # Перехват стандартных логов aiogram, aiohttp, uvicorn в loguru / bot.log
+    logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
+    for _lib in ("aiogram", "aiohttp", "uvicorn", "asyncio"):
+        _l = logging.getLogger(_lib)
+        _l.handlers = [InterceptHandler()]
+        _l.propagate = False
 
     logger.info(
         "Старт «{}» | tail -f {} | архивы: botlog_YYYYMMDD_HHMMSS.log (макс. {})",

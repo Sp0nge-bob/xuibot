@@ -1208,6 +1208,15 @@ def admin_debug_orders_menu_text(
     )
 
 
+def _safe_int(val: Any, default: int = 0) -> int:
+    if val is None or val == "":
+        return default
+    try:
+        return int(float(val))
+    except (TypeError, ValueError):
+        return default
+
+
 _ORDER_LIST_TITLES = {
     "paid": "💳 <b>Оплаченные заказы</b>",
     "pending": "⏳ <b>Ожидают оплаты</b>",
@@ -1247,7 +1256,7 @@ def _admin_order_type_label(order_type: str | None) -> str:
 
 def _admin_order_extras_line(order: Dict[str, Any]) -> str | None:
     promo = (order.get("promo_code") or "").strip()
-    discount = int(order.get("discount_amount") or 0)
+    discount = _safe_int(order.get("discount_amount"))
     parts: list[str] = []
     if promo:
         parts.append(f"🎟 <code>{html.escape(promo)}</code>")
@@ -1272,7 +1281,7 @@ def _admin_order_list_card(order: Dict[str, Any]) -> str:
     elif status == "pending":
         action = f"{action} · ожидает"
     plan = html.escape(str(order.get("plan_name") or "—"))
-    amount = int(order.get("amount") or 0)
+    amount = _safe_int(order.get("amount"))
     # pending: paid_at пуст — показываем created
     when = _admin_order_paid_at(order)
     lines = [
@@ -1288,7 +1297,7 @@ def _admin_order_list_card(order: Dict[str, Any]) -> str:
 
 def admin_order_button_label(order: Dict[str, Any]) -> str:
     order_id = int(order["id"])
-    amount = int(order.get("amount") or 0)
+    amount = _safe_int(order.get("amount"))
     status = (order.get("status") or "").strip()
     if status == "failed":
         icon = "❌"
@@ -1431,9 +1440,9 @@ def _admin_referrer_suffix(order: Dict[str, Any]) -> str:
 
 def _admin_discount_lines(order: Dict[str, Any]) -> list[str]:
     promo = (order.get("promo_code") or "").strip()
-    discount = int(order.get("discount_amount") or 0)
-    original = int(order.get("original_amount") or 0)
-    amount = int(order.get("amount") or 0)
+    discount = _safe_int(order.get("discount_amount"))
+    original = _safe_int(order.get("original_amount"))
+    amount = _safe_int(order.get("amount"))
     lines: list[str] = []
     if original and original != amount:
         lines.append(f"💵 Без скидки: <b>{original} ₽</b>")
@@ -1630,7 +1639,7 @@ def admin_user_sub_last_payment_block(order: Dict[str, Any] | None) -> str:
     order_type = order.get("order_type") or "new"
     action = _admin_order_type_label(order_type)
     plan = html.escape(str(order.get("plan_name") or "—"))
-    amount = int(order.get("amount") or 0)
+    amount = _safe_int(order.get("amount"))
     paid = _admin_order_paid_at(order)
     lines = [
         "",
@@ -1819,12 +1828,12 @@ def admin_debug_order_detail_text(order: Dict[str, Any]) -> str:
         f"🆔 TG ID: <code>{order.get('tg_id')}</code>",
         "",
         f"📦 {action}: <b>{html.escape(str(order.get('plan_name') or '—'))}</b>",
-        f"💰 Сумма: <b>{int(order.get('amount') or 0)} ₽</b>",
+        f"💰 Сумма: <b>{_safe_int(order.get('amount'))} ₽</b>",
     ]
-    if order.get("original_amount") and int(order.get("original_amount") or 0) != int(
-        order.get("amount") or 0
+    if order.get("original_amount") and _safe_int(order.get("original_amount")) != _safe_int(
+        order.get("amount")
     ):
-        lines.append(f"💵 Без скидки: <b>{int(order['original_amount'])} ₽</b>")
+        lines.append(f"💵 Без скидки: <b>{_safe_int(order['original_amount'])} ₽</b>")
     if method_line:
         lines.append(method_line.rstrip())
     lines.extend(_admin_discount_lines(order))
