@@ -167,13 +167,24 @@ async def _process_job(job: _WebhookJob) -> PaymentProcessResult | None:
             return result
 
         if not _should_retry_job(job, result) or attempt >= attempts:
-            logger.error(
-                "Fulfillment queue: unhandled tx {} status {} (attempt {}/{})",
-                job.tx_id,
-                job.status,
-                attempt,
-                attempts,
-            )
+            is_probe = job.tx_id.startswith("probe_") or job.tx_id.startswith("sim_")
+            is_non_confirmed = (job.status or "").upper() != "CONFIRMED"
+            if is_probe or is_non_confirmed:
+                logger.info(
+                    "Fulfillment queue: skipping non-confirmed/probe tx {} status {} (attempt {}/{})",
+                    job.tx_id,
+                    job.status,
+                    attempt,
+                    attempts,
+                )
+            else:
+                logger.error(
+                    "Fulfillment queue: unhandled tx {} status {} (attempt {}/{})",
+                    job.tx_id,
+                    job.status,
+                    attempt,
+                    attempts,
+                )
             return result
 
         delay = delays[min(attempt - 1, len(delays) - 1)]
