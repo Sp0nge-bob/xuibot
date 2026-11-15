@@ -14,10 +14,26 @@ from typing import Iterator
 from loguru import logger
 
 
+_NOISY_LOGGERS = {
+    "httpx",
+    "httpcore",
+    "aiogram.event",
+    "aiohttp.access",
+    "uvicorn.access",
+    "asyncio",
+    "urllib3",
+}
+
+
 class InterceptHandler(logging.Handler):
     """Перехват стандартного logging (aiogram, uvicorn и т.д.) в loguru."""
 
     def emit(self, record: logging.LogRecord) -> None:
+        if record.levelno < logging.WARNING:
+            name = record.name or ""
+            if any(name == noisy or name.startswith(f"{noisy}.") for noisy in _NOISY_LOGGERS):
+                return
+
         try:
             level = logger.level(record.levelname).name
         except ValueError:
@@ -336,12 +352,14 @@ def init_logging(
 
     atexit.register(_atexit_archive)
 
-    # Перехват стандартных логов aiogram, aiohttp, uvicorn в loguru / bot.log
-    logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
-    for _lib in ("aiogram", "aiohttp", "uvicorn", "asyncio"):
+    # Перехват стандартных логов в loguru / bot.log с подавлением спама библиотек
+    logging.basicConfig(handlers=[InterceptHandler()], level=logging.WARNING, force=True)
+    for _lib in ("aiogram", "aiohttp", "uvicorn"):
         _l = logging.getLogger(_lib)
         _l.handlers = [InterceptHandler()]
         _l.propagate = False
+    for _noisy in _NOISY_LOGGERS:
+        logging.getLogger(_noisy).setLevel(logging.WARNING)
 
     logger.info(
         "Старт «{}» | tail -f {} | архивы: botlog_YYYYMMDD_HHMMSS.log (макс. {})",
