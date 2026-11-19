@@ -85,6 +85,9 @@ run_venv_pip() {
 install_python_deps() {
     log "pip install -e . (1–3 мин)"
     run_venv_pip install -U pip wheel
+    if [[ -f "$APP_DIR/requirements.txt" ]]; then
+        run_venv_pip install -r "$APP_DIR/requirements.txt" || true
+    fi
     run_venv_pip install -e "$APP_DIR" || return 1
     python_deps_ok
 }
