@@ -328,10 +328,14 @@ env_get() {
 # ── Telegram getMe ─────────────────────────────────────────────
 verify_bot_token() {
     local token="$1"
+    local proxy="${2:-}"
     local tmp
     tmp="$(mktemp)"
-    if ! curl -fsSL --connect-timeout 15 --max-time 30 \
-        -o "$tmp" "https://api.telegram.org/bot${token}/getMe"; then
+    local -a curl_args=(-fsSL --connect-timeout 15 --max-time 30)
+    if [[ -n "$proxy" ]]; then
+        curl_args+=(--proxy "$proxy")
+    fi
+    if ! curl "${curl_args[@]}" -o "$tmp" "https://api.telegram.org/bot${token}/getMe"; then
         rm -f "$tmp"
         return 1
     fi
@@ -455,6 +459,17 @@ run_wizard() {
     fi
 
     printf '\n%s▸ Telegram%s\n' "$C_BOLD" "$C_RESET"
+    local tg_proxy
+    tg_proxy="$(env_get TELEGRAM_PROXY)"
+    if [[ -z "$tg_proxy" ]]; then
+        tg_proxy="${https_proxy:-${HTTPS_PROXY:-${all_proxy:-${ALL_PROXY:-}}}}"
+    fi
+    ask "TELEGRAM_PROXY (Enter если без прокси; пример: socks5://127.0.0.1:10808 или http://127.0.0.1:8080)" "$tg_proxy"
+    tg_proxy="$(printf '%s' "$REPLY" | tr -d ' ')"
+    if [[ -n "$tg_proxy" ]]; then
+        env_set "TELEGRAM_PROXY" "$tg_proxy"
+    fi
+
     local token=""
     while true; do
         ask_secret "BOT_TOKEN (от @BotFather)"
@@ -464,11 +479,19 @@ run_wizard() {
             continue
         fi
         log "Проверяю токен через api.telegram.org/getMe…"
-        if verify_bot_token "$token"; then
+        if verify_bot_token "$token" "$tg_proxy"; then
             ok "Бот доступен: @${BOT_USERNAME} (id ${BOT_ID})"
             break
         fi
-        warn "Токен не прошёл getMe (сеть или неверный токен) — введите снова"
+        warn "Токен не прошёл getMe (api.telegram.org недоступен или неверный токен)"
+        if ask_yn "Всё равно сохранить этот токен и продолжить без проверки?" "N"; then
+            break
+        fi
+        if ask_yn "Хотите указать / изменить TELEGRAM_PROXY?" "Y"; then
+            ask "TELEGRAM_PROXY" "$tg_proxy"
+            tg_proxy="$(printf '%s' "$REPLY" | tr -d ' ')"
+            env_set "TELEGRAM_PROXY" "$tg_proxy"
+        fi
     done
     env_set "BOT_TOKEN" "$token"
 

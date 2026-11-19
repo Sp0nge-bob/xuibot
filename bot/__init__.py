@@ -57,44 +57,15 @@ _FAST_UI_METHODS = frozenset({
 })
 
 
-class ResilientAiohttpSession(AiohttpSession):
-    """
-    Устойчивая сессия к api.telegram.org:
-    - Форсирует IPv4 (AF_INET), исключая 10-секундные зависания на битых IPv6 маршрутах VPS.
-    - Очищает закрытые keep-alive сокеты (enable_cleanup_closed=True, keepalive_timeout=20s).
-    - Для быстрых UI-запросов (editMessageText, sendMessage, answerCallbackQuery и др.)
-      ограничивает таймаут попытки 7 секундами и делает мгновенный повтор при залипшем сокете.
-    """
+from .session import ResilientAiohttpSession, mask_proxy
 
-    def __init__(self, **kwargs: Any) -> None:
-        super().__init__(timeout=25.0, **kwargs)
-        self._connector_init["family"] = socket.AF_INET
-        self._connector_init["enable_cleanup_closed"] = True
-        self._connector_init["keepalive_timeout"] = 20.0
-
-    async def make_request(
-        self,
-        bot: Bot,
-        method: TelegramMethod[TelegramType],
-        timeout: int | None = None,
-    ) -> TelegramType:
-        api_method = getattr(method, "__api_method__", "")
-        if api_method in _FAST_UI_METHODS and timeout is None:
-            try:
-                return await super().make_request(bot, method, timeout=7)
-            except TelegramNetworkError as exc:
-                logger.warning(
-                    "Telegram API {} network stall ({}), retrying immediately…",
-                    api_method,
-                    exc,
-                )
-                return await super().make_request(bot, method, timeout=10)
-        return await super().make_request(bot, method, timeout=timeout)
-
+_telegram_proxy: str | None = getattr(settings, "effective_telegram_proxy", None)
+if _telegram_proxy:
+    logger.info("Используется прокси для Telegram API: {}", mask_proxy(_telegram_proxy))
 
 bot = Bot(
     token=settings.BOT_TOKEN,
-    session=ResilientAiohttpSession(),
+    session=ResilientAiohttpSession(proxy=_telegram_proxy),
     default=DefaultBotProperties(
         parse_mode=ParseMode.HTML,
         link_preview_is_disabled=True,

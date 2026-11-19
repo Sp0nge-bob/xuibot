@@ -9,6 +9,7 @@ from pydantic_settings import BaseSettings, NoDecode
 class Settings(BaseSettings):
     # Telegram
     BOT_TOKEN: str
+    TELEGRAM_PROXY: str = ""
     # /reboot: путь к deploy/restart-services.sh или полная shell-команда (опционально)
     BOT_RESTART_SCRIPT: str = ""
     BOT_RESTART_CMD: str = ""
@@ -189,6 +190,22 @@ class Settings(BaseSettings):
         def check(user_id: int) -> bool:
             return user_id in self.BOT_ADMINS
         return check
+
+    @property
+    def effective_telegram_proxy(self) -> str | None:
+        """
+        URL прокси для запросов к api.telegram.org (socks5://, http://, https://).
+        Проверяет TELEGRAM_PROXY из .env, либо стандартные переменные окружения.
+        """
+        p = (self.TELEGRAM_PROXY or "").strip()
+        if p:
+            return p
+        import os
+        for env_var in ("TELEGRAM_PROXY", "telegram_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"):
+            val = (os.getenv(env_var) or "").strip()
+            if val:
+                return val
+        return None
 
     @property
     def website_base_url(self) -> str:
