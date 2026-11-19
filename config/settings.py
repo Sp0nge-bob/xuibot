@@ -183,6 +183,7 @@ class Settings(BaseSettings):
         "env_file": None if os.environ.get("PYTEST_RUNNING") == "1" else ".env",
         "env_file_encoding": "utf-8",
         "case_sensitive": True,
+        "extra": "ignore",
     }
 
     @property
