@@ -333,7 +333,12 @@ verify_bot_token() {
     tmp="$(mktemp)"
     local -a curl_args=(-fsSL --connect-timeout 15 --max-time 30)
     if [[ -n "$proxy" ]]; then
-        curl_args+=(--proxy "$proxy")
+        local curl_proxy="$proxy"
+        # Для curl используем socks5h://, чтобы DNS резолвился через прокси, а не на локальном заблокированном DNS ноды
+        if [[ "$curl_proxy" =~ ^socks5:// ]]; then
+            curl_proxy="socks5h://${curl_proxy#socks5://}"
+        fi
+        curl_args+=(--proxy "$curl_proxy")
     fi
     if ! curl "${curl_args[@]}" -o "$tmp" "https://api.telegram.org/bot${token}/getMe"; then
         rm -f "$tmp"
